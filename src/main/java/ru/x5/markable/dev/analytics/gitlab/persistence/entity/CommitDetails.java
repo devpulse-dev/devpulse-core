@@ -6,51 +6,57 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "daily_author_stats",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"email", "date"}))
+@Table(name = "commit_details")
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DailyAuthorStats {
+public class CommitDetails {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "commit_hash", nullable = false, unique = true)
+    private String commitHash;
+
     @Column(name = "email", nullable = false)
     private String email;
 
-    @Column(name = "date", nullable = false)
-    private LocalDate date;
+    @Column(name = "commit_date", nullable = false)
+    private LocalDateTime commitDate;
 
-    @Column(name = "merge_commits")
-    private Long mergeCommits;
+    @Column(name = "hour")
+    private Integer hour;
 
-    @Column(name = "commits")
-    private Long commits;
+    @Column(name = "is_merge")
+    private boolean isMerge;
+
+    @Column(name = "task_number")
+    private String taskNumber;
+
+    @Column(name = "commit_message")
+    private String commitMessage;
 
     @Column(name = "added_lines")
-    private Long addedLines;
+    private long addedLines;
 
     @Column(name = "deleted_lines")
-    private Long deletedLines;
+    private long deletedLines;
 
     @Column(name = "test_added_lines")
-    private Long testAddedLines;
+    private long testAddedLines;
 
-    @Column(name = "last_updated")
-    private LocalDateTime lastUpdated;
-
-    @Column(name = "repository_name", nullable = false)
+    @Column(name = "repository_name")
     private String repositoryName;
+
+    @Column(name = "collected_at")
+    private LocalDateTime collectedAt;
 }

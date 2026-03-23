@@ -1,0 +1,69 @@
+databaseChangeLog:
+  - changeSet:
+      id: 005-create-commit-details
+      author: boris.osechinskiy
+      changes:
+        - createTable:
+            tableName: commit_details
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: commit_hash
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: email
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: commit_date
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: hour
+                  type: INT
+              - column:
+                  name: is_merge
+                  type: BOOLEAN
+                  defaultValue: false
+              - column:
+                  name: added_lines
+                  type: BIGINT
+                  defaultValue: 0
+              - column:
+                  name: deleted_lines
+                  type: BIGINT
+                  defaultValue: 0
+              - column:
+                  name: test_added_lines
+                  type: BIGINT
+                  defaultValue: 0
+              - column:
+                  name: repository_name
+                  type: VARCHAR(255)
+              - column:
+                  name: collected_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+
+        - createIndex:
+            indexName: idx_commit_details_email
+            tableName: commit_details
+            columns:
+              - column:
+                  name: email
+
+        - createIndex:
+            indexName: idx_commit_details_date
+            tableName: commit_details
+            columns:
+              - column:
+                  name: commit_date

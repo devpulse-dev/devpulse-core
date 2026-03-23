@@ -1,0 +1,21 @@
+databaseChangeLog:
+  - changeSet:
+      id: 006-add-task-and-message-to-commit-details
+      author: boris.osechinskiy
+      changes:
+        - addColumn:
+            tableName: commit_details
+            columns:
+              - column:
+                  name: task_number
+                  type: VARCHAR(50)
+              - column:
+                  name: commit_message
+                  type: VARCHAR(2000)
+
+        - createIndex:
+            indexName: idx_commit_details_task
+            tableName: commit_details
+            columns:
+              - column:
+                  name: task_number

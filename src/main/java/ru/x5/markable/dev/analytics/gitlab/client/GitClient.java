@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.gitlab.git;
+package ru.x5.markable.dev.analytics.gitlab.client;
 
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
@@ -107,7 +107,7 @@ public class GitClient {
         command.add("git");
         command.add("log");
         command.add("--all");
-        command.add("--pretty=format:%ae|%P|%ad"); // добавили %ad - дата
+        command.add("--pretty=format:%H|%ae|%P|%ad|%s");
         command.add("--date=iso-strict");
         command.add("--numstat");
 

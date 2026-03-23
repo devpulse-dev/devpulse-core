@@ -1,22 +1,19 @@
 package ru.x5.markable.dev.analytics.gitlab.service.impl;
 
 import java.io.IOException;
-import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.markable.dev.analytics.gitlab.config.GitProperties;
 import ru.x5.markable.dev.analytics.gitlab.exception.RepositoryAnalysisException;
 import ru.x5.markable.dev.analytics.gitlab.exception.StatisticsPersistenceException;
-import ru.x5.markable.dev.analytics.gitlab.git.GitClient;
+import ru.x5.markable.dev.analytics.gitlab.client.GitClient;
 import ru.x5.markable.dev.analytics.gitlab.model.AuthorAggregate;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AnalysisRun;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AnalysisStatus;
@@ -32,7 +29,6 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import ru.x5.markable.dev.analytics.gitlab.service.ExportTrackerService;
 
 @Service
 @Log4j2

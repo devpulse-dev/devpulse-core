@@ -13,8 +13,6 @@ import ru.x5.markable.dev.analytics.gitlab.persistence.entity.DailyAuthorStats;
 @Repository
 public interface DailyAuthorStatsRepository extends JpaRepository<DailyAuthorStats, Long> {
 
-    Optional<DailyAuthorStats> findByEmailAndDate(String email, LocalDate date);
-
     List<DailyAuthorStats> findByDateBetween(LocalDate start, LocalDate end);
 
     List<DailyAuthorStats> findByDate(LocalDate date);
@@ -24,5 +22,20 @@ public interface DailyAuthorStatsRepository extends JpaRepository<DailyAuthorSta
     @Modifying
     @Query("DELETE FROM DailyAuthorStats d WHERE d.date < :date")
     int deleteOlderThan(@Param("date") LocalDate date);
+
+    List<DailyAuthorStats> findByEmail(String email);
+
+    List<DailyAuthorStats> findByEmailOrderByDateAsc(String email);
+
+    Optional<DailyAuthorStats> findByEmailAndDateAndRepositoryName(String email, LocalDate date, String repositoryName);
+
+    @Query("SELECT DISTINCT d.repositoryName FROM DailyAuthorStats d WHERE d.email = :email")
+    List<String> findRepositoriesByEmail(@Param("email") String email);
+
+    @Query("SELECT d FROM DailyAuthorStats d WHERE d.email = :email AND d.date BETWEEN :start AND :end ORDER BY d.date ASC")
+    List<DailyAuthorStats> findByEmailAndDateBetween(
+            @Param("email") String email,
+            @Param("start") LocalDate start,
+            @Param("end") LocalDate end);
 
 }

@@ -5,3 +5,9 @@ databaseChangeLog:
       file: liquibase/migration/002-create-last-export-tracker.yaml
   - include:
       file: liquibase/migration/003-create-daily-author-stats.yaml
+  - include:
+      file: liquibase/migration/004-add-repository-name-to-daily-stats.yaml
+  - include:
+      file: liquibase/migration/005-create-commit-details.yaml
+  - include:
+      file: liquibase/migration/006-add-task-and-message-to-commit-details.yaml

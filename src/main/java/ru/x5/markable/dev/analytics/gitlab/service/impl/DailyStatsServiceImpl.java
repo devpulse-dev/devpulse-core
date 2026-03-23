@@ -3,7 +3,6 @@ package ru.x5.markable.dev.analytics.gitlab.service.impl;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -16,10 +15,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -28,7 +26,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.markable.dev.analytics.gitlab.config.GitProperties;
-import ru.x5.markable.dev.analytics.gitlab.git.GitClient;
+import ru.x5.markable.dev.analytics.gitlab.client.GitClient;
 import ru.x5.markable.dev.analytics.gitlab.model.AuthorAggregate;
 import ru.x5.markable.dev.analytics.gitlab.model.CommitDetail;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.DailyAuthorStats;
@@ -39,8 +37,10 @@ import ru.x5.markable.dev.analytics.gitlab.rest.dto.DailyCommitStatsDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.DailyUserStatsDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.PeriodSummaryDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.WeeklyCommitStatsDto;
+import ru.x5.markable.dev.analytics.gitlab.service.CommitDetailsService;
 import ru.x5.markable.dev.analytics.gitlab.service.DailyStatsService;
 import ru.x5.markable.dev.analytics.gitlab.service.ExportTrackerService;
+import ru.x5.markable.dev.analytics.gitlab.utill.CommitMessageParser;
 
 @Service
 @Log4j2
@@ -52,16 +52,16 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     private final DailyAuthorStatsRepository dailyStatsRepository;
     private final Executor analysisExecutor;
     private final ExportTrackerService exportTrackerService;
+    private final CommitDetailsService commitDetailsService;
 
     private static final LocalDateTime DEFAULT_START_DATE = LocalDateTime.of(2026, 1, 1, 0, 0, 0);
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
     /**
-     * Запускается каждый день в 01:00
-     * Собирает статистику с даты последней выгрузки до текущего момента
+     * Запускается каждый день в 01:00 Собирает статистику с даты последней выгрузки до текущего момента
      */
     @Override
-    @Scheduled(cron = "0 0 1 * * ?") // каждый день в 01:00
+    @Scheduled(cron = "0 0 1 * * ?")
     @Transactional
     public void collectDailyStats() {
         log.info("Starting daily stats collection...");
@@ -70,8 +70,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                 .orElse(DEFAULT_START_DATE);
 
         LocalDateTime now = LocalDateTime.now();
-
-        // Начинаем собирать СРАЗУ ПОСЛЕ последней выгрузки
         LocalDateTime startFrom = lastExport.plusSeconds(1);
 
         if (startFrom.isAfter(now)) {
@@ -92,14 +90,40 @@ public class DailyStatsServiceImpl implements DailyStatsService {
         log.info("Starting collection for period: {} - {}", start, end);
 
         try {
-            // Собираем статистику с детальными данными (включая даты коммитов)
-            List<CommitDetail> commitDetails = collectCommitDetails(start, end);
+            // Собираем коммиты с привязкой к репозиториям
+            Map<String, List<CommitDetail>> commitsByRepo = collectCommitDetailsWithRepo(start, end);
 
-            // Группируем по дням и пользователям
-            Map<LocalDate, Map<String, AuthorAggregate>> dailyStats = groupCommitsByDay(commitDetails);
+            // Для глобальной статистики (без разбивки по репозиториям)
+            Map<LocalDate, Map<String, AuthorAggregate>> globalDailyStats = new HashMap<>();
 
-            // Сохраняем в БД
-            saveDailyStats(dailyStats);
+            // Сохраняем статистику по каждому репозиторию отдельно
+            for (Map.Entry<String, List<CommitDetail>> entry : commitsByRepo.entrySet()) {
+                String repoName = entry.getKey();
+                List<CommitDetail> repoCommits = entry.getValue();
+
+                Map<LocalDate, Map<String, AuthorAggregate>> dailyStats = groupCommitsByDay(repoCommits);
+
+                // Сохраняем для конкретного репозитория (нужно для профиля пользователя)
+                saveDailyStatsForRepo(dailyStats, repoName);
+
+//                // Объединяем в глобальную статистику
+//                for (Map.Entry<LocalDate, Map<String, AuthorAggregate>> dayEntry : dailyStats.entrySet()) {
+//                    LocalDate date = dayEntry.getKey();
+//                    Map<String, AuthorAggregate> dayStats = dayEntry.getValue();
+//
+//                    globalDailyStats.computeIfAbsent(date, k -> new HashMap<>());
+//                    Map<String, AuthorAggregate> globalDayStats = globalDailyStats.get(date);
+//
+//                    for (Map.Entry<String, AuthorAggregate> statEntry : dayStats.entrySet()) {
+//                        globalDayStats.merge(statEntry.getKey(), statEntry.getValue(), AuthorAggregate::merge);
+//                    }
+//                }
+            }
+
+//            // Сохраняем глобальную статистику (для общей аналитики)
+//            if (!globalDailyStats.isEmpty()) {
+//                saveDailyStatsForRepo(globalDailyStats, "ALL_REPOS");
+//            }
 
             exportTrackerService.markExportSuccess(end);
             log.info("Successfully collected stats from {} to {}", start, end);
@@ -114,7 +138,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     public PeriodSummaryDto getPeriodSummary() {
         log.info("Fetching summary for all available data");
 
-        // Получаем все записи
         List<DailyAuthorStats> allStats = dailyStatsRepository.findAll();
 
         if (allStats.isEmpty()) {
@@ -129,7 +152,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                     .build();
         }
 
-        // Находим минимальную и максимальную дату
         LocalDate minDate = allStats.stream()
                 .map(DailyAuthorStats::getDate)
                 .min(LocalDate::compareTo)
@@ -140,7 +162,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                 .max(LocalDate::compareTo)
                 .orElse(null);
 
-        // Группируем по пользователям
         Map<String, AuthorSummaryDto> authorMap = new HashMap<>();
         long totalCommits = 0;
         long totalMergeCommits = 0;
@@ -171,7 +192,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
             });
         }
 
-        // Сортируем пользователей по количеству коммитов и берем топ-10
         Map<String, AuthorSummaryDto> topAuthors = authorMap.entrySet().stream()
                 .sorted((e1, e2) -> Long.compare(e2.getValue().getCommits(), e1.getValue().getCommits()))
                 .limit(10)
@@ -205,14 +225,13 @@ public class DailyStatsServiceImpl implements DailyStatsService {
             return Collections.emptyList();
         }
 
-        // Группируем по неделям
-        Map<Integer, Map<String, List<DailyAuthorStats>>> weeklyData = new TreeMap<>();
+        Map<Integer, Map<String, List<DailyAuthorStats>>> weeklyData = new java.util.TreeMap<>();
 
         for (DailyAuthorStats stat : allStats) {
             LocalDate date = stat.getDate();
             int week = date.get(WeekFields.ISO.weekOfWeekBasedYear());
             int year = date.getYear();
-            int weekKey = year * 100 + week; // уникальный ключ: год + неделя
+            int weekKey = year * 100 + week;
 
             weeklyData.computeIfAbsent(weekKey, k -> new HashMap<>());
             weeklyData.get(weekKey).computeIfAbsent(stat.getEmail(), k -> new ArrayList<>())
@@ -227,20 +246,17 @@ public class DailyStatsServiceImpl implements DailyStatsService {
             int week = weekKey % 100;
             Map<String, List<DailyAuthorStats>> userData = entry.getValue();
 
-            // Находим начало и конец недели
             LocalDate weekStart = LocalDate.of(year, 1, 1)
                     .with(WeekFields.ISO.weekOfWeekBasedYear(), week)
-                    .with(WeekFields.ISO.dayOfWeek(), 1); // понедельник
-            LocalDate weekEnd = weekStart.plusDays(6); // воскресенье
+                    .with(WeekFields.ISO.dayOfWeek(), 1);
+            LocalDate weekEnd = weekStart.plusDays(6);
 
-            // Агрегируем данные за неделю
             long totalCommits = 0;
             long totalMergeCommits = 0;
             long totalAdded = 0;
             long totalDeleted = 0;
             long totalTestAdded = 0;
 
-            // 👇 Используем AuthorWeeklySummaryDto вместо AuthorSummaryDto
             Map<String, AuthorWeeklySummaryDto> authors = new HashMap<>();
 
             for (Map.Entry<String, List<DailyAuthorStats>> userEntry : userData.entrySet()) {
@@ -265,7 +281,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                     totalTestAdded += stat.getTestAddedLines() != null ? stat.getTestAddedLines() : 0;
                 }
 
-                // 👇 Используем AuthorWeeklySummaryDto
                 authors.put(email, AuthorWeeklySummaryDto.builder()
                         .email(email)
                         .commits(userCommits)
@@ -276,7 +291,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                         .build());
             }
 
-            // Сохраняем всех авторов без ограничения по количеству
             Map<String, AuthorWeeklySummaryDto> allAuthors = authors.entrySet().stream()
                     .sorted((e1, e2) -> Long.compare(e2.getValue().getCommits(), e1.getValue().getCommits()))
                     .collect(Collectors.toMap(
@@ -300,7 +314,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                     .build());
         }
 
-        // Сортируем по неделе (от старых к новым)
         result.sort(Comparator.comparing(WeeklyCommitStatsDto::getWeekStart));
 
         log.info("Found {} weeks of data", result.size());
@@ -313,7 +326,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
 
         List<DailyAuthorStats> allStats = dailyStatsRepository.findAll();
 
-        // Группируем по датам
         Map<LocalDate, DailyCommitStatsDto> dailyMap = new LinkedHashMap<>();
 
         for (DailyAuthorStats stat : allStats) {
@@ -339,7 +351,6 @@ public class DailyStatsServiceImpl implements DailyStatsService {
             });
         }
 
-        // Сортируем по дате
         return dailyMap.values().stream()
                 .sorted((a, b) -> a.getDate().compareTo(b.getDate()))
                 .collect(Collectors.toList());
@@ -361,29 +372,36 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                         .build())
                 .sorted((a, b) -> {
                     int dateCompare = a.getDate().compareTo(b.getDate());
-                    if (dateCompare != 0) return dateCompare;
+                    if (dateCompare != 0) {
+                        return dateCompare;
+                    }
                     return a.getEmail().compareTo(b.getEmail());
                 })
                 .collect(Collectors.toList());
     }
 
     /**
-     * Собрать детальную информацию о коммитах (с датами)
+     * Собрать коммиты из всех репозиториев с привязкой к имени репозитория
      */
-    private List<CommitDetail> collectCommitDetails(LocalDateTime start, LocalDateTime end) {
+    private Map<String, List<CommitDetail>> collectCommitDetailsWithRepo(LocalDateTime start, LocalDateTime end) {
         log.info("Collecting commit details between {} and {}", start, end);
 
-        List<CompletableFuture<List<CommitDetail>>> futures = gitProperties.getRepositories()
+        Map<String, List<CommitDetail>> commitsByRepo = new ConcurrentHashMap<>();
+
+        List<CompletableFuture<Void>> futures = gitProperties.getRepositories()
                 .stream()
-                .map(repo -> CompletableFuture.supplyAsync(
-                        () -> collectForRepositoryWithDetails(repo, start, end),
+                .map(repo -> CompletableFuture.runAsync(
+                        () -> {
+                            String repoName = extractRepoName(repo);
+                            List<CommitDetail> repoCommits = collectForRepositoryWithDetails(repo, start, end);
+                            commitsByRepo.put(repoName, repoCommits);
+                        },
                         analysisExecutor))
                 .toList();
 
-        return futures.stream()
-                .map(CompletableFuture::join)
-                .flatMap(List::stream)
-                .toList();
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        return commitsByRepo;
     }
 
     /**
@@ -406,22 +424,23 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                 return repoCommits;
             }
 
-            // Парсим все коммиты из git
             List<CommitDetail> allCommits = parseGitOutputWithDates(lines);
 
             for (CommitDetail commit : allCommits) {
                 LocalDateTime commitDate = commit.getCommitDate();
 
-                // Проверяем, что дата коммита ВНУТРИ нашего периода
-                // и НЕ раньше 2026-01-01
-                if (commitDate != null &&
-                        !commitDate.isBefore(start) &&
-                        !commitDate.isAfter(end)) {
+                if (commitDate != null && !commitDate.isBefore(start) && !commitDate.isAfter(end)) {
+                    commit.setRepoName(repoName);
                     repoCommits.add(commit);
                 } else {
                     log.debug("Filtered out commit from {} (period: {} - {})",
                             commitDate, start, end);
                 }
+            }
+
+            if (CollectionUtils.isNotEmpty(repoCommits)) {
+                commitDetailsService.saveCommitDetails(repoCommits);
+                log.debug("Saved {} commit details for repo {}", repoCommits.size(), repoName);
             }
 
             log.debug("Repository [{}] processed, kept {} of {} commits within period",
@@ -435,58 +454,50 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     }
 
     /**
-     * Парсинг вывода git log с датами
-     * Формат: email|parent|date
+     * Парсинг вывода git log с датами Формат: email|parent|date
      */
     private List<CommitDetail> parseGitOutputWithDates(List<String> lines) {
         List<CommitDetail> commits = new ArrayList<>();
         CommitDetail currentCommit = null;
 
-        List<String> userLines = lines.stream()
-                .filter(l -> l != null && l.contains("vikto.zhigunov@x5.ru"))
-                .collect(Collectors.toList());
-
-        if (!userLines.isEmpty()) {
-            log.info("=== DAILY STATS RAW LINES for vikto.zhigunov@x5.ru ===");
-            userLines.forEach(line -> log.info("RAW: {}", line));
-            log.info("=== END ===");
-        }
-
         for (String rawLine : lines) {
-            if (rawLine == null || rawLine.trim().isEmpty()) continue;
+            if (rawLine == null || rawLine.trim().isEmpty()) {
+                continue;
+            }
 
             String line = rawLine.trim();
 
             // Строка с информацией о коммите (email|parent|date)
             if (!line.contains("\t") && line.contains("@")) {
                 String[] parts = line.split("\\|");
-                if (parts.length >= 3) {
-                    String email = parts[0].trim().toLowerCase();
-                    String parent = parts[1].trim();
-                    String dateStr = parts[2].trim();
+                if (parts.length >= 5) {
+                    String hash = parts[0].trim();
+                    String email = parts[1].trim().toLowerCase();
+                    String parent = parts[2].trim();
+                    String dateStr = parts[3].trim();
+                    String message = parts[4].trim();
 
                     boolean isMerge = parent.contains(" ");
 
                     try {
-                        // Парсим дату в формате ISO_OFFSET_DATE_TIME
-                        ZonedDateTime zonedDateTime = ZonedDateTime.parse(dateStr, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-                        // Сохраняем в UTC
-                        LocalDateTime commitDateUTC = zonedDateTime.withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+                        ZonedDateTime zonedDateTime = ZonedDateTime.parse(dateStr,
+                                DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+                        LocalDateTime commitDateUTC = zonedDateTime.withZoneSameInstant(ZoneOffset.UTC)
+                                .toLocalDateTime();
+                        String taskNumber = CommitMessageParser.extractTaskNumber(message);
 
                         currentCommit = new CommitDetail();
+                        currentCommit.setHash(hash);
                         currentCommit.setEmail(email);
                         currentCommit.setCommitDate(commitDateUTC);
                         currentCommit.setMerge(isMerge);
                         currentCommit.setAdded(0);
                         currentCommit.setDeleted(0);
                         currentCommit.setTestAdded(0);
+                        currentCommit.setCommitMessage(message);
+                        currentCommit.setTaskNumber(taskNumber);
 
                         commits.add(currentCommit);
-
-                        log.debug("Parsed commit: {} at {} by {}",
-                                isMerge ? "merge" : "regular",
-                                commitDateUTC,
-                                email);
 
                     } catch (DateTimeParseException e) {
                         log.warn("Failed to parse date: '{}' for email: {}", dateStr, email);
@@ -500,7 +511,9 @@ public class DailyStatsServiceImpl implements DailyStatsService {
             if (currentCommit != null && line.contains("\t")) {
                 String[] parts = line.split("\t");
                 if (parts.length >= 3) {
-                    if (parts[0].equals("-") || parts[1].equals("-")) continue;
+                    if (parts[0].equals("-") || parts[1].equals("-")) {
+                        continue;
+                    }
 
                     try {
                         long added = Long.parseLong(parts[0]);
@@ -531,15 +544,12 @@ public class DailyStatsServiceImpl implements DailyStatsService {
         Map<LocalDate, Map<String, AuthorAggregate>> dailyStats = new HashMap<>();
 
         LocalDate minAllowedDate = LocalDate.of(2026, 1, 1);
-        int skippedCommits = 0;
 
         for (CommitDetail commit : commits) {
             LocalDate day = commit.getCommitDate().toLocalDate();
 
             if (day.isBefore(minAllowedDate)) {
-                log.warn("⚠️ Forbidden old commit detected: {} from {}",
-                        commit.getEmail(), day);
-                skippedCommits++;
+                log.debug("Skipping old commit from: {}", day);
                 continue;
             }
 
@@ -560,17 +570,13 @@ public class DailyStatsServiceImpl implements DailyStatsService {
             });
         }
 
-        if (skippedCommits > 0) {
-            log.error("🔥 CRITICAL: Skipped {} commits from before 2026-01-01", skippedCommits);
-        }
-
         return dailyStats;
     }
 
     /**
-     * Сохранить статистику по дням (с обновлением существующих записей, пакетная обработка)
+     * Сохранить статистику по дням для конкретного репозитория
      */
-    private void saveDailyStats(Map<LocalDate, Map<String, AuthorAggregate>> dailyStats) {
+    private void saveDailyStatsForRepo(Map<LocalDate, Map<String, AuthorAggregate>> dailyStats, String repoName) {
         List<DailyAuthorStats> newRecords = new ArrayList<>();
         List<DailyAuthorStats> updateRecords = new ArrayList<>();
 
@@ -578,25 +584,15 @@ public class DailyStatsServiceImpl implements DailyStatsService {
             LocalDate date = dayEntry.getKey();
             Map<String, AuthorAggregate> dayStats = dayEntry.getValue();
 
-            // Собираем все email за этот день для пакетной проверки
-            List<String> emails = new ArrayList<>(dayStats.keySet());
-
-            // Пакетная проверка существующих записей за этот день
-            List<DailyAuthorStats> existingRecords = dailyStatsRepository.findByEmailInAndDate(emails, date);
-
-            // Создаем Map для быстрого доступа к существующим записям
-            Map<String, DailyAuthorStats> existingMap = existingRecords.stream()
-                    .collect(Collectors.toMap(DailyAuthorStats::getEmail, Function.identity()));
-
-            // Разделяем на новые и обновляемые
             for (Map.Entry<String, AuthorAggregate> statEntry : dayStats.entrySet()) {
                 String email = statEntry.getKey();
                 AuthorAggregate stat = statEntry.getValue();
 
-                DailyAuthorStats existing = existingMap.get(email);
+                DailyAuthorStats existing = dailyStatsRepository
+                        .findByEmailAndDateAndRepositoryName(email, date, repoName)
+                        .orElse(null);
 
                 if (existing != null) {
-                    // Обновляем существующую запись
                     existing.setMergeCommits(stat.mergeCommits());
                     existing.setCommits(stat.commits());
                     existing.setAddedLines(stat.added());
@@ -605,10 +601,10 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                     existing.setLastUpdated(LocalDateTime.now());
                     updateRecords.add(existing);
                 } else {
-                    // Создаем новую запись
                     DailyAuthorStats newStats = DailyAuthorStats.builder()
                             .email(email)
                             .date(date)
+                            .repositoryName(repoName)
                             .mergeCommits(stat.mergeCommits())
                             .commits(stat.commits())
                             .addedLines(stat.added())
@@ -621,22 +617,21 @@ public class DailyStatsServiceImpl implements DailyStatsService {
             }
         }
 
-        // Пакетное сохранение
         if (CollectionUtils.isNotEmpty(newRecords)) {
             dailyStatsRepository.saveAll(newRecords);
-            log.info("Saved {} new daily stats records", newRecords.size());
+            log.info("Saved {} new daily stats records for repo {}", newRecords.size(), repoName);
         }
 
         if (CollectionUtils.isNotEmpty(updateRecords)) {
             dailyStatsRepository.saveAll(updateRecords);
-            log.info("Updated {} existing daily stats records", updateRecords.size());
+            log.info("Updated {} existing daily stats records for repo {}", updateRecords.size(), repoName);
         }
-
-        log.info("Total processed: {} new, {} updated", newRecords.size(), updateRecords.size());
     }
 
     private boolean isTestFile(String fileName) {
-        if (fileName == null) return false;
+        if (fileName == null) {
+            return false;
+        }
         String lower = fileName.toLowerCase();
         return lower.contains("/test/") ||
                 lower.endsWith("test.java") ||

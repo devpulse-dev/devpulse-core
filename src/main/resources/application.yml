@@ -31,5 +31,11 @@ git:
     - https://scm.x5.ru/gkpl/bo-oas.git
   token:
   cache-directory:
+ai:
+  url:
+  api-key:
+  model:
+  timeout: 30000
+
 server:
   port: 8080

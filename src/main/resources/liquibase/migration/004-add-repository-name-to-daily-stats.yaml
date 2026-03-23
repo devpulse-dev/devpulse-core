@@ -1,0 +1,23 @@
+databaseChangeLog:
+  - changeSet:
+      id: 004-add-repository-name-to-daily-stats
+      author: boris.osechinskiy
+      changes:
+        - addColumn:
+            tableName: daily_author_stats
+            columns:
+              - column:
+                  name: repository_name
+                  type: VARCHAR(255)
+                  defaultValue: "unknown"
+                  constraints:
+                    nullable: false
+
+        - dropUniqueConstraint:
+            tableName: daily_author_stats
+            constraintName: uk_daily_stats_email_date
+
+        - addUniqueConstraint:
+            constraintName: uk_daily_stats_email_date_repo
+            tableName: daily_author_stats
+            columnNames: email, date, repository_name
