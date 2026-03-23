@@ -2,15 +2,20 @@ package ru.x5.markable.dev.analytics.gitlab.service.impl;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import ru.x5.markable.dev.analytics.gitlab.mapper.CommitDetailsMapper;
 import ru.x5.markable.dev.analytics.gitlab.model.CommitDetail;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.CommitDetails;
 import ru.x5.markable.dev.analytics.gitlab.persistence.repository.CommitDetailsRepository;
@@ -18,78 +23,64 @@ import ru.x5.markable.dev.analytics.gitlab.rest.dto.CommitDetailDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.TaskWithCommitsDto;
 import ru.x5.markable.dev.analytics.gitlab.service.CommitDetailsService;
 
-import java.time.LocalDateTime;
-import java.util.stream.Collectors;
-
 @Service
 @Log4j2
 @RequiredArgsConstructor
 public class CommitDetailsServiceImpl implements CommitDetailsService {
 
     private final CommitDetailsRepository commitDetailsRepository;
+    private final CommitDetailsMapper commitDetailsMapper;
 
     @Override
     @Transactional
     public void saveCommitDetails(List<CommitDetail> commits) {
+        if (commits == null || commits.isEmpty()) {
+            log.info("No commits to save");
+            return;
+        }
+
         log.info("Saving {} commit details", commits.size());
 
-        List<CommitDetails> newCommits = new ArrayList<>();
-        int skippedCount = 0;
+        // Batch check for existing commits to avoid N+1 problem
+        List<String> commitHashes = commits.stream()
+                .map(CommitDetail::getHash)
+                .toList();
 
-        for (CommitDetail commit : commits) {
-            if (commitDetailsRepository.existsByCommitHash(commit.getHash())) {
-                skippedCount++;
-                continue;
-            }
+        Set<String> existingHashes = Set.copyOf(commitDetailsRepository.findExistingHashes(commitHashes));
 
-            CommitDetails entity = CommitDetails.builder()
-                    .commitHash(commit.getHash())
-                    .email(commit.getEmail())
-                    .commitDate(commit.getCommitDate())
-                    .hour(commit.getCommitDate().getHour())
-                    .isMerge(commit.isMerge())
-                    .addedLines(commit.getAdded())
-                    .deletedLines(commit.getDeleted())
-                    .testAddedLines(commit.getTestAdded())
-                    .repositoryName(commit.getRepoName())
-                    .taskNumber(commit.getTaskNumber())
-                    .commitMessage(commit.getCommitMessage())
-                    .collectedAt(LocalDateTime.now())
-                    .build();
+        List<CommitDetails> newCommits = commits.stream()
+                .filter(commit -> !existingHashes.contains(commit.getHash()))
+                .map(commitDetailsMapper::toEntity)
+                .toList();
 
-            newCommits.add(entity);
-        }
+        int skippedCount = commits.size() - newCommits.size();
 
         if (!newCommits.isEmpty()) {
             commitDetailsRepository.saveAll(newCommits);
             log.info("Saved {} new commit details, skipped {} duplicates", newCommits.size(), skippedCount);
+        } else {
+            log.info("All {} commits already exist in database", skippedCount);
         }
     }
 
     @Override
     public List<CommitDetailDto> getUserCommits(String email) {
-        List<CommitDetails> commits = commitDetailsRepository.findByEmailOrderByCommitDateAsc(email);
-
-        return commits.stream()
+        return commitDetailsRepository.findByEmailOrderByCommitDateAsc(email).stream()
                 .map(CommitDetailDto::fromEntity)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Override
     public Map<Integer, Long> getHourlyActivity(String email) {
-        Map<Integer, Long> hourlyActivity = new HashMap<>();
-        for (int i = 0; i < 24; i++) {
-            hourlyActivity.put(i, 0L);
-        }
-
-        List<Object[]> results = commitDetailsRepository.findHourlyActivityByEmail(email);
-        for (Object[] result : results) {
+        Map<Integer, Long> hourlyActivity = initializeHourlyMap();
+        
+        commitDetailsRepository.findHourlyActivityByEmail(email).forEach(result -> {
             Integer hour = (Integer) result[0];
             Long count = (Long) result[1];
             if (hour != null) {
                 hourlyActivity.put(hour, count);
             }
-        }
+        });
 
         return hourlyActivity;
     }
@@ -102,57 +93,8 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
     @Override
     public List<TaskWithCommitsDto> getTasksWithCommits(String email) {
         log.info("Fetching tasks with commits for user: {}", email);
-
         List<CommitDetails> commits = commitDetailsRepository.findByEmailOrderByCommitDateAsc(email);
-
-        Map<String, List<CommitDetails>> commitsByTask = new LinkedHashMap<>();
-
-        for (CommitDetails commit : commits) {
-            String taskNumber = commit.getTaskNumber();
-            if (taskNumber == null || taskNumber.isBlank()) {
-                continue;
-            }
-
-            commitsByTask.computeIfAbsent(taskNumber, k -> new ArrayList<>()).add(commit);
-        }
-
-        List<TaskWithCommitsDto> result = new ArrayList<>();
-
-        for (Map.Entry<String, List<CommitDetails>> entry : commitsByTask.entrySet()) {
-            String taskNumber = entry.getKey();
-            List<CommitDetails> taskCommits = entry.getValue();
-
-            String taskTitle = extractTaskTitle(taskCommits.get(0).getCommitMessage(), taskNumber);
-
-            List<CommitDetailDto> commitDtos = taskCommits.stream()
-                    .map(CommitDetailDto::fromEntity)
-                    .collect(Collectors.toList());
-
-            result.add(TaskWithCommitsDto.builder()
-                    .taskNumber(taskNumber)
-                    .taskTitle(taskTitle)
-                    .commits(commitDtos)
-                    .build());
-        }
-
-        result.sort((a, b) -> Integer.compare(b.getCommits().size(), a.getCommits().size()));
-
-        log.info("Found {} tasks with commits for user {}", result.size(), email);
-        return result;
-    }
-
-    private String extractTaskTitle(String commitMessage, String taskNumber) {
-        if (commitMessage == null || commitMessage.isBlank()) {
-            return taskNumber;
-        }
-
-        String title = commitMessage.replaceFirst("^" + taskNumber, "").trim();
-
-        if (title.isEmpty()) {
-            return taskNumber;
-        }
-
-        return title;
+        return buildTasksWithCommits(commits);
     }
 
     @Override
@@ -163,17 +105,15 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
         LocalDateTime endDateTime = end.atTime(LocalTime.MAX);
 
         List<CommitDetails> commits = commitDetailsRepository
-                .findByEmailAndCommitDateBetween(email, startDateTime, endDateTime);
+                .findByEmailAndCommitDateBetween(email, startDateTime, endDateTime)
+                .stream().filter(p -> !p.isMerge())
+                .toList();
 
-        Map<Integer, Long> hourlyActivity = new HashMap<>();
-        for (int i = 0; i < 24; i++) {
-            hourlyActivity.put(i, 0L);
-        }
-
-        for (CommitDetails commit : commits) {
-            int hour = commit.getHour();
-            hourlyActivity.merge(hour, 1L, Long::sum);
-        }
+        Map<Integer, Long> hourlyActivity = initializeHourlyMap();
+        
+        commits.forEach(commit -> 
+            hourlyActivity.merge(commit.getHour(), 1L, Long::sum)
+        );
 
         return hourlyActivity;
     }
@@ -188,37 +128,55 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
         List<CommitDetails> commits = commitDetailsRepository
                 .findByEmailAndCommitDateBetween(email, startDateTime, endDateTime);
 
-        Map<String, List<CommitDetails>> commitsByTask = new LinkedHashMap<>();
+        return buildTasksWithCommits(commits);
+    }
 
-        for (CommitDetails commit : commits) {
-            String taskNumber = commit.getTaskNumber();
-            if (taskNumber == null || taskNumber.isBlank()) {
-                continue;
-            }
-            commitsByTask.computeIfAbsent(taskNumber, k -> new ArrayList<>()).add(commit);
+    private Map<Integer, Long> initializeHourlyMap() {
+        return IntStream.range(0, 24)
+                .boxed()
+                .collect(Collectors.toMap(hour -> hour, hour -> 0L));
+    }
+
+    private List<TaskWithCommitsDto> buildTasksWithCommits(List<CommitDetails> commits) {
+        Map<String, List<CommitDetails>> commitsByTask = commits.stream()
+                .filter(commit -> commit.getTaskNumber() != null && !commit.getTaskNumber().isBlank())
+                .filter(commit -> !commit.isMerge())
+                .collect(Collectors.groupingBy(
+                        CommitDetails::getTaskNumber,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+
+        return commitsByTask.entrySet().stream()
+                .map(entry -> buildTaskWithCommits(entry.getKey(), entry.getValue()))
+                .sorted((a, b) -> Integer.compare(b.getCommits().size(), a.getCommits().size()))
+                .toList();
+    }
+
+    private TaskWithCommitsDto buildTaskWithCommits(String taskNumber, List<CommitDetails> taskCommits) {
+        String taskTitle = extractTaskTitle(taskCommits.get(0).getCommitMessage(), taskNumber);
+        
+        List<CommitDetailDto> commitDtos = taskCommits.stream()
+                .map(CommitDetailDto::fromEntity)
+                .toList();
+
+        return TaskWithCommitsDto.builder()
+                .taskNumber(taskNumber)
+                .taskTitle(taskTitle)
+                .commits(commitDtos)
+                .build();
+    }
+
+    private String extractTaskTitle(String commitMessage, String taskNumber) {
+        if (commitMessage == null || commitMessage.isBlank()) {
+            return taskNumber;
         }
 
-        List<TaskWithCommitsDto> result = new ArrayList<>();
+        // Optimized: use startsWith instead of regex
+        String title = commitMessage.startsWith(taskNumber) 
+                ? commitMessage.substring(taskNumber.length()).trim() 
+                : commitMessage.trim();
 
-        for (Map.Entry<String, List<CommitDetails>> entry : commitsByTask.entrySet()) {
-            String taskNumber = entry.getKey();
-            List<CommitDetails> taskCommits = entry.getValue();
-
-            String taskTitle = extractTaskTitle(taskCommits.get(0).getCommitMessage(), taskNumber);
-
-            List<CommitDetailDto> commitDtos = taskCommits.stream()
-                    .map(CommitDetailDto::fromEntity)
-                    .collect(Collectors.toList());
-
-            result.add(TaskWithCommitsDto.builder()
-                    .taskNumber(taskNumber)
-                    .taskTitle(taskTitle)
-                    .commits(commitDtos)
-                    .build());
-        }
-
-        result.sort((a, b) -> Integer.compare(b.getCommits().size(), a.getCommits().size()));
-
-        return result;
+        return title.isEmpty() ? taskNumber : title;
     }
 }

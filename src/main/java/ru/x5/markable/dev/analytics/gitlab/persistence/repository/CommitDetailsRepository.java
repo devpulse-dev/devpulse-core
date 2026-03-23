@@ -23,5 +23,8 @@ public interface CommitDetailsRepository extends JpaRepository<CommitDetails, Lo
     @Query("SELECT c.hour, COUNT(c) FROM CommitDetails c WHERE c.email = :email GROUP BY c.hour ORDER BY c.hour")
     List<Object[]> findHourlyActivityByEmail(@Param("email") String email);
 
+    @Query("SELECT c.commitHash FROM CommitDetails c WHERE c.commitHash IN :hashes")
+    List<String> findExistingHashes(@Param("hashes") List<String> hashes);
+
     void deleteByCommitDateBefore(LocalDateTime date);
 }

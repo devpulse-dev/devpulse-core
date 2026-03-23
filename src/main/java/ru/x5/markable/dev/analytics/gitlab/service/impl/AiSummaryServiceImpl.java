@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 import ru.x5.markable.dev.analytics.gitlab.client.AiClient;
-import ru.x5.markable.dev.analytics.gitlab.config.AiProperties;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.AiSummaryDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.UserProfileDto;
 import ru.x5.markable.dev.analytics.gitlab.service.AiSummaryService;
