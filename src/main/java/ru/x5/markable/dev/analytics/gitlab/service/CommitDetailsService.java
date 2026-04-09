@@ -23,4 +23,6 @@ public interface CommitDetailsService {
 
     List<TaskWithCommitsDto> getTasksWithCommits(String email, LocalDate start, LocalDate end);
 
+    List<CommitDetailDto> getUserCommits(String email, LocalDate start, LocalDate end);
+
 }

@@ -1,5 +1,6 @@
 package ru.x5.markable.dev.analytics.kaiten.service.impl;
 
+import java.util.Collection;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
@@ -35,5 +36,10 @@ public class KaitenCardServiceImpl implements KaitenCardService {
     @Override
     public Optional<KaitenCard> findById(Long id) {
         return kaitenCardRepository.findById(id);
+    }
+
+    @Override
+    public List<KaitenCard> findByIds(Collection<Long> ids) {
+        return kaitenCardRepository.findByIds(ids);
     }
 }

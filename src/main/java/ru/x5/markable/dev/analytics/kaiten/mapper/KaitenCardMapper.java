@@ -29,7 +29,6 @@ public interface KaitenCardMapper {
     @Mapping(target = "tags", source = "tags", qualifiedByName = "mapTagsToString")
     @Mapping(target = "customFields", source = "properties")
     @Mapping(target = "url", source = "id", qualifiedByName = "buildCardUrl")
-    @Mapping(target = "members", ignore = true)  // члены карточки сохраняются отдельно
     KaitenCard toEntity(KaitenCardDto dto);
 
     KaitenCardResponseDto toResponseDto(KaitenCard entity);

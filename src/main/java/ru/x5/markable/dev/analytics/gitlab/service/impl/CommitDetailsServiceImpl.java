@@ -160,6 +160,20 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
         return buildTasksWithCommits(commits);
     }
 
+    @Override
+    public List<CommitDetailDto> getUserCommits(String email, LocalDate start, LocalDate end) {
+        log.info("Fetching commits for user: {} between {} and {}", email, start, end);
+
+        LocalDateTime startDateTime = start.atStartOfDay();
+        LocalDateTime endDateTime = end.atTime(LocalTime.MAX);
+
+        return commitDetailsRepository
+                .findByEmailAndCommitDateBetween(email, startDateTime, endDateTime)
+                .stream()
+                .map(CommitDetailDto::fromEntity)
+                .collect(Collectors.toList());
+    }
+
     private Map<Integer, Long> initializeHourlyMap() {
         return IntStream.range(0, 24)
                 .boxed()

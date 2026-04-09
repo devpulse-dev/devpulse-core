@@ -7,6 +7,7 @@ import java.time.format.TextStyle;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -19,12 +20,19 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.DailyAuthorStats;
+import ru.x5.markable.dev.analytics.gitlab.persistence.entity.UnifiedUser;
 import ru.x5.markable.dev.analytics.gitlab.persistence.repository.DailyAuthorStatsRepository;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.CommitDetailDto;
+import ru.x5.markable.dev.analytics.gitlab.rest.dto.KaitenCardStatus;
+import ru.x5.markable.dev.analytics.gitlab.rest.dto.KaitenCardWithCommitsDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.TaskWithCommitsDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.UserProfileDto;
 import ru.x5.markable.dev.analytics.gitlab.service.CommitDetailsService;
+import ru.x5.markable.dev.analytics.gitlab.service.UnifiedUserService;
 import ru.x5.markable.dev.analytics.gitlab.service.UserProfileService;
+import ru.x5.markable.dev.analytics.kaiten.persistence.entity.KaitenCard;
+import ru.x5.markable.dev.analytics.kaiten.service.KaitenCardMemberService;
+import ru.x5.markable.dev.analytics.kaiten.service.KaitenCardService;
 
 @Service
 @Log4j2
@@ -33,6 +41,9 @@ public class UserProfileServiceImpl implements UserProfileService {
 
     private final DailyAuthorStatsRepository dailyStatsRepository;
     private final CommitDetailsService commitDetailsService;
+    private final UnifiedUserService unifiedUserService;
+    private final KaitenCardMemberService kaitenCardMemberService;
+    private final KaitenCardService kaitenCardService;
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy");
     private static final DateTimeFormatter SHORT_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM");
@@ -47,6 +58,8 @@ public class UserProfileServiceImpl implements UserProfileService {
     public UserProfileDto getUserProfile(String email, LocalDate periodStart, LocalDate periodEnd) {
         log.info("Fetching profile for user: {} with period: {} - {}", email, periodStart, periodEnd);
 
+        Optional<UnifiedUser> unifiedUser = unifiedUserService.findByEmail(email);
+
         List<DailyAuthorStats> userStats = fetchUserStats(email, periodStart, periodEnd);
 
         if (userStats.isEmpty()) {
@@ -60,6 +73,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         var repositories = fetchRepositories(email, periodStart, periodEnd);
         var activityByHour = fetchHourlyActivity(email, periodStart, periodEnd);
         var tasks = fetchTasks(email, periodStart, periodEnd);
+        var kaitenCards = fetchKaitenCards(unifiedUser.orElse(null), tasks, periodStart, periodEnd);
 
         LocalDate firstDate = userStats.get(0).getDate();
         LocalDate lastDate = userStats.get(userStats.size() - 1).getDate();
@@ -80,6 +94,7 @@ public class UserProfileServiceImpl implements UserProfileService {
                 .email(email)
                 .username(extractUsername(email))
                 .joinedDate(firstDate)
+                .avatarUrl(unifiedUser.map(UnifiedUser::getAvatarUrl).orElse(null))
                 .totalCommits(aggregatedStats.totalCommits())
                 .totalMergeCommits(aggregatedStats.totalMergeCommits())
                 .totalAddedLines(aggregatedStats.totalAdded())
@@ -94,6 +109,7 @@ public class UserProfileServiceImpl implements UserProfileService {
                 .activityByHour(activityByHour)
                 .repositories(new ArrayList<>(repositories))
                 .tasks(tasks)
+                .kaitenCards(kaitenCards)
                 .inactivePeriods(inactivePeriods)
                 .aiSummary(aiSummary)
                 .build();
@@ -130,6 +146,116 @@ public class UserProfileServiceImpl implements UserProfileService {
         return dailyStatsRepository.findRepositoriesByEmailAndPeriod(email, periodStart, periodEnd).stream()
                 .filter(repo -> !"ALL_REPOS".equals(repo))
                 .collect(Collectors.toSet());
+    }
+
+    private List<CommitDetailDto> fetchCommits(String email, LocalDate periodStart, LocalDate periodEnd) {
+        if (periodStart != null && periodEnd != null) {
+            return commitDetailsService.getUserCommits(email, periodStart, periodEnd);
+        }
+        return commitDetailsService.getUserCommits(email);
+    }
+
+    private List<KaitenCardWithCommitsDto> fetchKaitenCards(
+            UnifiedUser user,
+            List<TaskWithCommitsDto> taskWithCommitsDtos,
+            LocalDate periodStart,
+            LocalDate periodEnd
+    ) {
+
+        if (user == null || user.getKaitenId() == null) {
+            log.debug("User has no kaiten_id");
+            return Collections.emptyList();
+        }
+        List<CommitDetailDto> commits = taskWithCommitsDtos.stream()
+                .map(TaskWithCommitsDto::getCommits)
+                .flatMap(List<CommitDetailDto>::stream)
+                .toList();
+        Long kaitenUserId = user.getKaitenId();
+
+        // 1. Получаем ID карточек пользователя за период
+        List<Long> cardIds = kaitenCardMemberService.getCardIdsByUserId(kaitenUserId);
+        if (cardIds.isEmpty()) {
+            log.debug("User {} has no Kaiten cards in period", user.getEmail());
+            return Collections.emptyList();
+        }
+
+        // 2. Получаем карточки по ID
+        List<KaitenCard> cards = kaitenCardService.findByIds(cardIds);
+
+        // 3. Группируем коммиты по ID карточки (извлекаем из task_number)
+        Map<Long, List<CommitDetailDto>> commitsByCardId = commits.stream()
+                .filter(c -> c.getTaskNumber() != null && !c.getTaskNumber().isBlank())
+                .collect(Collectors.groupingBy(
+                        commit -> extractKaitenCardIdFromTaskNumber(commit.getTaskNumber()),
+                        Collectors.toList()
+                ));
+
+        // 4. Фильтруем карточки: открытые ИЛИ есть коммиты
+        cards = cards.stream()
+                .filter(card -> {
+                    LocalDate createdDate = card.getCreatedAt().toLocalDate();
+
+                    // 1. Проверка периода
+                    boolean isInPeriod = (periodStart == null || !createdDate.isBefore(periodStart)) &&
+                            (periodEnd == null || !createdDate.isAfter(periodEnd));
+
+                    // 2. Проверка статуса
+                    KaitenCardStatus status = KaitenCardStatus.fromColumnId(card.getColumnId());
+                    boolean isOpen = !status.isClosed();
+
+                    // 3. Проверка наличия коммитов
+                    boolean hasCommits = commitsByCardId.containsKey(card.getId());
+
+                    return isInPeriod && (isOpen || hasCommits);
+                })
+                .collect(Collectors.toList());
+
+
+        // 5. Собираем DTO
+        return cards.stream()
+                .map(card -> {
+                    List<CommitDetailDto> cardCommits = commitsByCardId.getOrDefault(card.getId(), Collections.emptyList());
+
+                    return KaitenCardWithCommitsDto.builder()
+                            .id(card.getId())
+                            .title(card.getTitle())
+                            .status(KaitenCardStatus.fromColumnId(card.getColumnId()).getDisplayName())
+                            .priority(card.getPriority())
+                            .createdAt(card.getCreatedAt())
+                            .closedAt(card.getClosedAt())
+                            .lastMovedAt(card.getLastMovedAt())
+                            .url(card.getUrl())
+                            .commits(cardCommits)
+                            .build();
+                })
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Извлекает ID карточки Kaiten из номера задачи
+     * Пример: "1700-2423436" -> 2423436
+     */
+    private Long extractKaitenCardIdFromTaskNumber(String taskNumber) {
+        if (taskNumber == null || taskNumber.isBlank()) {
+            return null;
+        }
+
+        // Ищем цифры после дефиса
+        int lastDashIndex = taskNumber.lastIndexOf('-');
+        if (lastDashIndex != -1 && lastDashIndex < taskNumber.length() - 1) {
+            try {
+                return Long.parseLong(taskNumber.substring(lastDashIndex + 1));
+            } catch (NumberFormatException e) {
+                // Не удалось распарсить
+            }
+        }
+
+        // Если дефиса нет, пробуем распарсить всё число
+        try {
+            return Long.parseLong(taskNumber);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private Map<String, Long> calculateActivityByDay(List<DailyAuthorStats> userStats) {

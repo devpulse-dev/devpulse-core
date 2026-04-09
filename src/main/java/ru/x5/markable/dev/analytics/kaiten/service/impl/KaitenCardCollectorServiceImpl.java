@@ -18,6 +18,7 @@ import ru.x5.markable.dev.analytics.kaiten.persistence.entity.KaitenCard;
 import ru.x5.markable.dev.analytics.kaiten.rest.dto.KaitenSpaceDto;
 import ru.x5.markable.dev.analytics.kaiten.rest.dto.KaitenUserDto;
 import ru.x5.markable.dev.analytics.kaiten.service.KaitenCardCollectorService;
+import ru.x5.markable.dev.analytics.kaiten.service.KaitenCardMemberService;
 import ru.x5.markable.dev.analytics.kaiten.service.KaitenCardService;
 import ru.x5.markable.dev.analytics.kaiten.service.KaitenSpaceService;
 import ru.x5.markable.dev.analytics.kaiten.service.KaitenUserSyncService;
@@ -31,12 +32,13 @@ import java.time.LocalDateTime;
 public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorService {
 
     private final KaitenClient kaitenClient;
-    private final KaitenCardService kaitenCardService;      // 👈 вместо cardRepository
+    private final KaitenCardService kaitenCardService;
     private final KaitenCardMapper cardMapper;
     private final KaitenSpaceService spaceService;
-    private final KaitenUserSyncService kaitenUserSyncService;  // 👈 для работы с пользователями Kaiten
-    private final UnifiedUserService unifiedUserService;        // 👈 для работы с unified_user
+    private final KaitenUserSyncService kaitenUserSyncService;
+    private final UnifiedUserService unifiedUserService;
     private final KaitenProperties properties;
+    private final KaitenCardMemberService kaitenCardMemberService;
 
     @Override
     public void collectCardsFromAllSpaces(LocalDateTime since) {
@@ -73,13 +75,20 @@ public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorServic
             List<KaitenCardDto> cards = kaitenClient.getCardsBySpace(space.getId(), memberIds, since);
 
             if (!cards.isEmpty()) {
-                List<KaitenCard> teamCards = cards.stream()
-                        .map(cardMapper::toEntity)
-                        .toList();
+                for (KaitenCardDto cardDto : cards) {
+                    // Сохраняем карточку
+                    KaitenCard card = cardMapper.toEntity(cardDto);
+                    card.setUrl("https://kaiten.x5.ru/" + cardDto.getId());
+                    KaitenCard savedCard = kaitenCardService.save(card);
 
-                kaitenCardService.saveAll(teamCards);  // 👈 используем сервис
-                totalCards += teamCards.size();
-                log.info("Space {}: saved {} team cards", space.getId(), teamCards.size());
+                    // Сохраняем участников карточки
+                    if (cardDto.getMembers() != null && !cardDto.getMembers().isEmpty()) {
+                        kaitenCardMemberService.saveCardMembers(savedCard.getId(), cardDto.getMembers());
+                    }
+
+                    totalCards++;
+                }
+                log.info("Space {}: saved {} team cards", space.getId(), cards.size());
             } else {
                 log.debug("Space {}: no cards found for team members", space.getId());
             }
@@ -116,7 +125,7 @@ public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorServic
             if (kaitenUser.isPresent()) {
                 KaitenUserDto userDto = kaitenUser.get();
                 result.put(email, userDto.getId());
-                unifiedUserService.updateKaitenId(email, userDto.getId(), userDto.getFullName(), userDto.getAvatarInitialsUrl());
+                unifiedUserService.updateKaitenId(email, userDto.getId(), userDto.getFullName(), userDto.getAvatar());
             }
         }
 
@@ -136,22 +145,5 @@ public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorServic
         }
 
         return allSpaces;
-    }
-
-    private void saveCardMembers(Long cardId, List<KaitenCardDto.KaitenMemberDto> members) {
-        if (members == null || members.isEmpty()) return;
-
-        List<KaitenCardMember> cardMembers = members.stream()
-                .map(m -> KaitenCardMember.builder()
-                        .cardId(cardId)
-                        .userId(m.getId())
-                        .userName(m.getFullName())
-                        .userEmail(m.getEmail())
-                        .memberType(m.getType())
-                        .joinedAt(LocalDateTime.now())
-                        .build())
-                .toList();
-
-        kaitenCardMemberRepository.saveAll(cardMembers);
     }
 }

@@ -52,19 +52,6 @@ public class UserProfileController {
         return ResponseEntity.ok(profile);
     }
 
-//    @GetMapping("/{email}")
-//    public ResponseEntity<UserProfileDto> getUserProfile(@PathVariable String email) {
-//        log.info("GET /api/v1/users/{}", email);
-//
-//        UserProfileDto profile = userProfileService.getUserProfile(email);
-//
-//        if (profile == null) {
-//            return ResponseEntity.notFound().build();
-//        }
-//
-//        return ResponseEntity.ok(profile);
-//    }
-
     @GetMapping("/{email}/commits")
     public ResponseEntity<List<CommitDetailDto>> getUserCommits(@PathVariable String email) {
         log.info("GET /api/v1/users/{}/commits", email);

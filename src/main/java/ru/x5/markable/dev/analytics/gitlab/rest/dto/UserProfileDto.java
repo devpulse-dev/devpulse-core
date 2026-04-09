@@ -18,6 +18,7 @@ public class UserProfileDto {
     private String email;
     private String username;
     private LocalDate joinedDate;
+    private String avatarUrl;
 
     // Общая статистика
     private long totalCommits;
@@ -33,7 +34,7 @@ public class UserProfileDto {
     private LocalDate periodStart;
     private LocalDate periodEnd;
 
-    // Активность по дням недели (0-6, где 0=понедельник)
+    // Активность по дням недели
     private Map<String, Long> activityByDay;
 
     // Активность по часам (0-23)
@@ -48,4 +49,6 @@ public class UserProfileDto {
 
     // AI Summary
     private String aiSummary;
+
+    private List<KaitenCardWithCommitsDto> kaitenCards;
 }

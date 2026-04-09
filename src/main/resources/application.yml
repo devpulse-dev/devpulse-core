@@ -21,6 +21,7 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: 6379
+
 git:
   repositories:
     - https://scm.x5.ru/gkr/xrg-core.git
@@ -29,13 +30,20 @@ git:
     - https://scm.x5.ru/gkpl/pricing-service.git
     - https://scm.x5.ru/gkpl/platform-service.git
     - https://scm.x5.ru/gkpl/bo-oas.git
-  token:
-  cache-directory:
+  token: eWzfJEmRUwLnWRsHWoFuHm86MQp1OjJnCA.01.0y0bfbayt
+  cache-directory: /Users/boris.osechinskiy/Documents/git-cache/
+
 ai:
-  url:
-  api-key:
-  model:
+  url: https://api-copilot.x5.ru/aigw/v1
+  api-key: fa4b5a32-eeb8-45ce-a74b-850e131d7e56
+  model: copilot-code-large
   timeout: 30000
+
+kaiten:
+  api:
+    url: https://kaiten.x5.ru/api/latest
+    token: 940a0f59-83da-4794-9ace-2a0570e51619
+    space-ids: 1700
 
 server:
   port: 8080

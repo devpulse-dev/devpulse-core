@@ -12,11 +12,11 @@ import java.util.List;
 public interface KaitenUserMapper {
 
     @Mapping(target = "name", source = "fullName")
-    @Mapping(target = "avatarUrl", source = "avatarInitialsUrl")
+    @Mapping(target = "avatarUrl", source = "avatar")
     KaitenUser toEntity(KaitenUserDto dto);
 
     @Mapping(target = "fullName", source = "name")
-    @Mapping(target = "avatarInitialsUrl", source = "avatarUrl")
+    @Mapping(target = "avatar", source = "avatarUrl")
     KaitenUserDto toDto(KaitenUser entity);
 
     List<KaitenUser> toEntityList(List<KaitenUserDto> dtos);
@@ -24,6 +24,6 @@ public interface KaitenUserMapper {
     List<KaitenUserDto> toDtoList(List<KaitenUser> entities);
 
     @Mapping(target = "name", source = "fullName")
-    @Mapping(target = "avatarUrl", source = "avatarInitialsUrl")
+    @Mapping(target = "avatarUrl", source = "avatar")
     void updateEntity(@MappingTarget KaitenUser entity, KaitenUserDto dto);
 }

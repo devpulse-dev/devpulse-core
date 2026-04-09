@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 public class UnifiedUserServiceImpl implements UnifiedUserService {
 
     private final UnifiedUserRepository unifiedUserRepository;
-    private final KaitenUserSyncService kaitenUserSyncService;  // ✅ используем сервис, а не репозиторий
+    private final KaitenUserSyncService kaitenUserSyncService;
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
