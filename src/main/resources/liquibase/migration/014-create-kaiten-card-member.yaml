@@ -1,0 +1,54 @@
+- changeSet:
+    id: 014-create-kaiten-card-member
+    author: boris.osechinskiy
+    changes:
+      - createTable:
+          tableName: kaiten_card_member
+          columns:
+            - column:
+                name: id
+                type: BIGSERIAL
+                constraints:
+                  primaryKey: true
+            - column:
+                name: card_id
+                type: BIGINT
+                constraints:
+                  nullable: false
+            - column:
+                name: user_id
+                type: BIGINT
+                constraints:
+                  nullable: false
+            - column:
+                name: user_name
+                type: VARCHAR(255)
+            - column:
+                name: user_email
+                type: VARCHAR(255)
+            - column:
+                name: member_type
+                type: INT
+            - column:
+                name: joined_at
+                type: TIMESTAMP
+
+      - addForeignKeyConstraint:
+          baseTableName: kaiten_card_member
+          baseColumnNames: card_id
+          referencedTableName: kaiten_card
+          referencedColumnNames: id
+          constraintName: fk_kaiten_card_member_card
+
+      - createIndex:
+          indexName: idx_kaiten_card_member_card
+          tableName: kaiten_card_member
+          columns:
+            - column:
+                name: card_id
+      - createIndex:
+          indexName: idx_kaiten_card_member_user
+          tableName: kaiten_card_member
+          columns:
+            - column:
+                name: user_id

@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DailyUserStatsDto {
-    private     LocalDate date;
+    private LocalDate date;
     private String email;
     private long commits;
     private long mergeCommits;

@@ -53,4 +53,7 @@ public class DailyAuthorStats {
 
     @Column(name = "repository_name", nullable = false)
     private String repositoryName;
+
+    @Column(name = "user_id")
+    private Long userId;
 }

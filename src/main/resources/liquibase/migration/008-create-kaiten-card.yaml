@@ -1,0 +1,125 @@
+databaseChangeLog:
+  - changeSet:
+      id: 008-create-kaiten-card
+      author: boris.osechinskiy
+      changes:
+        - createTable:
+            tableName: kaiten_card
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: title
+                  type: VARCHAR(500)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: TEXT
+              - column:
+                  name: status
+                  type: VARCHAR(50)
+              - column:
+                  name: priority
+                  type: VARCHAR(50)
+              - column:
+                  name: space_id
+                  type: BIGINT
+              - column:
+                  name: space_name
+                  type: VARCHAR(255)
+              - column:
+                  name: board_id
+                  type: BIGINT
+              - column:
+                  name: board_name
+                  type: VARCHAR(255)
+              - column:
+                  name: owner_id
+                  type: BIGINT
+              - column:
+                  name: owner_name
+                  type: VARCHAR(255)
+              - column:
+                  name: type_id
+                  type: BIGINT
+              - column:
+                  name: type_name
+                  type: VARCHAR(255)
+              - column:
+                  name: column_id
+                  type: BIGINT
+              - column:
+                  name: column_name
+                  type: VARCHAR(255)
+              - column:
+                  name: lane_id
+                  type: BIGINT
+              - column:
+                  name: lane_name
+                  type: VARCHAR(255)
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+              - column:
+                  name: closed_at
+                  type: TIMESTAMP
+              - column:
+                  name: last_moved_at
+                  type: TIMESTAMP
+              - column:
+                  name: lane_changed_at
+                  type: TIMESTAMP
+              - column:
+                  name: archived
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+              - column:
+                  name: tags
+                  type: TEXT
+              - column:
+                  name: custom_fields
+                  type: JSONB
+              - column:
+                  name: url
+                  type: VARCHAR(500)
+              - column:
+                  name: version
+                  type: INT
+
+        - createIndex:
+            indexName: idx_kaiten_card_owner
+            tableName: kaiten_card
+            columns:
+              - column:
+                  name: owner_id
+        - createIndex:
+            indexName: idx_kaiten_card_created
+            tableName: kaiten_card
+            columns:
+              - column:
+                  name: created_at
+        - createIndex:
+            indexName: idx_kaiten_card_updated
+            tableName: kaiten_card
+            columns:
+              - column:
+                  name: updated_at
+        - createIndex:
+            indexName: idx_kaiten_card_board
+            tableName: kaiten_card
+            columns:
+              - column:
+                  name: board_id
+        - createIndex:
+            indexName: idx_kaiten_card_type
+            tableName: kaiten_card
+            columns:
+              - column:
+                  name: type_id

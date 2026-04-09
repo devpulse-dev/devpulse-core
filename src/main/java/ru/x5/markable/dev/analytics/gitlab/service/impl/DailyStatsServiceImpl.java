@@ -3,7 +3,6 @@ package ru.x5.markable.dev.analytics.gitlab.service.impl;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -30,6 +29,7 @@ import ru.x5.markable.dev.analytics.gitlab.client.GitClient;
 import ru.x5.markable.dev.analytics.gitlab.model.AuthorAggregate;
 import ru.x5.markable.dev.analytics.gitlab.model.CommitDetail;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.DailyAuthorStats;
+import ru.x5.markable.dev.analytics.gitlab.persistence.entity.UnifiedUser;
 import ru.x5.markable.dev.analytics.gitlab.persistence.repository.DailyAuthorStatsRepository;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.AuthorSummaryDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.AuthorWeeklySummaryDto;
@@ -40,6 +40,7 @@ import ru.x5.markable.dev.analytics.gitlab.rest.dto.WeeklyCommitStatsDto;
 import ru.x5.markable.dev.analytics.gitlab.service.CommitDetailsService;
 import ru.x5.markable.dev.analytics.gitlab.service.DailyStatsService;
 import ru.x5.markable.dev.analytics.gitlab.service.ExportTrackerService;
+import ru.x5.markable.dev.analytics.gitlab.service.UnifiedUserService;
 import ru.x5.markable.dev.analytics.gitlab.utill.CommitMessageParser;
 
 @Service
@@ -53,6 +54,7 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     private final Executor analysisExecutor;
     private final ExportTrackerService exportTrackerService;
     private final CommitDetailsService commitDetailsService;
+    private final UnifiedUserService unifiedUserService;
 
     private static final LocalDateTime DEFAULT_START_DATE = LocalDateTime.of(2026, 1, 1, 0, 0, 0);
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
@@ -634,11 +636,8 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     }
 
     /**
-     * Проверяет, является ли строка заголовком коммита.
-     * Заголовок содержит email (@) и не содержит табуляции.
-     *
-     * @param line строка для проверки
-     * @return true если это заголовок коммита
+     * Определяет, является ли строка заголовком коммита.
+     * Заголовок коммита не содержит табуляций, но содержит @ (email)
      */
     private boolean isCommitHeaderLine(String line) {
         return !line.contains("\t") && line.contains("@");
@@ -656,23 +655,31 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     }
 
     /**
-     * Парсит строку заголовка коммита и создаёт объект CommitDetail.
+     * Парсит строку заголовка коммита.
      * Формат: hash|email|parent|date|message
-     *
-     * @param line строка заголовка коммита
-     * @return объект CommitDetail или null при ошибке парсинга
+     * Сообщение может содержать символы |, поэтому разбиваем по первым 4 разделителям
      */
     private CommitDetail parseCommitHeaderLine(String line) {
-        String[] parts = line.split("\\|");
-        if (parts.length < 5) {
-            return null;
-        }
+        // Находим позиции первых 4 разделителей
+        int firstPipe = line.indexOf('|');
+        if (firstPipe == -1) return null;
 
-        String hash = parts[0].trim();
-        String email = parts[1].trim().toLowerCase();
-        String parent = parts[2].trim();
-        String dateStr = parts[3].trim();
-        String message = parts[4].trim();
+        int secondPipe = line.indexOf('|', firstPipe + 1);
+        if (secondPipe == -1) return null;
+
+        int thirdPipe = line.indexOf('|', secondPipe + 1);
+        if (thirdPipe == -1) return null;
+
+        int fourthPipe = line.indexOf('|', thirdPipe + 1);
+        if (fourthPipe == -1) return null;
+
+        // Извлекаем поля
+        String hash = line.substring(0, firstPipe).trim();
+        String email = line.substring(firstPipe + 1, secondPipe).trim();
+        String parent = line.substring(secondPipe + 1, thirdPipe).trim();
+        String dateStr = line.substring(thirdPipe + 1, fourthPipe).trim();
+        // Всё что после 4-го разделителя — это сообщение коммита (может содержать |)
+        String message = line.substring(fourthPipe + 1).trim();
 
         boolean isMerge = parent.contains(" ");
 
@@ -700,15 +707,15 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     }
 
     /**
-     * Конвертирует строку даты в LocalDateTime в UTC.
+     * Парсит строку даты в LocalDateTime, сохраняя исходное время.
      *
      * @param dateStr строка даты в формате ISO_OFFSET_DATE_TIME
-     * @return LocalDateTime в UTC
+     * @return LocalDateTime в исходном часовом поясе
      * @throws DateTimeParseException при ошибке парсинга
      */
     private LocalDateTime convertToUtc(String dateStr) throws DateTimeParseException {
         ZonedDateTime zonedDateTime = ZonedDateTime.parse(dateStr, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-        return zonedDateTime.withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+        return zonedDateTime.toLocalDateTime();
     }
 
     /**
@@ -787,6 +794,9 @@ public class DailyStatsServiceImpl implements DailyStatsService {
         List<DailyAuthorStats> newRecords = new ArrayList<>();
         List<DailyAuthorStats> updateRecords = new ArrayList<>();
 
+        // Кэш для уже найденных пользователей, чтобы не ходить в БД каждый раз
+        Map<String, Long> userCache = new HashMap<>();
+
         for (Map.Entry<LocalDate, Map<String, AuthorAggregate>> dayEntry : dailyStats.entrySet()) {
             LocalDate date = dayEntry.getKey();
             Map<String, AuthorAggregate> dayStats = dayEntry.getValue();
@@ -794,6 +804,11 @@ public class DailyStatsServiceImpl implements DailyStatsService {
             for (Map.Entry<String, AuthorAggregate> statEntry : dayStats.entrySet()) {
                 String email = statEntry.getKey();
                 AuthorAggregate stat = statEntry.getValue();
+
+                Long userId = userCache.computeIfAbsent(email, e -> {
+                    UnifiedUser user = unifiedUserService.findOrCreateByEmail(e);
+                    return user.getId();
+                });
 
                 dailyStatsRepository.findByEmailAndDateAndRepositoryName(email, date, repoName)
                         .ifPresentOrElse(existing -> {
@@ -803,6 +818,7 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                             existing.setDeletedLines(stat.deleted());
                             existing.setTestAddedLines(stat.testAdded());
                             existing.setLastUpdated(LocalDateTime.now());
+                            existing.setUserId(userId);
                             updateRecords.add(existing);
                         }, () -> {
                             DailyAuthorStats newStats = DailyAuthorStats.builder()
@@ -815,6 +831,7 @@ public class DailyStatsServiceImpl implements DailyStatsService {
                                     .deletedLines(stat.deleted())
                                     .testAddedLines(stat.testAdded())
                                     .lastUpdated(LocalDateTime.now())
+                                    .userId(userId)
                                     .build();
                             newRecords.add(newStats);
                         });

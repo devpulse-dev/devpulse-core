@@ -11,3 +11,19 @@ databaseChangeLog:
       file: liquibase/migration/005-create-commit-details.yaml
   - include:
       file: liquibase/migration/006-add-task-and-message-to-commit-details.yaml
+  - include:
+      file: liquibase/migration/007-create-kaiten-user.yaml
+  - include:
+      file: liquibase/migration/008-create-kaiten-card.yaml
+  - include:
+      file: liquibase/migration/009-create-kaiten-card-comment.yaml
+  - include:
+      file: liquibase/migration/010-add-kaiten-card-to-commit.yaml
+  - include:
+      file: liquibase/migration/011-create-unified-user.yaml
+  - include:
+      file: liquibase/migration/012-add-user-id-to-commit-details.yaml
+  - include:
+      file: liquibase/migration/013-add-user-id-to-daily-stats.yaml
+  - include:
+      file: liquibase/migration/014-create-kaiten-card-member.yaml

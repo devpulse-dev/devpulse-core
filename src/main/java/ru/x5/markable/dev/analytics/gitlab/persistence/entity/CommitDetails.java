@@ -59,4 +59,10 @@ public class CommitDetails {
 
     @Column(name = "collected_at")
     private LocalDateTime collectedAt;
+
+    @Column(name = "user_id")
+    private Long userId;
+
+    @Column(name = "kaiten_card_id")
+    private Long kaitenCardId;
 }

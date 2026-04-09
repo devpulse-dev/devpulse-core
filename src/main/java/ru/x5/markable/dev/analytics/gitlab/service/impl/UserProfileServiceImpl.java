@@ -57,7 +57,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         var aggregatedStats = aggregateStats(userStats);
         var activityByDay = calculateActivityByDay(userStats);
         var inactivePeriods = calculateInactivePeriods(userStats);
-        var repositories = fetchRepositories(email);
+        var repositories = fetchRepositories(email, periodStart, periodEnd);
         var activityByHour = fetchHourlyActivity(email, periodStart, periodEnd);
         var tasks = fetchTasks(email, periodStart, periodEnd);
 
@@ -126,8 +126,8 @@ public class UserProfileServiceImpl implements UserProfileService {
                 .orElseGet(() -> commitDetailsService.getTasksWithCommits(email));
     }
 
-    private Set<String> fetchRepositories(String email) {
-        return dailyStatsRepository.findRepositoriesByEmail(email).stream()
+    private Set<String> fetchRepositories(String email, LocalDate periodStart, LocalDate periodEnd) {
+        return dailyStatsRepository.findRepositoriesByEmailAndPeriod(email, periodStart, periodEnd).stream()
                 .filter(repo -> !"ALL_REPOS".equals(repo))
                 .collect(Collectors.toSet());
     }

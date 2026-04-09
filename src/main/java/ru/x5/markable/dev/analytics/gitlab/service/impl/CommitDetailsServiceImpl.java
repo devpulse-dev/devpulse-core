@@ -3,10 +3,12 @@ package ru.x5.markable.dev.analytics.gitlab.service.impl;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -22,6 +24,8 @@ import ru.x5.markable.dev.analytics.gitlab.persistence.repository.CommitDetailsR
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.CommitDetailDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.TaskWithCommitsDto;
 import ru.x5.markable.dev.analytics.gitlab.service.CommitDetailsService;
+import ru.x5.markable.dev.analytics.gitlab.service.UnifiedUserService;
+import ru.x5.markable.dev.analytics.gitlab.persistence.entity.UnifiedUser;
 
 @Service
 @Log4j2
@@ -30,6 +34,8 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
 
     private final CommitDetailsRepository commitDetailsRepository;
     private final CommitDetailsMapper commitDetailsMapper;
+    private final UnifiedUserService unifiedUserService;
+    private final Map<String, Object> userCreationLocks = new ConcurrentHashMap<>();
 
     @Override
     @Transactional
@@ -41,22 +47,45 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
 
         log.info("Saving {} commit details", commits.size());
 
-        // Batch check for existing commits to avoid N+1 problem
         List<String> commitHashes = commits.stream()
                 .map(CommitDetail::getHash)
                 .toList();
 
         Set<String> existingHashes = Set.copyOf(commitDetailsRepository.findExistingHashes(commitHashes));
 
-        List<CommitDetails> newCommits = commits.stream()
-                .filter(commit -> !existingHashes.contains(commit.getHash()))
-                .map(commitDetailsMapper::toEntity)
-                .toList();
+        // Кэш для уже созданных пользователей в рамках этой пачки
+        Map<String, Long> userCache = new ConcurrentHashMap<>();
+
+        List<CommitDetails> newCommits = new ArrayList<>();
+
+        for (CommitDetail commit : commits) {
+            if (existingHashes.contains(commit.getHash())) {
+                continue;
+            }
+
+            // Получаем userId с синхронизацией
+            Long userId = getOrCreateUserId(commit.getEmail(), userCache);
+
+            CommitDetails entity = commitDetailsMapper.toEntity(commit);
+            entity.setUserId(userId);
+
+            if (commit.getTaskNumber() != null) {
+                try {
+                    Long kaitenCardId = Long.parseLong(commit.getTaskNumber());
+                    entity.setKaitenCardId(kaitenCardId);
+                } catch (NumberFormatException e) {
+                    // ignore
+                }
+            }
+
+            newCommits.add(entity);
+        }
 
         int skippedCount = commits.size() - newCommits.size();
 
         if (!newCommits.isEmpty()) {
-            commitDetailsRepository.saveAll(newCommits);
+            // Сохраняем пачками по 500 для уменьшения нагрузки
+            batchSave(newCommits);
             log.info("Saved {} new commit details, skipped {} duplicates", newCommits.size(), skippedCount);
         } else {
             log.info("All {} commits already exist in database", skippedCount);
@@ -73,7 +102,7 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
     @Override
     public Map<Integer, Long> getHourlyActivity(String email) {
         Map<Integer, Long> hourlyActivity = initializeHourlyMap();
-        
+
         commitDetailsRepository.findHourlyActivityByEmail(email).forEach(result -> {
             Integer hour = (Integer) result[0];
             Long count = (Long) result[1];
@@ -110,9 +139,9 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
                 .toList();
 
         Map<Integer, Long> hourlyActivity = initializeHourlyMap();
-        
-        commits.forEach(commit -> 
-            hourlyActivity.merge(commit.getHour(), 1L, Long::sum)
+
+        commits.forEach(commit ->
+                hourlyActivity.merge(commit.getHour(), 1L, Long::sum)
         );
 
         return hourlyActivity;
@@ -155,7 +184,7 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
 
     private TaskWithCommitsDto buildTaskWithCommits(String taskNumber, List<CommitDetails> taskCommits) {
         String taskTitle = extractTaskTitle(taskCommits.get(0).getCommitMessage(), taskNumber);
-        
+
         List<CommitDetailDto> commitDtos = taskCommits.stream()
                 .map(CommitDetailDto::fromEntity)
                 .toList();
@@ -173,10 +202,34 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
         }
 
         // Optimized: use startsWith instead of regex
-        String title = commitMessage.startsWith(taskNumber) 
-                ? commitMessage.substring(taskNumber.length()).trim() 
+        String title = commitMessage.startsWith(taskNumber)
+                ? commitMessage.substring(taskNumber.length()).trim()
                 : commitMessage.trim();
 
         return title.isEmpty() ? taskNumber : title;
+    }
+
+    private Long getOrCreateUserId(String email, Map<String, Long> userCache) {
+        return userCache.computeIfAbsent(email, e -> {
+            // Синхронизируемся на уровне email, чтобы не создавать одного пользователя дважды
+            synchronized (userCreationLocks.computeIfAbsent(e, k -> new Object())) {
+                try {
+                    UnifiedUser user = unifiedUserService.findOrCreateByEmail(e);
+                    return user.getId();
+                } finally {
+                    userCreationLocks.remove(e);
+                }
+            }
+        });
+    }
+
+    private void batchSave(List<CommitDetails> commits) {
+        int batchSize = 500;
+        for (int i = 0; i < commits.size(); i += batchSize) {
+            int end = Math.min(i + batchSize, commits.size());
+            List<CommitDetails> batch = commits.subList(i, end);
+            commitDetailsRepository.saveAll(batch);
+            log.debug("Saved batch {} of {}", i / batchSize + 1, (commits.size() + batchSize - 1) / batchSize);
+        }
     }
 }

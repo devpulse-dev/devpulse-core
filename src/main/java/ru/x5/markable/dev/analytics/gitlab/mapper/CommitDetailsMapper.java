@@ -21,6 +21,8 @@ public interface CommitDetailsMapper {
     @Mapping(target = "repositoryName", source = "repoName")
     @Mapping(target = "isMerge", source = "merge")
     @Mapping(target = "collectedAt", source = "commitDetail", qualifiedByName = "currentDateTime")
+    @Mapping(target = "userId", ignore = true)
+    @Mapping(target = "kaitenCardId", ignore = true)
     CommitDetails toEntity(CommitDetail commitDetail);
 
     @Named("extractHour")

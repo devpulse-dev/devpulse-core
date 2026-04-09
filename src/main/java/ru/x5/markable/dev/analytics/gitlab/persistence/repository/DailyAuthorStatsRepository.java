@@ -38,4 +38,11 @@ public interface DailyAuthorStatsRepository extends JpaRepository<DailyAuthorSta
             @Param("start") LocalDate start,
             @Param("end") LocalDate end);
 
+
+    @Query("SELECT DISTINCT d.repositoryName FROM DailyAuthorStats d WHERE d.email = :email AND d.date BETWEEN :start AND :end")
+    List<String> findRepositoriesByEmailAndPeriod(
+            @Param("email") String email,
+            @Param("start") LocalDate start,
+            @Param("end") LocalDate end
+    );
 }

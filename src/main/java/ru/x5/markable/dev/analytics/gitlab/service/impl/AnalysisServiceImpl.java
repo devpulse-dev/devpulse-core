@@ -163,7 +163,7 @@ public class AnalysisServiceImpl implements AnalysisService {
 
                 String[] parts = line.split("\\|");
 
-                currentEmail = parts[0].trim().toLowerCase();
+                currentEmail = parts[0].trim();
                 currentCommitIsMerge =
                         parts.length > 1 &&
                                 parts[1] != null &&
