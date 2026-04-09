@@ -10,9 +10,8 @@ import java.util.regex.Pattern;
 @Log4j2
 public class CommitMessageParser {
 
-    // Паттерн для поиска номера задачи в сообщении коммита
-    // Ищет форматы: "1700-3102091"
-    private static final Pattern TASK_NUMBER_PATTERN = Pattern.compile("(\\d{4}-\\d+)");
+    // Любое количество цифр до и после дефиса: "1700-3102091", "12-345", "123456-789012"
+    private static final Pattern TASK_NUMBER_PATTERN = Pattern.compile("(\\d+-\\d+)");
 
     /**
      * Извлечь номер задачи из сообщения коммита

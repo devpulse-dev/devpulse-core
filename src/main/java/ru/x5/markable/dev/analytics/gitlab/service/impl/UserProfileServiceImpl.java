@@ -196,8 +196,8 @@ public class UserProfileServiceImpl implements UserProfileService {
                     LocalDate createdDate = card.getCreatedAt().toLocalDate();
 
                     // 1. Проверка периода
-                    boolean isInPeriod = (periodStart == null || !createdDate.isBefore(periodStart)) &&
-                            (periodEnd == null || !createdDate.isAfter(periodEnd));
+                    boolean isInPeriod = (periodStart == null ||
+                            (periodEnd == null || !createdDate.isAfter(periodEnd)));
 
                     // 2. Проверка статуса
                     KaitenCardStatus status = KaitenCardStatus.fromColumnId(card.getColumnId());

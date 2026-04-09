@@ -42,6 +42,7 @@ import ru.x5.markable.dev.analytics.gitlab.service.DailyStatsService;
 import ru.x5.markable.dev.analytics.gitlab.service.ExportTrackerService;
 import ru.x5.markable.dev.analytics.gitlab.service.UnifiedUserService;
 import ru.x5.markable.dev.analytics.gitlab.utill.CommitMessageParser;
+import ru.x5.markable.dev.analytics.kaiten.service.KaitenCardCollectorService;
 
 @Service
 @Log4j2
@@ -55,6 +56,7 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     private final ExportTrackerService exportTrackerService;
     private final CommitDetailsService commitDetailsService;
     private final UnifiedUserService unifiedUserService;
+    private final KaitenCardCollectorService kaitenCardCollectorService;
 
     private static final LocalDateTime DEFAULT_START_DATE = LocalDateTime.of(2026, 1, 1, 0, 0, 0);
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
@@ -129,6 +131,10 @@ public class DailyStatsServiceImpl implements DailyStatsService {
 
             exportTrackerService.markExportSuccess(end);
             log.info("Successfully collected stats from {} to {}", start, end);
+            log.info("Starting Kaiten cards collection after successful Git stats collection");
+
+            kaitenCardCollectorService.collectCardsForAllUsers(start);
+            log.info("Kaiten cards collection completed successfully");
 
         } catch (Exception e) {
             exportTrackerService.markExportFailed(start, end, e.getMessage());

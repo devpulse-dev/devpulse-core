@@ -83,10 +83,15 @@ public class UnifiedUserServiceImpl implements UnifiedUserService {
     }
 
     @Override
-    public List<UnifiedUserDto> getAllUsers() {
+    public List<UnifiedUser> getAllUsersWithKaitenId() {
         return unifiedUserRepository.findAll().stream()
-                .map(this::toDto)
+                .filter(user -> user.getKaitenId() != null)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<UnifiedUser> getAllUsers() {
+        return unifiedUserRepository.findAll();
     }
 
     @Override

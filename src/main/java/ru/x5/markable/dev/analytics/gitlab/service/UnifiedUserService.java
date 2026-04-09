@@ -17,7 +17,7 @@ public interface UnifiedUserService {
     /**
      * Получить всех пользователей
      */
-    List<UnifiedUserDto> getAllUsers();
+    List<UnifiedUser> getAllUsers();
 
     /**
      * Получить пользователя по email
@@ -31,4 +31,6 @@ public interface UnifiedUserService {
 
     Optional<UnifiedUser> findByEmail(String email);
     void updateKaitenId(String email, Long kaitenId, String name, String avatarUrl);
+
+    List<UnifiedUser> getAllUsersWithKaitenId();
 }

@@ -56,6 +56,6 @@ public enum KaitenCardStatus {
     }
 
     public boolean isClosed() {
-        return this == DONE || this == COMPLETED || this == PROD_CHECK;
+        return this == DONE || this == COMPLETED || this == PROD_CHECK || this == TEST_CHECK;
     }
 }

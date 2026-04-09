@@ -6,5 +6,6 @@ import java.util.List;
 public interface KaitenCardCollectorService {
     void collectCardsFromAllSpaces(LocalDateTime since);
     void collectCardsForTeam(List<String> teamEmails, LocalDateTime since);
+    void collectCardsForAllUsers(LocalDateTime since);
 
 }

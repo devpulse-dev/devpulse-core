@@ -7,7 +7,7 @@ import ru.x5.markable.dev.analytics.kaiten.persistence.entity.KaitenCard;
 import java.util.List;
 
 public interface KaitenCardService {
-    KaitenCard save(KaitenCard card);
+    KaitenCard saveOrUpdate(KaitenCard card);
     List<KaitenCard> saveAll(List<KaitenCard> cards);
     List<KaitenCard> findAll();
     Optional<KaitenCard> findById(Long id);

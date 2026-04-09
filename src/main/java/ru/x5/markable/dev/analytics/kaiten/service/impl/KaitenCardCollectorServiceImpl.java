@@ -79,7 +79,7 @@ public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorServic
                     // Сохраняем карточку
                     KaitenCard card = cardMapper.toEntity(cardDto);
                     card.setUrl("https://kaiten.x5.ru/" + cardDto.getId());
-                    KaitenCard savedCard = kaitenCardService.save(card);
+                    KaitenCard savedCard = kaitenCardService.saveOrUpdate(card);
 
                     // Сохраняем участников карточки
                     if (cardDto.getMembers() != null && !cardDto.getMembers().isEmpty()) {
@@ -95,6 +95,77 @@ public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorServic
         }
 
         log.info("Total team cards collected: {}", totalCards);
+    }
+
+    @Override
+    @Transactional
+    public void collectCardsForAllUsers(LocalDateTime since) {
+        log.info("Collecting Kaiten cards for all users from unified_user");
+
+        // 1. Получаем всех пользователей из unified_user
+        List<UnifiedUser> users = unifiedUserService.getAllUsers();
+        if (users.isEmpty()) {
+            log.warn("No users in unified_user");
+            return;
+        }
+
+        log.info("Found {} users in unified_user", users.size());
+
+        // 2. Собираем все email для синхронизации
+        List<String> allEmails = users.stream()
+                .map(UnifiedUser::getEmail)
+                .toList();
+
+        // 3. Синхронизируем этих пользователей в kaiten_user (получаем их kaiten_id)
+        kaitenUserSyncService.syncUsersByEmails(allEmails);
+
+        // 4. Получаем ID пользователей в Kaiten
+        Map<String, Long> userKaitenIds = getUserKaitenIds(allEmails);
+        log.info("Found Kaiten IDs for {} users: {}", userKaitenIds.size(), userKaitenIds.values());
+
+        if (userKaitenIds.isEmpty()) {
+            log.warn("No users found in Kaiten, skipping cards collection");
+            return;
+        }
+
+        // 5. Получаем список member_ids для фильтрации на уровне API
+        List<Long> memberIds = new ArrayList<>(userKaitenIds.values());
+
+        // 6. Получаем только нужные пространства
+        List<KaitenSpaceDto> spaces = getFilteredSpaces();
+        log.info("Processing {} spaces", spaces.size());
+
+        int totalCards = 0;
+        int updatedCards = 0;
+
+        for (KaitenSpaceDto space : spaces) {
+            List<KaitenCardDto> cards = kaitenClient.getCardsBySpace(space.getId(), memberIds, since);
+
+            if (!cards.isEmpty()) {
+                for (KaitenCardDto cardDto : cards) {
+                    KaitenCard existingCard = kaitenCardService.findById(cardDto.getId()).orElse(null);
+                    KaitenCard card = cardMapper.toEntity(cardDto);
+                    card.setUrl("https://kaiten.x5.ru/" + cardDto.getId());
+
+                    if (existingCard != null) {
+                        card.setId(cardDto.getId());
+                        kaitenCardService.saveOrUpdate(card);
+                        updatedCards++;
+                    } else {
+                        kaitenCardService.saveOrUpdate(card);
+                        totalCards++;
+                    }
+
+                    if (cardDto.getMembers() != null && !cardDto.getMembers().isEmpty()) {
+                        kaitenCardMemberService.saveCardMembers(cardDto.getId(), cardDto.getMembers());
+                    }
+                }
+                log.info("Space {}: saved {} cards ({} new, {} updated)",
+                        space.getId(), cards.size(), totalCards, updatedCards);
+            }
+        }
+
+        log.info("Total Kaiten cards collected: {} new, {} updated", totalCards, updatedCards);
     }
 
     /**
