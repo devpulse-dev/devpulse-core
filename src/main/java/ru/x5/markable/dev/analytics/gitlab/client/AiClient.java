@@ -21,15 +21,41 @@ import ru.x5.markable.dev.analytics.gitlab.rest.dto.UserProfileDto;
 import java.time.format.DateTimeFormatter;
 import java.util.stream.Collectors;
 
+/**
+ * Клиент для взаимодействия с AI API для генерации сводок активности разработчиков.
+ * 
+ * <p>Использует OpenAI-совместимый API для генерации текстовых сводок на основе
+ * статистики активности разработчиков. Поддерживает fallback-режим при недоступности AI.</p>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ */
 @Component
 @Log4j2
 @RequiredArgsConstructor
 public class AiClient {
 
+    /**
+     * Конфигурация AI API.
+     */
     private final AiProperties aiProperties;
+
+    /**
+     * RestTemplate для выполнения HTTP-запросов к AI API.
+     */
     private final RestTemplate restTemplate = new RestTemplate();
+
+    /**
+     * ObjectMapper для парсинга JSON-ответов от AI API.
+     */
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * Генерирует сводку активности разработчика с помощью AI.
+     * 
+     * @param profile профиль разработчика со статистикой активности
+     * @return текстовая сводка активности
+     */
     public String generate(UserProfileDto profile) {
         log.info("Calling corporate AI for user: {}", profile.getEmail());
         log.info("AI URL: {}", aiProperties.getUrl());
@@ -82,6 +108,12 @@ public class AiClient {
         }
     }
 
+    /**
+     * Парсит ответ от OpenAI-совместимого API.
+     * 
+     * @param responseBody тело ответа от API
+     * @return текст сгенерированной сводки
+     */
     private String parseOpenAiResponse(String responseBody) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
@@ -107,6 +139,12 @@ public class AiClient {
         }
     }
 
+    /**
+     * Строит промпт для AI на основе профиля разработчика.
+     * 
+     * @param profile профиль разработчика со статистикой активности
+     * @return текст промпта для AI
+     */
     private String buildPrompt(UserProfileDto profile) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
@@ -185,6 +223,12 @@ public class AiClient {
         );
     }
 
+    /**
+     * Определяет тип активности разработчика по часам.
+     * 
+     * @param activityByHour карта активности по часам
+     * @return тип активности (утренняя, дневная, вечерняя или ночная)
+     */
     private String getActivityType(Map<Integer, Long> activityByHour) {
         long morning = 0, day = 0, evening = 0, night = 0;
 
@@ -209,6 +253,11 @@ public class AiClient {
                 .orElse("не определена");
     }
 
+    /**
+     * Проверяет доступность AI API.
+     * 
+     * @return true, если AI API доступен, иначе false
+     */
     public boolean isAvailable() {
         try {
             String url = aiProperties.getUrl();
@@ -234,6 +283,12 @@ public class AiClient {
         }
     }
 
+    /**
+     * Генерирует базовую сводку активности разработчика без использования AI.
+     * 
+     * @param profile профиль разработчика со статистикой активности
+     * @return текстовая сводка активности
+     */
     private String getFallbackSummary(UserProfileDto profile) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 

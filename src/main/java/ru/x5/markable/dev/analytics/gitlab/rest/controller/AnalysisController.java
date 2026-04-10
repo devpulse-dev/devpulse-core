@@ -18,15 +18,41 @@ import ru.x5.markable.dev.analytics.gitlab.rest.dto.PeriodSummaryDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.WeeklyCommitStatsDto;
 import ru.x5.markable.dev.analytics.gitlab.service.DailyStatsService;
 
+/**
+ * REST-контроллер для анализа Git-репозиториев и получения статистики.
+ * 
+ * <p>Предоставляет API для запуска анализа репозиториев, сбора ежедневной статистики
+ * и получения различных отчётов по активности разработчиков.</p>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ */
 @RestController
 @RequestMapping("/api/v1/analysis")
 @RequiredArgsConstructor
 public class AnalysisController {
 
+    /**
+     * Интерактор для запуска анализа репозиториев.
+     */
     private final AnalysisInteractor analysisInteractor;
+
+    /**
+     * Сервис для работы с ежедневной статистикой.
+     */
     private final DailyStatsService dailyStatsService;
+
+    /**
+     * Маппер для преобразования статистики авторов в DTO.
+     */
     private final AuthorStatsMapper mapper;
 
+    /**
+     * Запускает анализ Git-репозиториев.
+     * 
+     * @param request запрос на анализ с указанием периодов и репозиториев
+     * @return список результатов анализа
+     */
     @PostMapping
     public ResponseEntity<List<AnalysisResponse>> start(@RequestBody AnalysisRequest request) {
         return ResponseEntity.ok().body(mapper.toDto(analysisInteractor.startAnalysis(request)));

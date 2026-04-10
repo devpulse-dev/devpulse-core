@@ -10,6 +10,23 @@ import ru.x5.markable.dev.analytics.kaiten.service.KaitenSpaceService;
 
 import java.util.List;
 
+/**
+ * Сервис для управления пространствами Kaiten.
+ * 
+ * <p>Обеспечивает получение пространств из системы Kaiten с возможностью
+ * фильтрации по белому списку ID пространств.</p>
+ * 
+ * <p>Основные функции:</p>
+ * <ul>
+ *   <li>Получение всех пространств из Kaiten</li>
+ *   <li>Фильтрация пространств по белому списку</li>
+ * </ul>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ * @see KaitenSpaceService
+ * @see KaitenSpaceDto
+ */
 @Service
 @Log4j2
 @RequiredArgsConstructor
@@ -18,6 +35,14 @@ public class KaitenSpaceServiceImpl implements KaitenSpaceService {
     private final KaitenClient kaitenClient;
     private final KaitenProperties properties;
 
+    /**
+     * Получает все пространства из Kaiten.
+     * 
+     * <p>Если в конфигурации задан белый список пространств (spaceIds),
+     * возвращает только пространства из этого списка. Иначе возвращает все пространства.</p>
+     * 
+     * @return список пространств (отфильтрованный или все)
+     */
     @Override
     public List<KaitenSpaceDto> getAllSpaces() {
         List<KaitenSpaceDto> allSpaces = kaitenClient.getSpaces();

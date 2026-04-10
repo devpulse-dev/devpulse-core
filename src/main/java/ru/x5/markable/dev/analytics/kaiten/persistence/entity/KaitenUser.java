@@ -10,6 +10,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Сущность для хранения пользователей из системы Kaiten.
+ * 
+ * <p>Содержит информацию о пользователе, включая имя пользователя,
+ * email, отображаемое имя, URL аватара и время последней синхронизации.</p>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ */
 @Entity
 @Table(name = "kaiten_user")
 @Data
@@ -18,21 +27,39 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class KaitenUser {
 
+    /**
+     * Уникальный идентификатор пользователя в Kaiten.
+     */
     @Id
     private Long id;
 
+    /**
+     * Имя пользователя (логин).
+     */
     @Column(name = "username", nullable = false)
     private String username;
 
+    /**
+     * Email пользователя.
+     */
     @Column(name = "email", nullable = false)
     private String email;
 
+    /**
+     * Отображаемое имя пользователя.
+     */
     @Column(name = "name")
     private String name;
 
+    /**
+     * URL аватара пользователя.
+     */
     @Column(name = "avatar_url")
     private String avatarUrl;
 
+    /**
+     * Дата и время последней синхронизации данных пользователя.
+     */
     @Column(name = "last_synced_at")
     private LocalDateTime lastSyncedAt;
 }

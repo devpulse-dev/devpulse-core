@@ -14,6 +14,15 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * Сущность для хранения статистики по репозиторию за период анализа.
+ * 
+ * <p>Содержит агрегированную статистику по конкретному репозиторию для конкретного запуска анализа,
+ * включая количество коммитов, добавленных и удалённых строк кода.</p>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ */
 @Entity
 @Table(name = "repo_stats",
         indexes = {
@@ -27,31 +36,58 @@ import lombok.Setter;
 @AllArgsConstructor
 public class RepoStats {
 
+    /**
+     * Уникальный идентификатор записи статистики.
+     */
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * Идентификатор запуска анализа.
+     */
     @Column(name = "analysis_id", nullable = false)
     private UUID analysisId;
 
+    /**
+     * Название репозитория.
+     */
     @Column(name = "repository_name", nullable = false)
     private String repositoryName;
 
+    /**
+     * Email автора.
+     */
     @Column(nullable = false)
     private String email;
 
+    /**
+     * Количество merge-коммитов.
+     */
     @Column(name = "merge_commits")
     long mergeCommits;
 
+    /**
+     * Общее количество коммитов.
+     */
     @Column(nullable = false)
     private Long commits;
 
+    /**
+     * Количество добавленных строк кода.
+     */
     @Column(name = "added_lines", nullable = false)
     private Long addedLines;
 
+    /**
+     * Количество удалённых строк кода.
+     */
     @Column(name = "deleted_lines", nullable = false)
     private Long deletedLines;
 
+    /**
+     * Количество добавленных строк в тестовых файлах.
+     */
     @Column(name = "test_added_lines")
     private Long testAddedLines;
 }

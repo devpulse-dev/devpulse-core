@@ -1,10 +1,10 @@
 # Markable Dev Analytics
 
-Система аналитики активности разработчиков в Git-репозиториях с интеграцией AI для генерации сводок.
+Система аналитики активности разработчиков в Git-репозиториях с интеграцией AI и Kaiten для генерации сводок.
 
 ## Описание проекта
 
-Markable Dev Analytics — это Spring Boot приложение для сбора, анализа и визуализации статистики работы разработчиков с Git-репозиториями. Система автоматически анализирует коммиты, собирает метрики активности и предоставляет REST API для получения аналитических данных. Также поддерживается генерация AI-сводок на основе статистики пользователя.
+Markable Dev Analytics — это Spring Boot приложение для сбора, анализа и визуализации статистики работы разработчиков с Git-репозиториями. Система автоматически анализирует коммиты, собирает метрики активности и предоставляет REST API для получения аналитических данных. Также поддерживается генерация AI-сводок на основе статистики пользователя и интеграция с системой управления задачами Kaiten.
 
 ## Основные возможности
 
@@ -15,6 +15,8 @@ Markable Dev Analytics — это Spring Boot приложение для сбо
 - 🔍 **Детализация коммитов** — информация о задачах, сообщениях и изменениях
 - 📈 **Агрегированная статистика** — суммарные показатели за период
 - ⚡ **Асинхронная обработка** — параллельный анализ нескольких репозиториев
+- 🎯 **Интеграция с Kaiten** — синхронизация карточек задач и связывание с коммитами
+- 🔗 **Унифицированные пользователи** — объединение пользователей из разных систем
 
 ## Технологический стек
 
@@ -34,6 +36,7 @@ Markable Dev Analytics — это Spring Boot приложение для сбо
 - **Git** — анализ репозиториев через командную строку
 - **Redis** — кэширование
 - **AI API** — генерация сводок (OpenAI-совместимый формат)
+- **Kaiten API** — интеграция с системой управления задачами
 
 ### Тестирование
 - **JUnit 5.10.2** — модульное тестирование
@@ -47,54 +50,99 @@ src/main/java/ru/x5/markable/dev/analytics/
 ├── commons/                           # Общие компоненты
 │   ├── config/                        # Конфигурация (WebConfig)
 │   └── exceptions/                    # Исключения (ApiException, UnprocessableEntityException)
-└── gitlab/                            # Основной функционал
-    ├── client/                        # Внешние клиенты
-    │   ├── AiClient.java             # Клиент для AI API
-    │   └── GitClient.java            # Клиент для Git (через CLI)
-    ├── config/                        # Конфигурации
-    │   ├── AiProperties.java         # Настройки AI
-    │   ├── AsyncConfig.java          # Асинхронное выполнение
-    │   ├── GitProperties.java        # Настройки Git
-    │   ├── RedisConfig.java          # Настройки Redis
-    │   └── RestTemplateConfig.java   # Конфигурация HTTP клиента
-    ├── exception/                     # Исключения домена
-    ├── interactor/                    # Интеракторы (AnalysisInteractor)
-    ├── mapper/                        # Мапперы (AuthorStatsMapper)
-    ├── model/                         # Доменные модели
-    │   ├── AuthorAggregate.java      # Агрегат статистики автора
-    │   └── CommitDetail.java         # Детали коммита
-    ├── persistence/                    # Слой персистентности
-    │   ├── entity/                   # Сущности БД
-    │   │   ├── AnalysisRun.java
-    │   │   ├── AnalysisStatus.java
-    │   │   ├── AuthorStats.java
-    │   │   ├── CommitDetails.java
-    │   │   ├── DailyAuthorStats.java
-    │   │   ├── LastExportTracker.java
-    │   │   └── RepoStats.java
-    │   └── repository/               # Репозитории JPA
-    ├── rest/                          # REST API
-    │   ├── controller/               # Контроллеры
-    │   │   ├── AnalysisController.java
-    │   │   ├── AiSummaryController.java
-    │   │   ├── GlobalExceptionHandler.java
-    │   │   └── UserProfileController.java
-    │   └── dto/                      # DTO объекты
-    ├── service/                       # Бизнес-логика
-    │   ├── AiSummaryService.java
-    │   ├── AnalysisService.java
-    │   ├── CommitDetailsService.java
-    │   ├── DailyStatsService.java
-    │   ├── ExportTrackerService.java
-    │   ├── UserProfileService.java
-    │   └── impl/                     # Реализации сервисов
-    └── utill/                         # Утилиты
-        └── CommitMessageParser.java  # Парсер сообщений коммитов
+├── gitlab/                            # Основной функционал Git-аналитики
+│   ├── client/                        # Внешние клиенты
+│   │   ├── AiClient.java             # Клиент для AI API
+│   │   └── GitClient.java            # Клиент для Git (через CLI)
+│   ├── config/                        # Конфигурации
+│   │   ├── AiProperties.java         # Настройки AI
+│   │   ├── AsyncConfig.java          # Асинхронное выполнение
+│   │   ├── GitProperties.java        # Настройки Git
+│   │   ├── RedisConfig.java          # Настройки Redis
+│   │   └── RestTemplateConfig.java   # Конфигурация HTTP клиента
+│   ├── exception/                     # Исключения домена
+│   ├── interactor/                    # Интеракторы (AnalysisInteractor)
+│   ├── mapper/                        # Мапперы (AuthorStatsMapper, CommitDetailsMapper)
+│   ├── model/                         # Доменные модели
+│   │   ├── AuthorAggregate.java      # Агрегат статистики автора
+│   │   └── CommitDetail.java         # Детали коммита
+│   ├── persistence/                    # Слой персистентности
+│   │   ├── entity/                   # Сущности БД
+│   │   │   ├── AnalysisRun.java
+│   │   │   ├── AnalysisStatus.java
+│   │   │   ├── AuthorStats.java
+│   │   │   ├── CommitDetails.java
+│   │   │   ├── DailyAuthorStats.java
+│   │   │   ├── LastExportTracker.java
+│   │   │   ├── RepoStats.java
+│   │   │   └── UnifiedUser.java      # Унифицированный пользователь
+│   │   └── repository/               # Репозитории JPA
+│   ├── rest/                          # REST API
+│   │   ├── controller/               # Контроллеры
+│   │   │   ├── AnalysisController.java
+│   │   │   ├── AiSummaryController.java
+│   │   │   ├── GlobalExceptionHandler.java
+│   │   │   └── UserProfileController.java
+│   │   └── dto/                      # DTO объекты
+│   ├── service/                       # Бизнес-логика
+│   │   ├── AiSummaryService.java
+│   │   ├── AnalysisService.java
+│   │   ├── CommitDetailsService.java
+│   │   ├── DailyStatsService.java
+│   │   ├── ExportTrackerService.java
+│   │   ├── UnifiedUserService.java   # Сервис унифицированных пользователей
+│   │   ├── UserProfileService.java
+│   │   └── impl/                     # Реализации сервисов
+│   │       └── helper/               # Helper классы для сервисов
+│   │           ├── GitCommitCollector.java
+│   │           ├── StatsAggregator.java
+│   │           ├── StatsPersistenceHelper.java
+│   │           ├── WeeklyStatsBuilder.java
+│   │           ├── UserProfileDataFetcher.java
+│   │           ├── KaitenCardFetcher.java
+│   │           ├── UserProfileSummaryGenerator.java
+│   │           ├── TaskBuilder.java
+│   │           └── UserSyncHelper.java
+│   └── utill/                         # Утилиты
+│       └── CommitMessageParser.java  # Парсер сообщений коммитов
+└── kaiten/                            # Интеграция с Kaiten
+    ├── client/                        # Клиент Kaiten API
+    │   └── KaitenClient.java
+    ├── config/                        # Конфигурации Kaiten
+    │   ├── KaitenConfig.java
+    │   └── KaitenProperties.java
+    ├── mapper/                        # Мапперы Kaiten
+    │   ├── KaitenCardMapper.java
+    │   ├── KaitenCommentMapper.java
+    │   ├── KaitenSpaceMapper.java
+    │   └── KaitenUserMapper.java
+    ├── persistence/                    # Слой персистентности Kaiten
+    │   ├── entity/                   # Сущности БД Kaiten
+    │   │   ├── KaitenCard.java
+    │   │   ├── KaitenCardComment.java
+    │   │   ├── KaitenCardMember.java
+    │   │   └── KaitenUser.java
+    │   └── repository/               # Репозитории JPA Kaiten
+    ├── rest/                          # REST API Kaiten
+    │   ├── controller/               # Контроллеры Kaiten
+    │   │   ├── KaitenAdminController.java
+    │   │   └── KaitenStatsController.java
+    │   └── dto/                      # DTO объекты Kaiten
+    │       ├── card/                 # DTO карточек
+    │       └── ...                   # Другие DTO
+    └── service/                       # Бизнес-логика Kaiten
+        ├── KaitenCardCollectorService.java
+        ├── KaitenCardMemberService.java
+        ├── KaitenCardService.java
+        ├── KaitenSpaceService.java
+        ├── KaitenStatsService.java
+        ├── KaitenUserSyncService.java
+        └── impl/                     # Реализации сервисов Kaiten
 ```
 
 ## Схема базы данных
 
-### Таблицы
+### Таблицы Git-аналитики
 
 - **analysis_run** — информация о запусках анализа
 - **author_stats** — агрегированная статистика авторов
@@ -102,6 +150,14 @@ src/main/java/ru/x5/markable/dev/analytics/
 - **daily_author_stats** — ежедневная статистика авторов
 - **commit_details** — детальная информация о коммитах
 - **last_export_tracker** — трекер последней выгрузки данных
+- **unified_user** — унифицированные пользователи (объединение Git и Kaiten)
+
+### Таблицы Kaiten
+
+- **kaiten_user** — пользователи Kaiten
+- **kaiten_card** — карточки Kaiten
+- **kaiten_card_comment** — комментарии к карточкам
+- **kaiten_card_member** — участники карточек
 
 ### Миграции
 
@@ -113,6 +169,14 @@ src/main/java/ru/x5/markable/dev/analytics/
 - `004-add-repository-name-to-daily-stats.yaml` — добавление имени репозитория
 - `005-create-commit-details.yaml` — детали коммитов
 - `006-add-task-and-message-to-commit-details.yaml` — задачи и сообщения
+- `007-create-kaiten-user.yaml` — пользователи Kaiten
+- `008-create-kaiten-card.yaml` — карточки Kaiten
+- `009-create-kaiten-card-comment.yaml` — комментарии к карточкам
+- `010-add-kaiten-card-to-commit.yaml` — связь коммитов с карточками
+- `011-create-unified-user.yaml` — унифицированные пользователи
+- `012-add-user-id-to-commit-details.yaml` — связь коммитов с пользователями
+- `013-add-user-id-to-daily-stats.yaml` — связь статистики с пользователями
+- `014-create-kaiten-card-member.yaml` — участники карточек
 
 ## REST API
 
@@ -173,6 +237,33 @@ GET /api/v1/users/{email}/commits
 GET /api/v1/users/{email}/summary
 ```
 
+### Kaiten API
+
+#### Синхронизация всех пользователей Kaiten
+```http
+POST /api/v1/kaiten/admin/sync-users
+```
+
+#### Сбор карточек для команды
+```http
+POST /api/v1/kaiten/admin/collect-cards/team
+Content-Type: application/json
+
+{
+  "emails": ["user1@example.com", "user2@example.com"]
+}
+```
+
+#### Сбор карточек для всех пользователей
+```http
+POST /api/v1/kaiten/admin/collect-cards/all
+```
+
+#### Получение статистики Kaiten
+```http
+GET /api/v1/kaiten/stats
+```
+
 ## Конфигурация
 
 ### application.yml
@@ -213,6 +304,11 @@ ai:
   model: copilot-code-large
   timeout: 30000
 
+kaiten:
+  url: https://your-kaiten-instance.com
+  api-key: your-kaiten-api-key
+  space-id: your-space-id
+
 server:
   port: 8080
 ```
@@ -223,6 +319,9 @@ server:
 - `SPRING_DATASOURCE_URL` — URL базы данных
 - `SPRING_DATASOURCE_USERNAME` — пользователь БД
 - `SPRING_DATASOURCE_PASSWORD` — пароль БД
+- `KAITEN_URL` — URL инстанса Kaiten
+- `KAITEN_API_KEY` — API ключ Kaiten
+- `KAITEN_SPACE_ID` — ID пространства Kaiten
 
 ## Установка и запуск
 
@@ -356,6 +455,33 @@ mvn test
 ### Парсинг коммитов
 
 Сообщения коммитов анализируются для извлечения информации о задачах и контексте изменений.
+
+### Helper классы
+
+Для улучшения читаемости и поддерживаемости кода, большие сервисы были разбиты на специализированные helper классы:
+
+#### Git-аналитика
+- **GitCommitCollector** — сбор и парсинг Git-коммитов
+- **StatsAggregator** — агрегация статистики по дням и неделям
+- **StatsPersistenceHelper** — сохранение статистики в базу данных
+- **WeeklyStatsBuilder** — построение недельной статистики
+- **UserProfileDataFetcher** — получение данных профиля пользователя
+- **KaitenCardFetcher** — получение и фильтрация карточек Kaiten
+- **UserProfileSummaryGenerator** — генерация сводок профиля
+- **TaskBuilder** — построение DTO задач с коммитами
+- **UserSyncHelper** — синхронизация пользователей с кэшированием
+
+### Интеграция с Kaiten
+
+Система поддерживает полную интеграцию с системой управления задачами Kaiten:
+- Синхронизация пользователей
+- Сбор карточек задач
+- Связывание коммитов с карточками
+- Отслеживание участников карточек
+
+### Унифицированные пользователи
+
+Система объединяет пользователей из разных систем (Git и Kaiten) в единую модель для удобства работы и анализа.
 
 ## Лицензия
 

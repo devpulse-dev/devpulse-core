@@ -12,9 +12,23 @@ import org.springframework.web.client.RestTemplate;
 
 import java.security.cert.X509Certificate;
 
+/**
+ * Конфигурация RestTemplate для выполнения HTTP-запросов.
+ * 
+ * <p>Отключает проверку SSL-сертификатов для разработки и настраивает
+ * таймауты соединения и чтения.</p>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ */
 @Configuration
 public class RestTemplateConfig {
 
+    /**
+     * Создаёт и настраивает бин RestTemplate.
+     * 
+     * @return настроенный экземпляр RestTemplate
+     */
     @Bean
     public RestTemplate restTemplate() {
         // Отключаем проверку SSL для разработки
@@ -27,6 +41,12 @@ public class RestTemplateConfig {
         return new RestTemplate(factory);
     }
 
+    /**
+     * Отключает проверку SSL-сертификатов.
+     * 
+     * <p>Используется только для разработки. В продакшене следует использовать
+     * валидные SSL-сертификаты.</p>
+     */
     private void disableSslVerification() {
         try {
             TrustManager[] trustAllCerts = new TrustManager[]{

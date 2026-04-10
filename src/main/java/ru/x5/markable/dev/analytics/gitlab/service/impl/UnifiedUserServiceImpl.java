@@ -20,6 +20,25 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+/**
+ * Сервис для управления унифицированными пользователями.
+ * 
+ * <p>Обеспечивает централизованное управление пользователями из разных систем (Git, Kaiten),
+ * синхронизацию данных и предотвращение дублирования пользователей.</p>
+ * 
+ * <p>Основные функции:</p>
+ * <ul>
+ *   <li>Поиск и создание пользователей по email</li>
+ *   <li>Синхронизация пользователей из Kaiten</li>
+ *   <li>Обновление информации о пользователях</li>
+ *   <li>Получение списков пользователей с фильтрацией</li>
+ * </ul>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ * @see UnifiedUserService
+ * @see UnifiedUser
+ */
 @Service
 @Log4j2
 @RequiredArgsConstructor
@@ -28,6 +47,18 @@ public class UnifiedUserServiceImpl implements UnifiedUserService {
     private final UnifiedUserRepository unifiedUserRepository;
     private final KaitenUserSyncService kaitenUserSyncService;
 
+    /**
+     * Находит или создает пользователя по email.
+     * 
+     * <p>Если пользователь с указанным email существует, возвращает его.
+     * Если нет - создает нового пользователя с нормализованным email.</p>
+     * 
+     * <p>Метод использует механизм повторных попыток для обработки конкурентных
+     * ситуаций при создании пользователя.</p>
+     * 
+     * @param email email пользователя
+     * @return найденный или созданный пользователь
+     */
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     @Retryable(
@@ -61,12 +92,26 @@ public class UnifiedUserServiceImpl implements UnifiedUserService {
         }
     }
 
+    /**
+     * Находит пользователя по email.
+     * 
+     * @param email email пользователя
+     * @return Optional с найденным пользователем, или пустой если пользователь не найден
+     */
     @Override
     public Optional<UnifiedUser> findByEmail(String email) {
         String normalizedEmail = email.toLowerCase();
         return unifiedUserRepository.findByEmail(normalizedEmail);
     }
 
+    /**
+     * Обновляет информацию о Kaiten для пользователя.
+     * 
+     * @param email email пользователя
+     * @param kaitenId идентификатор пользователя в Kaiten
+     * @param name имя пользователя
+     * @param avatarUrl URL аватара пользователя
+     */
     @Override
     @Transactional
     public void updateKaitenId(String email, Long kaitenId, String name, String avatarUrl) {
@@ -82,18 +127,34 @@ public class UnifiedUserServiceImpl implements UnifiedUserService {
         });
     }
 
+    /**
+     * Получает всех пользователей, у которых есть идентификатор в Kaiten.
+     * 
+     * @return список пользователей с kaitenId
+     */
     @Override
     public List<UnifiedUser> getAllUsersWithKaitenId() {
         return unifiedUserRepository.findAll().stream()
                 .filter(user -> user.getKaitenId() != null)
-                .collect(Collectors.toList());
+                .toList();
     }
 
+    /**
+     * Получает всех пользователей.
+     * 
+     * @return список всех пользователей
+     */
     @Override
     public List<UnifiedUser> getAllUsers() {
         return unifiedUserRepository.findAll();
     }
 
+    /**
+     * Получает пользователя по email в виде DTO.
+     * 
+     * @param email email пользователя
+     * @return Optional с DTO пользователя, или пустой если пользователь не найден
+     */
     @Override
     public Optional<UnifiedUserDto> getUserByEmail(String email) {
         String normalizedEmail = email.toLowerCase();
@@ -101,6 +162,12 @@ public class UnifiedUserServiceImpl implements UnifiedUserService {
                 .map(this::toDto);
     }
 
+    /**
+     * Синхронизирует пользователей из Kaiten.
+     * 
+     * <p>Получает всех пользователей из Kaiten и обновляет соответствующие
+     * записи в таблице unified_users.</p>
+     */
     @Override
     @Transactional
     public void syncFromKaiten() {
@@ -117,7 +184,9 @@ public class UnifiedUserServiceImpl implements UnifiedUserService {
     }
 
     /**
-     * Обновить unified_user данными из Kaiten
+     * Обновляет unified_user данными из Kaiten.
+     * 
+     * @param kaitenUser пользователь из Kaiten
      */
     private void updateFromKaiten(KaitenUser kaitenUser) {
         String normalizedEmail = kaitenUser.getEmail().toLowerCase();
@@ -139,6 +208,12 @@ public class UnifiedUserServiceImpl implements UnifiedUserService {
         log.debug("Updated unified user from Kaiten: {}", normalizedEmail);
     }
 
+    /**
+     * Преобразует сущность пользователя в DTO.
+     * 
+     * @param user сущность пользователя
+     * @return DTO пользователя
+     */
     private UnifiedUserDto toDto(UnifiedUser user) {
         return UnifiedUserDto.builder()
                 .id(user.getId())
@@ -151,6 +226,12 @@ public class UnifiedUserServiceImpl implements UnifiedUserService {
                 .build();
     }
 
+    /**
+     * Извлекает имя пользователя из email.
+     * 
+     * @param email email пользователя
+     * @return имя пользователя (часть email до @)
+     */
     private String extractUsername(String email) {
         if (email == null) return "";
         return email.split("@")[0];

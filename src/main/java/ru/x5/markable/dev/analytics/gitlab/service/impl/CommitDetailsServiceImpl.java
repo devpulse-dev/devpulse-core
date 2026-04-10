@@ -4,7 +4,6 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,9 +23,26 @@ import ru.x5.markable.dev.analytics.gitlab.persistence.repository.CommitDetailsR
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.CommitDetailDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.TaskWithCommitsDto;
 import ru.x5.markable.dev.analytics.gitlab.service.CommitDetailsService;
-import ru.x5.markable.dev.analytics.gitlab.service.UnifiedUserService;
-import ru.x5.markable.dev.analytics.gitlab.persistence.entity.UnifiedUser;
+import ru.x5.markable.dev.analytics.gitlab.service.impl.helper.TaskBuilder;
+import ru.x5.markable.dev.analytics.gitlab.service.impl.helper.UserSyncHelper;
 
+/**
+ * Сервис для работы с деталями коммитов.
+ * 
+ * <p>Основные функции:</p>
+ * <ul>
+ *   <li>Сохранение деталей коммитов в базу данных</li>
+ *   <li>Получение коммитов пользователя</li>
+ *   <li>Расчёт почасовой активности</li>
+ *   <li>Группировка коммитов по задачам</li>
+ * </ul>
+ * 
+ * <p>Сервис использует вспомогательные классы для разделения ответственности:</p>
+ * <ul>
+ *   <li>{@link TaskBuilder} - построение DTO задач с коммитами</li>
+ *   <li>{@link UserSyncHelper} - синхронизация пользователей</li>
+ * </ul>
+ */
 @Service
 @Log4j2
 @RequiredArgsConstructor
@@ -34,9 +50,15 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
 
     private final CommitDetailsRepository commitDetailsRepository;
     private final CommitDetailsMapper commitDetailsMapper;
-    private final UnifiedUserService unifiedUserService;
-    private final Map<String, Object> userCreationLocks = new ConcurrentHashMap<>();
+    private final TaskBuilder taskBuilder;
+    private final UserSyncHelper userSyncHelper;
 
+    /**
+     * Сохраняет детали коммитов в базу данных.
+     * Пропускает дубликаты и использует пакетное сохранение для оптимизации.
+     *
+     * @param commits список деталей коммитов
+     */
     @Override
     @Transactional
     public void saveCommitDetails(List<CommitDetail> commits) {
@@ -64,7 +86,7 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
             }
 
             // Получаем userId с синхронизацией
-            Long userId = getOrCreateUserId(commit.getEmail(), userCache);
+            Long userId = userSyncHelper.getOrCreateUserId(commit.getEmail(), userCache);
 
             CommitDetails entity = commitDetailsMapper.toEntity(commit);
             entity.setUserId(userId);
@@ -92,6 +114,12 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
         }
     }
 
+    /**
+     * Получает коммиты пользователя.
+     *
+     * @param email email пользователя
+     * @return список деталей коммитов
+     */
     @Override
     public List<CommitDetailDto> getUserCommits(String email) {
         return commitDetailsRepository.findByEmailOrderByCommitDateAsc(email).stream()
@@ -99,6 +127,12 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
                 .toList();
     }
 
+    /**
+     * Получает почасовую активность пользователя.
+     *
+     * @param email email пользователя
+     * @return карта активности по часам (0-23)
+     */
     @Override
     public Map<Integer, Long> getHourlyActivity(String email) {
         Map<Integer, Long> hourlyActivity = initializeHourlyMap();
@@ -114,18 +148,38 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
         return hourlyActivity;
     }
 
+    /**
+     * Проверяет существование коммита по хешу.
+     *
+     * @param commitHash хеш коммита
+     * @return true если коммит существует
+     */
     @Override
     public boolean commitExists(String commitHash) {
         return commitDetailsRepository.existsByCommitHash(commitHash);
     }
 
+    /**
+     * Получает задачи с коммитами пользователя.
+     *
+     * @param email email пользователя
+     * @return список задач с коммитами
+     */
     @Override
     public List<TaskWithCommitsDto> getTasksWithCommits(String email) {
         log.info("Fetching tasks with commits for user: {}", email);
         List<CommitDetails> commits = commitDetailsRepository.findByEmailOrderByCommitDateAsc(email);
-        return buildTasksWithCommits(commits);
+        return taskBuilder.buildTasksWithCommits(commits);
     }
 
+    /**
+     * Получает почасовую активность пользователя за период.
+     *
+     * @param email email пользователя
+     * @param start начало периода
+     * @param end конец периода
+     * @return карта активности по часам (0-23)
+     */
     @Override
     public Map<Integer, Long> getHourlyActivity(String email, LocalDate start, LocalDate end) {
         log.info("Fetching hourly activity for user: {} between {} and {}", email, start, end);
@@ -147,6 +201,14 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
         return hourlyActivity;
     }
 
+    /**
+     * Получает задачи с коммитами пользователя за период.
+     *
+     * @param email email пользователя
+     * @param start начало периода
+     * @param end конец периода
+     * @return список задач с коммитами
+     */
     @Override
     public List<TaskWithCommitsDto> getTasksWithCommits(String email, LocalDate start, LocalDate end) {
         log.info("Fetching tasks with commits for user: {} between {} and {}", email, start, end);
@@ -157,9 +219,17 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
         List<CommitDetails> commits = commitDetailsRepository
                 .findByEmailAndCommitDateBetween(email, startDateTime, endDateTime);
 
-        return buildTasksWithCommits(commits);
+        return taskBuilder.buildTasksWithCommits(commits);
     }
 
+    /**
+     * Получает коммиты пользователя за период.
+     *
+     * @param email email пользователя
+     * @param start начало периода
+     * @param end конец периода
+     * @return список деталей коммитов
+     */
     @Override
     public List<CommitDetailDto> getUserCommits(String email, LocalDate start, LocalDate end) {
         log.info("Fetching commits for user: {} between {} and {}", email, start, end);
@@ -171,72 +241,25 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
                 .findByEmailAndCommitDateBetween(email, startDateTime, endDateTime)
                 .stream()
                 .map(CommitDetailDto::fromEntity)
-                .collect(Collectors.toList());
+                .toList();
     }
 
+    /**
+     * Инициализирует карту почасовой активности нулевыми значениями.
+     *
+     * @return карта с 24 часами (0-23)
+     */
     private Map<Integer, Long> initializeHourlyMap() {
         return IntStream.range(0, 24)
                 .boxed()
                 .collect(Collectors.toMap(hour -> hour, hour -> 0L));
     }
 
-    private List<TaskWithCommitsDto> buildTasksWithCommits(List<CommitDetails> commits) {
-        Map<String, List<CommitDetails>> commitsByTask = commits.stream()
-                .filter(commit -> commit.getTaskNumber() != null && !commit.getTaskNumber().isBlank())
-                .filter(commit -> !commit.isMerge())
-                .collect(Collectors.groupingBy(
-                        CommitDetails::getTaskNumber,
-                        LinkedHashMap::new,
-                        Collectors.toList()
-                ));
-
-        return commitsByTask.entrySet().stream()
-                .map(entry -> buildTaskWithCommits(entry.getKey(), entry.getValue()))
-                .sorted((a, b) -> Integer.compare(b.getCommits().size(), a.getCommits().size()))
-                .toList();
-    }
-
-    private TaskWithCommitsDto buildTaskWithCommits(String taskNumber, List<CommitDetails> taskCommits) {
-        String taskTitle = extractTaskTitle(taskCommits.get(0).getCommitMessage(), taskNumber);
-
-        List<CommitDetailDto> commitDtos = taskCommits.stream()
-                .map(CommitDetailDto::fromEntity)
-                .toList();
-
-        return TaskWithCommitsDto.builder()
-                .taskNumber(taskNumber)
-                .taskTitle(taskTitle)
-                .commits(commitDtos)
-                .build();
-    }
-
-    private String extractTaskTitle(String commitMessage, String taskNumber) {
-        if (commitMessage == null || commitMessage.isBlank()) {
-            return taskNumber;
-        }
-
-        // Optimized: use startsWith instead of regex
-        String title = commitMessage.startsWith(taskNumber)
-                ? commitMessage.substring(taskNumber.length()).trim()
-                : commitMessage.trim();
-
-        return title.isEmpty() ? taskNumber : title;
-    }
-
-    private Long getOrCreateUserId(String email, Map<String, Long> userCache) {
-        return userCache.computeIfAbsent(email, e -> {
-            // Синхронизируемся на уровне email, чтобы не создавать одного пользователя дважды
-            synchronized (userCreationLocks.computeIfAbsent(e, k -> new Object())) {
-                try {
-                    UnifiedUser user = unifiedUserService.findOrCreateByEmail(e);
-                    return user.getId();
-                } finally {
-                    userCreationLocks.remove(e);
-                }
-            }
-        });
-    }
-
+    /**
+     * Сохраняет коммиты пачками для оптимизации производительности.
+     *
+     * @param commits список коммитов для сохранения
+     */
     private void batchSave(List<CommitDetails> commits) {
         int batchSize = 500;
         for (int i = 0; i < commits.size(); i += batchSize) {

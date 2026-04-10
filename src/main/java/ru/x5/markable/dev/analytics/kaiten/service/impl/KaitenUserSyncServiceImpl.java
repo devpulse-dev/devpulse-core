@@ -16,6 +16,26 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Сервис для синхронизации пользователей из Kaiten.
+ * 
+ * <p>Обеспечивает синхронизацию пользователей из системы Kaiten в локальную базу данных,
+ * поддерживая актуальность информации о пользователях.</p>
+ * 
+ * <p>Основные функции:</p>
+ * <ul>
+ *   <li>Синхронизация всех пользователей из Kaiten</li>
+ *   <li>Синхронизация пользователя по email</li>
+ *   <li>Синхронизация списка пользователей по email</li>
+ *   <li>Сохранение и обновление пользователей</li>
+ *   <li>Поиск пользователей по email</li>
+ * </ul>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ * @see KaitenUserSyncService
+ * @see KaitenUser
+ */
 @Service
 @Log4j2
 @RequiredArgsConstructor
@@ -25,6 +45,12 @@ public class KaitenUserSyncServiceImpl implements KaitenUserSyncService {
     private final KaitenUserRepository kaitenUserRepository;
     private final KaitenUserMapper kaitenUserMapper;
 
+    /**
+     * Синхронизирует всех пользователей из Kaiten.
+     * 
+     * <p>Получает всех пользователей из Kaiten, преобразует их в сущности
+     * и сохраняет в базу данных с обновлением времени синхронизации.</p>
+     */
     @Override
     @Transactional
     public void syncAllUsers() {
@@ -41,6 +67,13 @@ public class KaitenUserSyncServiceImpl implements KaitenUserSyncService {
         log.info("Synced {} Kaiten users", users.size());
     }
 
+    /**
+     * Синхронизирует пользователя по email.
+     * 
+     * <p>Ищет пользователя в Kaiten по email и сохраняет или обновляет его в базе данных.</p>
+     * 
+     * @param email email пользователя для синхронизации
+     */
     @Override
     @Transactional
     public void syncUserByEmail(String email) {
@@ -49,11 +82,19 @@ public class KaitenUserSyncServiceImpl implements KaitenUserSyncService {
         Optional<KaitenUserDto> userOpt = kaitenClient.findUserByEmail(email);
 
         userOpt.ifPresentOrElse(
-                dto -> saveOrUpdate(dto),
+                this::saveOrUpdate,
                 () -> log.warn("User not found in Kaiten: {}", email)
         );
     }
 
+    /**
+     * Синхронизирует список пользователей по email.
+     * 
+     * <p>Для каждого email из списка ищет пользователя в Kaiten и сохраняет или обновляет его.
+     * Ошибки при синхронизации отдельных пользователей не прерывают процесс.</p>
+     * 
+     * @param emails список email пользователей для синхронизации
+     */
     @Override
     @Transactional
     public void syncUsersByEmails(List<String> emails) {
@@ -69,6 +110,15 @@ public class KaitenUserSyncServiceImpl implements KaitenUserSyncService {
         }
     }
 
+    /**
+     * Сохраняет или обновляет пользователя.
+     * 
+     * <p>Если пользователь с указанным ID существует, обновляет его данные.
+     * Если нет - создает нового пользователя.</p>
+     * 
+     * @param dto DTO пользователя из Kaiten
+     * @return сохраненная или обновленная сущность пользователя
+     */
     @Override
     @Transactional
     public KaitenUser saveOrUpdate(KaitenUserDto dto) {
@@ -82,12 +132,23 @@ public class KaitenUserSyncServiceImpl implements KaitenUserSyncService {
         return kaitenUserRepository.save(user);
     }
 
+    /**
+     * Находит пользователя по email.
+     * 
+     * @param email email пользователя
+     * @return Optional с найденным пользователем, или пустой если пользователь не найден
+     */
     @Override
     public Optional<KaitenUser> findByEmail(String email) {
         String normalizedEmail = email.toLowerCase();
         return kaitenUserRepository.findByEmail(normalizedEmail);
     }
 
+    /**
+     * Получает всех пользователей.
+     * 
+     * @return список всех пользователей
+     */
     @Override
     public List<KaitenUser> getAllUsers() {
         return kaitenUserRepository.findAll();

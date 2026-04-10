@@ -1,6 +1,7 @@
 package ru.x5.markable.dev.analytics.gitlab.service.impl;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,27 @@ import java.time.LocalDateTime;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 
+/**
+ * Сервис для анализа Git репозиториев и сбора статистики коммитов.
+ * 
+ * <p>Обеспечивает асинхронный анализ нескольких репозиториев, сбор статистики по авторам,
+ * сохранение результатов в базу данных и обработку ошибок.</p>
+ * 
+ * <p>Основные функции:</p>
+ * <ul>
+ *   <li>Анализ коммитов в указанном временном периоде</li>
+ *   <li>Сбор статистики по авторам (количество коммитов, добавленных/удаленных строк)</li>
+ *   <li>Выделение тестовых файлов из общей статистики</li>
+ *   <li>Асинхронная обработка нескольких репозиториев</li>
+ *   <li>Сохранение результатов анализа в базу данных</li>
+ * </ul>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ * @see AnalysisService
+ * @see AnalysisRequest
+ * @see AuthorStats
+ */
 @Service
 @Log4j2
 @RequiredArgsConstructor
@@ -42,6 +64,15 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final GitProperties gitProperties;
     private final Executor analysisExecutor;
 
+    /**
+     * Запускает анализ репозиториев в указанном временном периоде.
+     * 
+     * <p>Создает запись о запуске анализа, выполняет асинхронную обработку репозиториев
+     * и возвращает агрегированную статистику по авторам.</p>
+     * 
+     * @param request запрос на анализ с указанием периода
+     * @return список статистики по авторам
+     */
     @Override
     @Transactional
     public List<AuthorStats> startAnalysis(AnalysisRequest request) {
@@ -60,6 +91,16 @@ public class AnalysisServiceImpl implements AnalysisService {
        return executeAsync(run.getId(), request);
     }
 
+    /**
+     * Выполняет асинхронный анализ репозиториев.
+     * 
+     * <p>Обрабатывает все репозитории параллельно, агрегирует статистику по авторам,
+     * сохраняет результаты в базу данных и отмечает статус анализа.</p>
+     * 
+     * @param analysisId идентификатор запуска анализа
+     * @param request запрос на анализ
+     * @return список агрегированной статистики по авторам, или null в случае ошибки
+     */
     private List<AuthorStats> executeAsync(UUID analysisId, AnalysisRequest request) {
 
         long totalStart = System.currentTimeMillis();
@@ -93,9 +134,18 @@ public class AnalysisServiceImpl implements AnalysisService {
             markFailed(analysisId, e.getMessage());
             log.error("Analysis {} failed", analysisId, e);
         }
-        return null;
+        return Collections.emptyList();
     }
 
+    /**
+     * Безопасно обрабатывает репозиторий с обработкой исключений.
+     * 
+     * @param repo URL репозитория
+     * @param request запрос на анализ
+     * @param analysisId идентификатор запуска анализа
+     * @param globalStats глобальная статистика для агрегации
+     * @throws RepositoryAnalysisException при ошибке обработки репозитория
+     */
     private void processRepositorySafely(String repo,
             AnalysisRequest request,
             UUID analysisId,
@@ -111,6 +161,19 @@ public class AnalysisServiceImpl implements AnalysisService {
         }
     }
 
+    /**
+     * Обрабатывает отдельный репозиторий.
+     * 
+     * <p>Подготавливает репозиторий, собирает статистику коммитов через Git,
+     * парсит вывод Git, сохраняет статистику репозитория и агрегирует в глобальную статистику.</p>
+     * 
+     * @param repoUrl URL репозитория
+     * @param request запрос на анализ
+     * @param analysisId идентификатор запуска анализа
+     * @param globalStats глобальная статистика для агрегации
+     * @throws IOException при ошибке работы с файловой системой или Git
+     * @throws InterruptedException при прерывании потока
+     */
     private void processRepository(String repoUrl,
             AnalysisRequest request,
             UUID analysisId,
@@ -121,7 +184,6 @@ public class AnalysisServiceImpl implements AnalysisService {
         long start = System.currentTimeMillis();
 
         log.info("Processing repository [{}]", repoName);
-
 
         Path repoPath = gitClient.prepareRepository(repoUrl);
 
@@ -144,6 +206,15 @@ public class AnalysisServiceImpl implements AnalysisService {
                 System.currentTimeMillis() - start);
     }
 
+    /**
+     * Парсит вывод Git команды для извлечения статистики коммитов.
+     * 
+     * <p>Обрабатывает строки вывода Git, выделяет информацию о коммитах и изменениях файлов.
+     * Определяет тестовые файлы и исключает бинарные файлы из статистики.</p>
+     * 
+     * @param lines строки вывода Git команды
+     * @return карта статистики по авторам
+     */
     private Map<String, AuthorAggregate> parseGitOutput(List<String> lines) {
 
         Map<String, AuthorAggregate> repoStats = new HashMap<>();
@@ -220,6 +291,19 @@ public class AnalysisServiceImpl implements AnalysisService {
         return repoStats;
     }
 
+    /**
+     * Проверяет, является ли файл тестовым.
+     * 
+     * <p>Файл считается тестовым, если:</p>
+     * <ul>
+     *   <li>Находится в директории /test/</li>
+     *   <li>Имеет суффикс test.java</li>
+     *   <li>Имеет суффикс tests.java</li>
+     * </ul>
+     * 
+     * @param fileName имя файла
+     * @return true если файл является тестовым, false в противном случае
+     */
     private boolean isTestFile(String fileName) {
 
         if (fileName == null) {
@@ -233,6 +317,14 @@ public class AnalysisServiceImpl implements AnalysisService {
                 || lower.endsWith("tests.java");
     }
 
+    /**
+     * Сохраняет статистику репозитория в базу данных.
+     * 
+     * @param repoName имя репозитория
+     * @param analysisId идентификатор запуска анализа
+     * @param repoStats статистика репозитория
+     * @throws StatisticsPersistenceException при ошибке сохранения в базу данных
+     */
     private void saveRepoStats(String repoName,
             UUID analysisId,
             Map<String, AuthorAggregate> repoStats) {
@@ -257,6 +349,13 @@ public class AnalysisServiceImpl implements AnalysisService {
         }
     }
 
+    /**
+     * Сохраняет агрегированную статистику по авторам в базу данных.
+     * 
+     * @param analysisId идентификатор запуска анализа
+     * @param globalStats глобальная агрегированная статистика
+     * @return список сохраненной статистики по авторам
+     */
     private List<AuthorStats> saveAggregatedStats(UUID analysisId,
             Map<String, AuthorAggregate> globalStats) {
 
@@ -277,6 +376,11 @@ public class AnalysisServiceImpl implements AnalysisService {
         return entities;
     }
 
+    /**
+     * Отмечает анализ как успешно завершенный.
+     * 
+     * @param id идентификатор запуска анализа
+     */
     private void markSuccess(UUID id) {
         AnalysisRun run = analysisRunRepository.findById(id).orElseThrow();
         run.setStatus(AnalysisStatus.SUCCESS);
@@ -284,6 +388,12 @@ public class AnalysisServiceImpl implements AnalysisService {
         analysisRunRepository.save(run);
     }
 
+    /**
+     * Отмечает анализ как завершенный с ошибкой.
+     * 
+     * @param id идентификатор запуска анализа
+     * @param error сообщение об ошибке
+     */
     private void markFailed(UUID id, String error) {
         AnalysisRun run = analysisRunRepository.findById(id).orElseThrow();
         run.setStatus(AnalysisStatus.FAILED);
@@ -292,6 +402,12 @@ public class AnalysisServiceImpl implements AnalysisService {
         analysisRunRepository.save(run);
     }
 
+    /**
+     * Извлекает имя репозитория из URL.
+     * 
+     * @param repoUrl URL репозитория
+     * @return имя репозитория без расширения .git
+     */
     private String extractRepoName(String repoUrl) {
         return repoUrl.substring(repoUrl.lastIndexOf("/") + 1)
                 .replace(".git", "");

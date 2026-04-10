@@ -23,24 +23,45 @@ import java.util.List;
 
 import static java.lang.Thread.sleep;
 
+/**
+ * Клиент для взаимодействия с API Kaiten.
+ * 
+ * <p>Предоставляет методы для получения пользователей, карточек и пространств из Kaiten.
+ * Поддерживает пагинацию при получении карточек и поиск пользователей по email.</p>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ */
 @Component
 @Log4j2
 @RequiredArgsConstructor
 public class KaitenClient {
 
+    /**
+     * Конфигурация подключения к Kaiten API.
+     */
     private final KaitenProperties properties;
+
+    /**
+     * RestTemplate для выполнения HTTP-запросов к Kaiten API.
+     */
     private final RestTemplate kaitenRestTemplate;
 
+    /**
+     * Получает список всех пользователей из Kaiten.
+     * 
+     * @return список пользователей Kaiten
+     */
     public List<KaitenUserDto> getUsers() {
         String url = properties.getUrl() + "/users";
         return executeGet(url, new ParameterizedTypeReference<List<KaitenUserDto>>() {});
     }
 
     /**
-     * Найти пользователя по email (через API поиска)
-     */
-    /**
-     * Найти пользователя по email (используя параметр query API)
+     * Найти пользователя по email (используя параметр query API).
+     * 
+     * @param email email пользователя для поиска
+     * @return Optional с найденным пользователем или пустой, если пользователь не найден
      */
     public Optional<KaitenUserDto> findUserByEmail(String email) {
         try {
@@ -60,6 +81,14 @@ public class KaitenClient {
         }
     }
 
+    /**
+     * Получает карточки из указанного пространства Kaiten с поддержкой пагинации.
+     * 
+     * @param spaceId идентификатор пространства Kaiten
+     * @param memberIds список идентификаторов участников для фильтрации (может быть null)
+     * @param since дата и время, с которой искать обновлённые карточки (может быть null)
+     * @return список карточек из указанного пространства
+     */
     public List<KaitenCardDto> getCardsBySpace(Long spaceId, List<Long> memberIds, LocalDateTime since) {
         List<KaitenCardDto> allCards = new ArrayList<>();
         int limit = 100;
@@ -106,11 +135,24 @@ public class KaitenClient {
         return allCards;
     }
 
+    /**
+     * Получает список всех пространств из Kaiten.
+     * 
+     * @return список пространств Kaiten
+     */
     public List<KaitenSpaceDto> getSpaces() {
         String url = properties.getUrl() + "/spaces";
         return executeGet(url, new ParameterizedTypeReference<List<KaitenSpaceDto>>() {});
     }
 
+    /**
+     * Выполняет GET-запрос к Kaiten API.
+     * 
+     * @param url URL для запроса
+     * @param responseType тип ответа
+     * @param <T> тип возвращаемого значения
+     * @return ответ от API
+     */
     private <T> T executeGet(String url, ParameterizedTypeReference<T> responseType) {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(properties.getToken());

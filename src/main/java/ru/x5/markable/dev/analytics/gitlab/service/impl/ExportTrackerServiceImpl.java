@@ -12,6 +12,24 @@ import ru.x5.markable.dev.analytics.gitlab.persistence.entity.LastExportTracker;
 import ru.x5.markable.dev.analytics.gitlab.persistence.repository.LastExportTrackerRepository;
 import ru.x5.markable.dev.analytics.gitlab.service.ExportTrackerService;
 
+/**
+ * Сервис для отслеживания времени последней выгрузки статистики.
+ * 
+ * <p>Обеспечивает отслеживание успешных и неудачных выгрузок статистики,
+ * сохраняя время последней успешной выгрузки и информацию об ошибках.</p>
+ * 
+ * <p>Основные функции:</p>
+ * <ul>
+ *   <li>Получение времени последней успешной выгрузки</li>
+ *   <li>Отметка успешной выгрузки с обновлением времени</li>
+ *   <li>Отметка неудачной выгрузки с сохранением информации об ошибке</li>
+ * </ul>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ * @see ExportTrackerService
+ * @see LastExportTracker
+ */
 @Service
 @Log4j2
 @RequiredArgsConstructor
@@ -22,7 +40,9 @@ public class ExportTrackerServiceImpl implements ExportTrackerService {
     private static final String DAILY_STATS_TYPE = "DAILY_STATS";
 
     /**
-     * Получить время последней выгрузки
+     * Получает время последней успешной выгрузки статистики.
+     * 
+     * @return Optional с временем последней выгрузки, или пустой если выгрузок не было
      */
     @Override
     @Transactional(readOnly = true)
@@ -31,7 +51,12 @@ public class ExportTrackerServiceImpl implements ExportTrackerService {
     }
 
     /**
-     * Отметить успешную выгрузку
+     * Отмечает успешную выгрузку статистики.
+     * 
+     * <p>Обновляет время последней выгрузки, устанавливает статус SUCCESS
+     * и очищает сообщение об ошибке.</p>
+     * 
+     * @param exportedUntil время до которого была выгружена статистика
      */
     @Override
     @Transactional
@@ -54,7 +79,14 @@ public class ExportTrackerServiceImpl implements ExportTrackerService {
     }
 
     /**
-     * Отметить неудачную выгрузку
+     * Отмечает неудачную выгрузку статистики.
+     * 
+     * <p>Устанавливает статус FAILED и сохраняет информацию об ошибке
+     * с указанием периода выгрузки.</p>
+     * 
+     * @param start начало периода выгрузки
+     * @param end конец периода выгрузки
+     * @param errorMessage сообщение об ошибке
      */
     @Override
     @Transactional

@@ -26,6 +26,26 @@ import ru.x5.markable.dev.analytics.kaiten.rest.dto.KaitenCardDto;
 
 import java.time.LocalDateTime;
 
+/**
+ * Сервис для сбора карточек из Kaiten.
+ * 
+ * <p>Обеспечивает сбор карточек задач из системы Kaiten для указанных пользователей
+ * или команд, синхронизацию пользователей и сохранение карточек в базу данных.</p>
+ * 
+ * <p>Основные функции:</p>
+ * <ul>
+ *   <li>Сбор карточек для команды пользователей</li>
+ *   <li>Сбор карточек для всех пользователей из unified_user</li>
+ *   <li>Синхронизация пользователей между системами</li>
+ *   <li>Фильтрация пространств по конфигурации</li>
+ *   <li>Сохранение участников карточек</li>
+ * </ul>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ * @see KaitenCardCollectorService
+ * @see KaitenCard
+ */
 @Service
 @Log4j2
 @RequiredArgsConstructor
@@ -40,11 +60,25 @@ public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorServic
     private final KaitenProperties properties;
     private final KaitenCardMemberService kaitenCardMemberService;
 
+    /**
+     * Собирает карточки из всех пространств.
+     * 
+     * @param since начало периода сбора карточек
+     */
     @Override
     public void collectCardsFromAllSpaces(LocalDateTime since) {
         // TODO: реализовать при необходимости
     }
 
+    /**
+     * Собирает карточки для команды пользователей.
+     * 
+     * <p>Синхронизирует пользователей в Kaiten, получает их ID, собирает карточки
+     * из отфильтрованных пространств и сохраняет их в базу данных.</p>
+     * 
+     * @param teamEmails список email пользователей команды
+     * @param since начало периода сбора карточек
+     */
     @Override
     @Transactional
     public void collectCardsForTeam(List<String> teamEmails, LocalDateTime since) {
@@ -97,6 +131,15 @@ public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorServic
         log.info("Total team cards collected: {}", totalCards);
     }
 
+    /**
+     * Собирает карточки для всех пользователей из unified_user.
+     * 
+     * <p>Получает всех пользователей из unified_user, синхронизирует их в Kaiten,
+     * собирает карточки из отфильтрованных пространств и сохраняет их в базу данных.
+     * Обновляет существующие карточки и создает новые.</p>
+     * 
+     * @param since начало периода сбора карточек
+     */
     @Override
     @Transactional
     public void collectCardsForAllUsers(LocalDateTime since) {
@@ -169,7 +212,13 @@ public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorServic
     }
 
     /**
-     * Получить Kaiten ID для списка email (с нормализацией регистра)
+     * Получает Kaiten ID для списка email с нормализацией регистра.
+     * 
+     * <p>Сначала ищет пользователей в unified_user, затем для отсутствующих
+     * выполняет поиск в Kaiten по одному.</p>
+     * 
+     * @param teamEmails список email пользователей
+     * @return карта email -> Kaiten ID
      */
     private Map<String, Long> getUserKaitenIds(List<String> teamEmails) {
         Map<String, Long> result = new HashMap<>();
@@ -204,7 +253,12 @@ public class KaitenCardCollectorServiceImpl implements KaitenCardCollectorServic
     }
 
     /**
-     * Получить отфильтрованные пространства (из конфига или все)
+     * Получает отфильтрованные пространства.
+     * 
+     * <p>Если в конфигурации указаны spaceIds, возвращает только эти пространства.
+     * Иначе возвращает все пространства.</p>
+     * 
+     * @return список отфильтрованных пространств
      */
     private List<KaitenSpaceDto> getFilteredSpaces() {
         List<KaitenSpaceDto> allSpaces = spaceService.getAllSpaces();

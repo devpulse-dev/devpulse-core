@@ -13,6 +13,24 @@ import ru.x5.markable.dev.analytics.kaiten.service.KaitenCardMemberService;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Сервис для управления участниками карточек Kaiten.
+ * 
+ * <p>Обеспечивает сохранение, обновление и получение информации об участниках
+ * карточек задач в системе Kaiten.</p>
+ * 
+ * <p>Основные функции:</p>
+ * <ul>
+ *   <li>Сохранение участников карточки с заменой старых</li>
+ *   <li>Получение списка участников карточки</li>
+ *   <li>Получение списка карточек по ID пользователя</li>
+ * </ul>
+ * 
+ * @author Markable Development Team
+ * @version 1.0
+ * @see KaitenCardMemberService
+ * @see KaitenCardMember
+ */
 @Service
 @Log4j2
 @RequiredArgsConstructor
@@ -20,6 +38,15 @@ public class KaitenCardMemberServiceImpl implements KaitenCardMemberService {
 
     private final KaitenCardMemberRepository cardMemberRepository;
 
+    /**
+     * Сохраняет участников карточки.
+     * 
+     * <p>Удаляет старых участников карточки и сохраняет новых.
+     * Используется при обновлении карточки для полной замены списка участников.</p>
+     * 
+     * @param cardId идентификатор карточки
+     * @param members список участников для сохранения
+     */
     @Override
     @Transactional
     public void saveCardMembers(Long cardId, List<KaitenMemberDto> members) {
@@ -46,11 +73,23 @@ public class KaitenCardMemberServiceImpl implements KaitenCardMemberService {
         log.debug("Saved {} members for card {}", cardMembers.size(), cardId);
     }
 
+    /**
+     * Получает список участников карточки.
+     * 
+     * @param cardId идентификатор карточки
+     * @return список участников карточки
+     */
     @Override
     public List<KaitenCardMember> getCardMembers(Long cardId) {
         return cardMemberRepository.findByCardId(cardId);
     }
 
+    /**
+     * Получает список карточек по ID пользователя.
+     * 
+     * @param userId идентификатор пользователя
+     * @return список идентификаторов карточек, в которых участвует пользователь
+     */
     @Override
     public List<Long> getCardIdsByUserId(Long userId) {
         return cardMemberRepository.findCardIdsByUserIdAndPeriod(userId);
