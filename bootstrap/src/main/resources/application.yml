@@ -1,0 +1,60 @@
+spring:
+  application:
+    name: markable-dev-analytics
+
+  # Java 25 virtual threads везде, где Spring их поддерживает (MVC, Async, Scheduling)
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/devanalytics}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    hikari:
+      maximum-pool-size: 20
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 100
+          batch_versioned_data: true
+        order_inserts: true
+        order_updates: true
+
+  liquibase:
+    enabled: true
+    change-log: classpath:/liquibase/changelog.master.yml
+
+# === Git collection ===
+git:
+  repositories: ${GIT_REPOSITORIES:}
+  token: ${GIT_TOKEN:}
+  cache-directory: ${GIT_CACHE_DIR:${user.home}/Documents/git-cache/}
+
+# === Kaiten integration ===
+kaiten:
+  api:
+    url: ${KAITEN_URL:https://kaiten.x5.ru/api/latest}
+    token: ${KAITEN_TOKEN:}
+    request-delay-ms: 250         # ≈4 RPS, safe for sliding-window limit
+    max-retries: 10
+    retry-initial-backoff-ms: 5000
+    retry-max-backoff-ms: 60000
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
