@@ -27,3 +27,5 @@ databaseChangeLog:
       file: liquibase/migration/013-add-user-id-to-daily-stats.yaml
   - include:
       file: liquibase/migration/014-create-kaiten-card-member.yaml
+  - include:
+      file: liquibase/migration/015-create-collection-run.yaml

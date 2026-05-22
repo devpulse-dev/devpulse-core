@@ -1,13 +1,14 @@
 package ru.x5.markable.dev.analytics.architecture;
 
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.library.Architectures;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
  * Защитные тесты гексагональной архитектуры.
@@ -15,9 +16,34 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * <p>Падают как обычные unit-тесты, если кто-то нечаянно нарушил направление зависимостей.
  * Запускаются в bootstrap-модуле, потому что только он видит все остальные модули на classpath.</p>
  */
+@DisplayName("Архитектурные правила: гексагональная архитектура")
 class HexagonalArchitectureTest {
 
     private static final String ROOT = "ru.x5.markable.dev.analytics";
+
+    private static final String DOMAIN = ROOT + ".domain..";
+    private static final String APPLICATION = ROOT + ".application..";
+    private static final String ADAPTER_REST = ROOT + ".adapter.rest..";
+    private static final String ADAPTER_PERSISTENCE = ROOT + ".adapter.persistence..";
+    private static final String ADAPTER_GIT = ROOT + ".adapter.git..";
+    private static final String ADAPTER_KAITEN = ROOT + ".adapter.kaiten..";
+
+    private static final String[] FORBIDDEN_FOR_DOMAIN = {
+            "org.springframework..",
+            "jakarta.persistence..",
+            "jakarta.servlet..",
+            "com.fasterxml.jackson..",
+            "org.hibernate..",
+            "lombok.."
+    };
+
+    private static final String[] FORBIDDEN_FOR_APPLICATION = {
+            "org.springframework..",
+            "jakarta.persistence..",
+            "jakarta.servlet..",
+            "com.fasterxml.jackson..",
+            "org.hibernate.."
+    };
 
     private static final JavaClasses CLASSES = new ClassFileImporter()
             .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
@@ -25,19 +51,17 @@ class HexagonalArchitectureTest {
             .importPackages(ROOT);
 
     @Test
+    @DisplayName("Направление зависимостей: адаптеры → application → domain (никогда наоборот)")
     void layeredHexagon() {
-        // bootstrap-модуль содержит только Application.java в корневом пакете ROOT.
-        // Адаптеры наружу никем не должны вызываться (только сам Spring-runtime).
-        // withOptionalLayers(true) — пока модули пустые, не считать это ошибкой.
         ArchRule rule = Architectures.layeredArchitecture()
                 .consideringAllDependencies()
                 .withOptionalLayers(true)
-                .layer("domain").definedBy(ROOT + ".domain..")
-                .layer("application").definedBy(ROOT + ".application..")
-                .layer("adapter-rest").definedBy(ROOT + ".adapter.rest..")
-                .layer("adapter-persistence").definedBy(ROOT + ".adapter.persistence..")
-                .layer("adapter-git").definedBy(ROOT + ".adapter.git..")
-                .layer("adapter-kaiten").definedBy(ROOT + ".adapter.kaiten..")
+                .layer("domain").definedBy(DOMAIN)
+                .layer("application").definedBy(APPLICATION)
+                .layer("adapter-rest").definedBy(ADAPTER_REST)
+                .layer("adapter-persistence").definedBy(ADAPTER_PERSISTENCE)
+                .layer("adapter-git").definedBy(ADAPTER_GIT)
+                .layer("adapter-kaiten").definedBy(ADAPTER_KAITEN)
 
                 .whereLayer("adapter-rest").mayNotBeAccessedByAnyLayer()
                 .whereLayer("adapter-persistence").mayNotBeAccessedByAnyLayer()
@@ -56,36 +80,24 @@ class HexagonalArchitectureTest {
     }
 
     @Test
+    @DisplayName("Domain: никаких зависимостей от Spring/JPA/Jackson/Hibernate/Lombok")
     void domainHasNoFrameworkDependencies() {
         ArchRule rule = noClasses()
-                .that().resideInAPackage(ROOT + ".domain..")
+                .that().resideInAPackage(DOMAIN)
                 .should().dependOnClassesThat()
-                .resideInAnyPackage(
-                        "org.springframework..",
-                        "jakarta.persistence..",
-                        "jakarta.servlet..",
-                        "com.fasterxml.jackson..",
-                        "org.hibernate..",
-                        "lombok.."
-                )
+                .resideInAnyPackage(FORBIDDEN_FOR_DOMAIN)
                 .allowEmptyShould(true);
 
         rule.check(CLASSES);
     }
 
     @Test
+    @DisplayName("Application: никаких зависимостей от Spring/JPA/Jackson/Hibernate (Lombok можно)")
     void applicationHasNoFrameworkDependencies() {
-        // Application может использовать Lombok для краткости, но НЕ Spring/JPA/HTTP.
         ArchRule rule = noClasses()
-                .that().resideInAPackage(ROOT + ".application..")
+                .that().resideInAPackage(APPLICATION)
                 .should().dependOnClassesThat()
-                .resideInAnyPackage(
-                        "org.springframework..",
-                        "jakarta.persistence..",
-                        "jakarta.servlet..",
-                        "com.fasterxml.jackson..",
-                        "org.hibernate.."
-                )
+                .resideInAnyPackage(FORBIDDEN_FOR_APPLICATION)
                 .allowEmptyShould(true);
 
         rule.check(CLASSES);
