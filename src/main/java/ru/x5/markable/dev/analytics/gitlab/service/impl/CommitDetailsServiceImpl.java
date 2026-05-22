@@ -4,10 +4,10 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -23,8 +23,8 @@ import ru.x5.markable.dev.analytics.gitlab.persistence.repository.CommitDetailsR
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.CommitDetailDto;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.TaskWithCommitsDto;
 import ru.x5.markable.dev.analytics.gitlab.service.CommitDetailsService;
+import ru.x5.markable.dev.analytics.gitlab.service.UnifiedUserService;
 import ru.x5.markable.dev.analytics.gitlab.service.impl.helper.TaskBuilder;
-import ru.x5.markable.dev.analytics.gitlab.service.impl.helper.UserSyncHelper;
 
 /**
  * Сервис для работы с деталями коммитов.
@@ -40,7 +40,6 @@ import ru.x5.markable.dev.analytics.gitlab.service.impl.helper.UserSyncHelper;
  * <p>Сервис использует вспомогательные классы для разделения ответственности:</p>
  * <ul>
  *   <li>{@link TaskBuilder} - построение DTO задач с коммитами</li>
- *   <li>{@link UserSyncHelper} - синхронизация пользователей</li>
  * </ul>
  */
 @Service
@@ -51,7 +50,7 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
     private final CommitDetailsRepository commitDetailsRepository;
     private final CommitDetailsMapper commitDetailsMapper;
     private final TaskBuilder taskBuilder;
-    private final UserSyncHelper userSyncHelper;
+    private final UnifiedUserService unifiedUserService;
 
     /**
      * Сохраняет детали коммитов в базу данных.
@@ -75,8 +74,14 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
 
         Set<String> existingHashes = Set.copyOf(commitDetailsRepository.findExistingHashes(commitHashes));
 
-        // Кэш для уже созданных пользователей в рамках этой пачки
-        Map<String, Long> userCache = new ConcurrentHashMap<>();
+        // Один batch find-or-create вместо N findOrCreateByEmail
+        Set<String> uniqueEmails = new HashSet<>();
+        for (CommitDetail c : commits) {
+            if (!existingHashes.contains(c.getHash()) && c.getEmail() != null) {
+                uniqueEmails.add(c.getEmail().toLowerCase());
+            }
+        }
+        Map<String, Long> userIdByEmail = unifiedUserService.findOrCreateAllByEmails(uniqueEmails);
 
         List<CommitDetails> newCommits = new ArrayList<>();
 
@@ -85,8 +90,9 @@ public class CommitDetailsServiceImpl implements CommitDetailsService {
                 continue;
             }
 
-            // Получаем userId с синхронизацией
-            Long userId = userSyncHelper.getOrCreateUserId(commit.getEmail(), userCache);
+            Long userId = commit.getEmail() == null
+                    ? null
+                    : userIdByEmail.get(commit.getEmail().toLowerCase());
 
             CommitDetails entity = commitDetailsMapper.toEntity(commit);
             entity.setUserId(userId);

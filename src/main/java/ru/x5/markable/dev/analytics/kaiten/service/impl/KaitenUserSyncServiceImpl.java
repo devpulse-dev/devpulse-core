@@ -1,6 +1,7 @@
 package ru.x5.markable.dev.analytics.kaiten.service.impl;
 
-import java.util.ArrayList;
+import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
@@ -89,10 +90,10 @@ public class KaitenUserSyncServiceImpl implements KaitenUserSyncService {
 
     /**
      * Синхронизирует список пользователей по email.
-     * 
-     * <p>Для каждого email из списка ищет пользователя в Kaiten и сохраняет или обновляет его.
-     * Ошибки при синхронизации отдельных пользователей не прерывают процесс.</p>
-     * 
+     *
+     * <p>Делает один запрос к Kaiten API для получения всех пользователей,
+     * затем фильтрует нужные и сохраняет их. Это заменяет N отдельных вызовов.</p>
+     *
      * @param emails список email пользователей для синхронизации
      */
     @Override
@@ -100,14 +101,26 @@ public class KaitenUserSyncServiceImpl implements KaitenUserSyncService {
     public void syncUsersByEmails(List<String> emails) {
         log.info("Syncing Kaiten users by {} emails", emails.size());
 
-        for (String email : emails) {
+        Set<String> normalizedEmails = emails.stream()
+                .map(String::toLowerCase)
+                .collect(Collectors.toSet());
+
+        List<KaitenUserDto> allUsers = kaitenClient.getUsers();
+
+        List<KaitenUserDto> targetUsers = allUsers.stream()
+                .filter(u -> u.getEmail() != null
+                        && normalizedEmails.contains(u.getEmail().toLowerCase()))
+                .toList();
+
+        for (KaitenUserDto dto : targetUsers) {
             try {
-                Optional<KaitenUserDto> userOpt = kaitenClient.findUserByEmail(email);
-                userOpt.ifPresent(this::saveOrUpdate);
+                saveOrUpdate(dto);
             } catch (Exception e) {
-                log.error("Failed to sync user: {}", email, e);
+                log.error("Failed to sync user: {}", dto.getEmail(), e);
             }
         }
+
+        log.info("Synced {} of {} requested users", targetUsers.size(), emails.size());
     }
 
     /**

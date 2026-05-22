@@ -25,7 +25,7 @@ import lombok.NoArgsConstructor;
  */
 @Entity
 @Table(name = "daily_author_stats",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"email", "date"}))
+        uniqueConstraints = @UniqueConstraint(columnNames = {"email", "date", "repository_name"}))
 @Data
 @Builder
 @NoArgsConstructor

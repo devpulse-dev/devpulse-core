@@ -1,6 +1,8 @@
 package ru.x5.markable.dev.analytics.kaiten.persistence.repository;
 
+import java.util.Collection;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -34,10 +36,19 @@ public interface KaitenCardMemberRepository extends JpaRepository<KaitenCardMemb
     
     /**
      * Удаляет всех членов карточки по идентификатору карточки.
-     * 
+     *
      * @param cardId идентификатор карточки
      */
     void deleteByCardId(Long cardId);
+
+    /**
+     * Удаляет всех членов для набора карточек одним запросом.
+     *
+     * @param cardIds коллекция идентификаторов карточек
+     */
+    @Modifying
+    @Query("DELETE FROM KaitenCardMember m WHERE m.cardId IN :cardIds")
+    void deleteByCardIdIn(@Param("cardIds") Collection<Long> cardIds);
 
     /**
      * Находит идентификаторы карточек по идентификатору пользователя.

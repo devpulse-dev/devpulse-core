@@ -37,4 +37,27 @@ public class KaitenProperties {
      * Список идентификаторов пространств (spaces) в Kaiten для синхронизации.
      */
     private List<Long> spaceIds;
+
+    /**
+     * Минимальная задержка между HTTP-запросами в Kaiten API (мс).
+     * 250 ms ≈ 4 RPS — безопасно для sliding-window лимита Kaiten.
+     */
+    private long requestDelayMs = 250;
+
+    /**
+     * Максимальное число повторных попыток после ошибки rate limit (429) или серверных ошибок (5xx).
+     */
+    private int maxRetries = 10;
+
+    /**
+     * Базовая задержка перед повторной попыткой (мс). Используется экспоненциальный backoff,
+     * если сервер не прислал заголовок Retry-After.
+     */
+    private long retryInitialBackoffMs = 5000;
+
+    /**
+     * Максимальная задержка перед повторной попыткой (мс).
+     * 60 секунд достаточно для восстановления sliding-window лимита.
+     */
+    private long retryMaxBackoffMs = 60000;
 }

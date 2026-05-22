@@ -1,12 +1,13 @@
 package ru.x5.markable.dev.analytics.kaiten.service.impl;
 
-import java.time.LocalTime;
+import java.util.ArrayList;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.markable.dev.analytics.kaiten.persistence.entity.KaitenCardMember;
 import ru.x5.markable.dev.analytics.kaiten.persistence.repository.KaitenCardMemberRepository;
+import ru.x5.markable.dev.analytics.kaiten.rest.dto.KaitenCardDto;
 import ru.x5.markable.dev.analytics.kaiten.rest.dto.card.KaitenMemberDto;
 import ru.x5.markable.dev.analytics.kaiten.service.KaitenCardMemberService;
 
@@ -86,12 +87,47 @@ public class KaitenCardMemberServiceImpl implements KaitenCardMemberService {
 
     /**
      * Получает список карточек по ID пользователя.
-     * 
+     *
      * @param userId идентификатор пользователя
      * @return список идентификаторов карточек, в которых участвует пользователь
      */
     @Override
     public List<Long> getCardIdsByUserId(Long userId) {
         return cardMemberRepository.findCardIdsByUserIdAndPeriod(userId);
+    }
+
+    /**
+     * Сохраняет участников для набора карточек одной транзакцией.
+     * Один DELETE по всем cardIds + один batch-INSERT всех участников.
+     */
+    @Override
+    @Transactional
+    public void saveAllCardMembers(List<KaitenCardDto> cards) {
+        List<Long> cardIds = cards.stream().map(KaitenCardDto::getId).toList();
+
+        cardMemberRepository.deleteByCardIdIn(cardIds);
+
+        List<KaitenCardMember> allMembers = new ArrayList<>();
+        for (KaitenCardDto card : cards) {
+            if (card.getMembers() == null || card.getMembers().isEmpty()) {
+                continue;
+            }
+            for (KaitenMemberDto m : card.getMembers()) {
+                allMembers.add(KaitenCardMember.builder()
+                        .cardId(card.getId())
+                        .userId(m.getId())
+                        .userName(m.getFullName())
+                        .userEmail(m.getEmail())
+                        .memberType(m.getType())
+                        .joinedAt(LocalDateTime.now())
+                        .build());
+            }
+        }
+
+        if (!allMembers.isEmpty()) {
+            cardMemberRepository.saveAll(allMembers);
+        }
+
+        log.debug("Saved members for {} cards ({} member records total)", cardIds.size(), allMembers.size());
     }
 }

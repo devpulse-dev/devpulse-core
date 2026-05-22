@@ -40,48 +40,11 @@ public class KaitenCardServiceImpl implements KaitenCardService {
 
     /**
      * Сохраняет или обновляет карточку.
-     * 
-     * <p>Если карточка с указанным ID существует, обновляет все её поля.
-     * Если нет - создает новую карточку.</p>
-     * 
-     * @param card карточка для сохранения или обновления
-     * @return сохраненная или обновленная карточка
+     * JPA merge обрабатывает upsert по ID без предварительных SELECT-запросов.
      */
     @Override
     @Transactional
     public KaitenCard saveOrUpdate(KaitenCard card) {
-        // Если карточка существует, обновляем
-        if (card.getId() != null && kaitenCardRepository.existsById(card.getId())) {
-            KaitenCard existing = kaitenCardRepository.findById(card.getId()).get();
-            existing.setTitle(card.getTitle());
-            existing.setDescription(card.getDescription());
-            existing.setStatus(card.getStatus());
-            existing.setPriority(card.getPriority());
-            existing.setSpaceId(card.getSpaceId());
-            existing.setSpaceName(card.getSpaceName());
-            existing.setBoardId(card.getBoardId());
-            existing.setBoardName(card.getBoardName());
-            existing.setOwnerId(card.getOwnerId());
-            existing.setOwnerName(card.getOwnerName());
-            existing.setTypeId(card.getTypeId());
-            existing.setTypeName(card.getTypeName());
-            existing.setColumnId(card.getColumnId());
-            existing.setColumnName(card.getColumnName());
-            existing.setLaneId(card.getLaneId());
-            existing.setLaneName(card.getLaneName());
-            existing.setUpdatedAt(card.getUpdatedAt());
-            existing.setClosedAt(card.getClosedAt());
-            existing.setLastMovedAt(card.getLastMovedAt());
-            existing.setLaneChangedAt(card.getLaneChangedAt());
-            existing.setArchived(card.getArchived());
-            existing.setTags(card.getTags());
-            existing.setCustomFields(card.getCustomFields());
-            existing.setUrl(card.getUrl());
-            existing.setVersion(card.getVersion());
-            return kaitenCardRepository.save(existing);
-        }
-
-        // Новая карточка
         return kaitenCardRepository.save(card);
     }
 
@@ -92,6 +55,7 @@ public class KaitenCardServiceImpl implements KaitenCardService {
      * @return список сохраненных карточек
      */
     @Override
+    @Transactional
     public List<KaitenCard> saveAll(List<KaitenCard> cards) {
         return kaitenCardRepository.saveAll(cards);
     }

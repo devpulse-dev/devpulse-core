@@ -1,6 +1,7 @@
 package ru.x5.markable.dev.analytics.kaiten.service;
 
 import ru.x5.markable.dev.analytics.kaiten.persistence.entity.KaitenCardMember;
+import ru.x5.markable.dev.analytics.kaiten.rest.dto.KaitenCardDto;
 import ru.x5.markable.dev.analytics.kaiten.rest.dto.card.KaitenMemberDto;
 
 import java.util.List;
@@ -39,12 +40,23 @@ public interface KaitenCardMemberService {
     
     /**
      * Получить идентификаторы карточек по идентификатору пользователя.
-     * 
+     *
      * <p>Возвращает список идентификаторов карточек, в которых указанный
      * пользователь является участником.</p>
-     * 
+     *
      * @param userId идентификатор пользователя
      * @return список идентификаторов карточек
      */
     List<Long> getCardIdsByUserId(Long userId);
+
+    /**
+     * Сохраняет участников для набора карточек одной транзакцией.
+     *
+     * <p>Удаляет всех существующих участников для переданных карточек единым DELETE-запросом,
+     * затем вставляет новых участников единым batch-INSERT. Это заменяет N пар
+     * (deleteByCardId + saveAll) на 1 DELETE + 1 INSERT.</p>
+     *
+     * @param cards список DTO карточек с участниками
+     */
+    void saveAllCardMembers(List<KaitenCardDto> cards);
 }

@@ -93,17 +93,15 @@ public class ExportTrackerServiceImpl implements ExportTrackerService {
     public void markExportFailed(LocalDateTime start, LocalDateTime end, String errorMessage) {
         LocalDateTime now = LocalDateTime.now();
 
-        LastExportTracker tracker = trackerRepository.findByExportType(DAILY_STATS_TYPE)
-                .orElse(LastExportTracker.builder()
-                        .exportType(DAILY_STATS_TYPE)
-                        .createdAt(now)
-                        .build());
+        // last_export_time is NOT NULL — если успешного export ещё не было, нечего обновлять,
+        // только логируем. Иначе обновляем статус/ошибку, сохраняя прежнее lastExportTime.
+        trackerRepository.findByExportType(DAILY_STATS_TYPE).ifPresent(tracker -> {
+            tracker.setStatus("FAILED");
+            tracker.setErrorMessage(String.format("Period %s - %s: %s", start, end, errorMessage));
+            tracker.setUpdatedAt(now);
+            trackerRepository.save(tracker);
+        });
 
-        tracker.setStatus("FAILED");
-        tracker.setErrorMessage(String.format("Period %s - %s: %s", start, end, errorMessage));
-        tracker.setUpdatedAt(now);
-
-        trackerRepository.save(tracker);
         log.error("Export failed for period {} - {}. Error: {}", start, end, errorMessage);
     }
 

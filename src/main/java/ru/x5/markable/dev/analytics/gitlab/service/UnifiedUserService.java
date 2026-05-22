@@ -3,7 +3,9 @@ package ru.x5.markable.dev.analytics.gitlab.service;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.UnifiedUser;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.UnifiedUserDto;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -83,11 +85,23 @@ public interface UnifiedUserService {
 
     /**
      * Получить всех пользователей с идентификатором Kaiten.
-     * 
+     *
      * <p>Возвращает список пользователей, у которых установлен
      * идентификатор в системе Kaiten.</p>
-     * 
+     *
      * @return список пользователей с идентификатором Kaiten
      */
     List<UnifiedUser> getAllUsersWithKaitenId();
+
+    /**
+     * Возвращает карту email → userId для всех указанных email,
+     * создавая отсутствующих пользователей одним batch-INSERT.
+     *
+     * <p>Заменяет N вызовов {@link #findOrCreateByEmail(String)} одним
+     * SELECT + одним INSERT для недостающих.</p>
+     *
+     * @param emails список email (любого регистра)
+     * @return карта нормализованный email → userId
+     */
+    Map<String, Long> findOrCreateAllByEmails(Collection<String> emails);
 }

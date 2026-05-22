@@ -92,12 +92,12 @@ public class UserProfileServiceImpl implements UserProfileService {
         LocalDate firstDate = userStats.get(0).getDate();
         LocalDate lastDate = userStats.get(userStats.size() - 1).getDate();
         long activeDays = activityByDay.values().stream().filter(v -> v != 0).count();
-        long totalDays = ChronoUnit.DAYS.between(firstDate, lastDate) + 1;
+        long totalDays = ChronoUnit.DAYS.between(periodStart, periodEnd) - 1;
         double avgCommitsPerDay = (double) aggregatedStats.totalCommits() / activeDays;
 
         String aiSummary = summaryGenerator.generateSummary(
                 email, aggregatedStats.totalCommits(), activeDays, totalDays,
-                firstDate, lastDate,
+                periodStart, periodEnd,
                 activityByDay, activityByHour,
                 inactivePeriods,
                 repositories,

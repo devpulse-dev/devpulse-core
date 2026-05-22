@@ -113,7 +113,7 @@ public interface DailyAuthorStatsRepository extends JpaRepository<DailyAuthorSta
 
     /**
      * Находит уникальные названия репозиториев по email автора и периоду.
-     * 
+     *
      * @param email email автора
      * @param start начальная дата периода (включительно)
      * @param end конечная дата периода (включительно)
@@ -125,4 +125,16 @@ public interface DailyAuthorStatsRepository extends JpaRepository<DailyAuthorSta
             @Param("start") LocalDate start,
             @Param("end") LocalDate end
     );
+
+    /**
+     * Возвращает существующие записи статистики для репозитория за период.
+     * Используется при batch-сохранении, чтобы определить какие записи обновить,
+     * а какие вставить — одним SELECT'ом вместо N findByEmailAndDateAndRepositoryName.
+     */
+    @Query("SELECT d FROM DailyAuthorStats d " +
+            "WHERE d.repositoryName = :repoName AND d.date BETWEEN :start AND :end")
+    List<DailyAuthorStats> findByRepoAndDateBetween(
+            @Param("repoName") String repoName,
+            @Param("start") LocalDate start,
+            @Param("end") LocalDate end);
 }

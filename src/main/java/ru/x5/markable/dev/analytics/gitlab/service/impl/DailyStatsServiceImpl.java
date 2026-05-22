@@ -13,7 +13,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import ru.x5.markable.dev.analytics.gitlab.config.GitProperties;
 import ru.x5.markable.dev.analytics.gitlab.model.CommitDetail;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.DailyAuthorStats;
@@ -73,10 +72,12 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     /**
      * Запускается каждый день в 01:00.
      * Собирает статистику с даты последней выгрузки до текущего момента.
+     *
+     * <p>Без @Transactional — каждый шаг (Git → save → Kaiten) сам управляет своей
+     * транзакцией. Иначе ошибка Kaiten в конце откатывала бы уже сохранённые git stats.</p>
      */
     @Override
     @Scheduled(cron = "0 0 1 * * ?")
-    @Transactional
     public void collectDailyStats() {
         log.info("Starting daily stats collection...");
 
@@ -98,40 +99,43 @@ public class DailyStatsServiceImpl implements DailyStatsService {
     /**
      * Собрать статистику за период с учетом времени.
      *
-     * @param start начало периода
-     * @param end конец периода
+     * <p>Не транзакционен по верху: каждый шаг (Git, save, Kaiten) пишет в БД самостоятельно.
+     * Ошибка Kaiten НЕ откатывает уже сохранённые git stats.</p>
      */
     @Override
-    @Transactional
     public void collectStatsForPeriod(LocalDateTime start, LocalDateTime end) {
         log.info("Starting collection for period: {} - {}", start, end);
 
         try {
-            // Собираем коммиты с привязкой к репозиториям
             Map<String, List<CommitDetail>> commitsByRepo = collectCommitDetailsWithRepo(start, end);
 
-            // Сохраняем статистику по каждому репозиторию отдельно
-            for (Map.Entry<String, List<CommitDetail>> entry : commitsByRepo.entrySet()) {
-                String repoName = entry.getKey();
-                List<CommitDetail> repoCommits = entry.getValue();
-
-                Map<LocalDate, Map<String, ru.x5.markable.dev.analytics.gitlab.model.AuthorAggregate>> dailyStats = 
-                        statsAggregator.groupCommitsByDay(repoCommits);
-
-                // Сохраняем для конкретного репозитория (нужно для профиля пользователя)
-                statsPersistenceHelper.saveDailyStatsForRepo(dailyStats, repoName);
-            }
+            // Сохранение daily stats параллельно по репозиториям
+            List<CompletableFuture<Void>> saveFutures = commitsByRepo.entrySet().stream()
+                    .map(entry -> CompletableFuture.runAsync(() -> {
+                        String repoName = entry.getKey();
+                        Map<LocalDate, Map<String, ru.x5.markable.dev.analytics.gitlab.model.AuthorAggregate>> dailyStats =
+                                statsAggregator.groupCommitsByDay(entry.getValue());
+                        statsPersistenceHelper.saveDailyStatsForRepo(dailyStats, repoName);
+                    }, analysisExecutor))
+                    .toList();
+            CompletableFuture.allOf(saveFutures.toArray(CompletableFuture[]::new)).join();
 
             exportTrackerService.markExportSuccess(end);
             log.info("Successfully collected stats from {} to {}", start, end);
-            log.info("Starting Kaiten cards collection after successful Git stats collection");
-
-            kaitenCardCollectorService.collectCardsForAllUsers(start);
-            log.info("Kaiten cards collection completed successfully");
 
         } catch (Exception e) {
             exportTrackerService.markExportFailed(start, end, e.getMessage());
             log.error("Failed to collect stats from {} to {}", start, end, e);
+            return;
+        }
+
+        // Kaiten — изолирован: его ошибка не должна валить уже сохранённую git-статистику
+        try {
+            log.info("Starting Kaiten cards collection after successful Git stats collection");
+            kaitenCardCollectorService.collectCardsForAllUsers(start);
+            log.info("Kaiten cards collection completed successfully");
+        } catch (Exception e) {
+            log.error("Kaiten cards collection failed (git stats are already saved): {}", e.getMessage());
         }
     }
 

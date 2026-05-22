@@ -1,5 +1,7 @@
 package ru.x5.markable.dev.analytics.gitlab.persistence.repository;
 
+import java.util.Collection;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.UnifiedUser;
@@ -49,9 +51,17 @@ public interface UnifiedUserRepository extends JpaRepository<UnifiedUser, Long> 
 
     /**
      * Проверяет существование пользователя с указанной электронной почтой.
-     * 
+     *
      * @param email электронная почта пользователя
      * @return true если пользователь существует, false в противном случае
      */
     boolean existsByEmail(String email);
+
+    /**
+     * Находит всех пользователей по списку email (одним SELECT).
+     *
+     * @param emails список email
+     * @return найденные пользователи
+     */
+    List<UnifiedUser> findByEmailIn(Collection<String> emails);
 }

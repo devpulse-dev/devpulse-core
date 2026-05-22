@@ -16,8 +16,14 @@ import ru.x5.markable.dev.analytics.kaiten.persistence.entity.KaitenUser;
 import ru.x5.markable.dev.analytics.kaiten.service.KaitenUserSyncService;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -141,12 +147,72 @@ public class UnifiedUserServiceImpl implements UnifiedUserService {
 
     /**
      * Получает всех пользователей.
-     * 
+     *
      * @return список всех пользователей
      */
     @Override
     public List<UnifiedUser> getAllUsers() {
         return unifiedUserRepository.findAll();
+    }
+
+    /**
+     * Batch find-or-create по списку email: один SELECT + один batch INSERT для недостающих.
+     * Возвращает карту нормализованный email → userId.
+     */
+    @Override
+    @Transactional
+    public Map<String, Long> findOrCreateAllByEmails(Collection<String> emails) {
+        if (emails == null || emails.isEmpty()) {
+            return Map.of();
+        }
+
+        Set<String> normalized = new HashSet<>();
+        for (String e : emails) {
+            if (e != null && !e.isBlank()) {
+                normalized.add(e.toLowerCase());
+            }
+        }
+        if (normalized.isEmpty()) return Map.of();
+
+        Map<String, Long> result = new HashMap<>(normalized.size());
+
+        // 1 SELECT для всех существующих
+        List<UnifiedUser> existing = unifiedUserRepository.findByEmailIn(normalized);
+        for (UnifiedUser u : existing) {
+            result.put(u.getEmail(), u.getId());
+        }
+
+        // Создаём недостающих одним batch-INSERT
+        List<UnifiedUser> toCreate = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+        for (String email : normalized) {
+            if (!result.containsKey(email)) {
+                toCreate.add(UnifiedUser.builder()
+                        .email(email)
+                        .username(extractUsername(email))
+                        .createdAt(now)
+                        .updatedAt(now)
+                        .build());
+            }
+        }
+
+        if (!toCreate.isEmpty()) {
+            try {
+                List<UnifiedUser> saved = unifiedUserRepository.saveAll(toCreate);
+                for (UnifiedUser u : saved) {
+                    result.put(u.getEmail(), u.getId());
+                }
+            } catch (DataIntegrityViolationException e) {
+                // Конкурирующее создание — перечитаем недостающих
+                log.debug("Concurrent insert detected, refetching missing users");
+                Set<String> stillMissing = new HashSet<>(normalized);
+                stillMissing.removeAll(result.keySet());
+                unifiedUserRepository.findByEmailIn(stillMissing)
+                        .forEach(u -> result.put(u.getEmail(), u.getId()));
+            }
+        }
+
+        return result;
     }
 
     /**
