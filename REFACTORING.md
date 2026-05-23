@@ -120,21 +120,21 @@ markable-dev-analytics/
 | 2 | **Domain + application ports** | Value objects (Email, Period, hashes, ids), entities, domain services + unit-тесты, in-ports и out-ports | ✅ |
 | 3 | **adapter-persistence** | JPA entities на существующие таблицы, миграция 015 (collection_run), MapStruct entity↔domain, Spring Data репозитории, реализации out-портов, Testcontainers тесты | ✅ |
 | 4 | **adapter-git + adapter-kaiten** | GitProperties+CliClient+LogParser+GatewayAdapter (StructuredTaskScope), KaitenProperties+DTO+HttpClient (`@HttpExchange`)+RateLimiter+GatewayAdapter (streaming), unit-тесты | ✅ |
-| 5 | **Use cases команды (write side)** | `CollectDailyStatsService`, `SyncKaitenUsersService`, wiring в bootstrap, Mockito-тесты | 🟡 |
-| 6 | **Use cases запросов + adapter-rest** | Реализация query-use cases (Profile, Weekly, Summary, DailyStats, UserCommits), REST-контроллеры api/v2, DTO, RFC 7807, e2e тесты | ⬜ |
-| 7 | **Финал** | Удаление `.old-src/`, smoke-тест в bootstrap, проверка миграции данных (если нужно), документация эндпоинтов | ⬜ |
+| 5 | **Use cases команды (write side)** | `CollectDailyStatsService`, `SyncKaitenUsersService`, wiring в bootstrap, Mockito-тесты | ✅ |
+| 6 | **Use cases запросов + adapter-rest** | Реализация query-use cases (Profile, Weekly, Summary, DailyStats, UserCommits, CollectionRun), `StatsSummarizer` в domain, REST-контроллеры api/v2 (Collection/Stats/Users/Kaiten), DTO с `from(domain)`, RFC 7807 через `ProblemDetail`, MockMvc-тесты | ✅ |
+| 7 | **Финал** | Удаление `.old-src/`, smoke-тест в bootstrap, документация эндпоинтов | 🟡 |
 
-### Где мы сейчас (Сессия 5)
+### Где мы сейчас (Сессия 6 — query + REST)
 
 Сделано:
-- ✅ `application/service/SyncKaitenUsersService` — реализация `SyncKaitenUsersUseCase`.
-- ✅ `application/service/CollectDailyStatsService` — оркестрация Git → CommitRepo + DailyStats → (изолированно) Kaiten → KaitenCardRepo, журналируется в `CollectionRun`.
-- ✅ Добавлен `DailyAuthorStats.withUserId(Long)` — convenience для прокидывания userId после агрегации.
-- ✅ В `application/pom.xml` добавлен `slf4j-api` (use case-ы логируют через SLF4J — реализацию подцепит bootstrap).
-
-В работе:
-- 🟡 Mockito-тесты для `CollectDailyStatsService` и `SyncKaitenUsersService`.
-- 🟡 `bootstrap/.../config/UseCaseConfig.java` — `@Configuration`, который собирает use case-ы из портов.
+- ✅ `domain/service/StatsSummarizer` — pure-агрегация `DailyAuthorStats → PeriodSummary` и `→ List<WeeklyStats>` (ISO weeks).
+- ✅ 5 query use cases в `application/service/`: `GetDailyStatsService`, `GetWeeklyStatsService`, `GetPeriodSummaryService`, `GetUserCommitsService`, `GetUserProfileService` + `GetCollectionRunService` (для polling статуса прогона).
+- ✅ Все use cases зарегистрированы как `@Bean` в `UseCaseConfig`.
+- ✅ Unit-тесты: `StatsSummarizerTest` (domain) + `QueryUseCasesTest` (application, все 5 use case-ов с Mockito).
+- ✅ DTO в `adapter-rest/dto/` — все records со статическим `from(domain)`.
+- ✅ 4 REST-контроллера: `CollectionController` (POST/GET runs), `StatsController` (daily/weekly/summary), `UsersController` (profile/commits + pagination), `KaitenController` (sync-users).
+- ✅ `ApiExceptionHandler` — RFC 7807 через `ProblemDetail`, обрабатывает 400 (malformed/illegal input) и 500.
+- ✅ MockMvc-тесты на каждый контроллер.
 
 ---
 
