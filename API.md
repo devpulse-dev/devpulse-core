@@ -11,12 +11,14 @@
 - [Управление сбором](#управление-сбором)
   - `POST /api/v2/collection/runs` — запустить сбор
   - `GET  /api/v2/collection/runs/{id}` — статус прогона
+- [Дашборд](#дашборд)
+  - `GET /api/v2/dashboard` — топ-N активных + N аутсайдеров
 - [Статистика](#статистика)
   - `GET /api/v2/stats/daily` — дневные агрегаты
   - `GET /api/v2/stats/weekly` — недельная статистика (ISO-недели)
   - `GET /api/v2/stats/summary` — сводка за период
 - [Пользователи](#пользователи)
-  - `GET /api/v2/users/{email}/profile` — профиль с агрегацией
+  - `GET /api/v2/users/{email}/profile` — профиль с агрегацией и live-карточками Kaiten
   - `GET /api/v2/users/{email}/commits` — коммиты с пагинацией
 - [Kaiten](#kaiten)
   - `POST /api/v2/kaiten/sync-users` — принудительная синхронизация пользователей
@@ -28,7 +30,7 @@
 
 ### `POST /api/v2/collection/runs`
 
-Запускает полный цикл сбора: git → daily stats → (изолированно) Kaiten cards. **Синхронный** — отдаёт уже финальный результат (`SUCCESS` или `FAILED`).
+Запускает полный цикл сбора: git → daily stats → (изолированно) sync Kaiten users (обновление `kaitenId`/`avatarUrl` в `unified_user`). **Карточки Kaiten НЕ выкачиваются** — они тянутся live при открытии профиля. **Синхронный** — отдаёт уже финальный результат (`SUCCESS` или `FAILED`).
 
 **Тело (опционально):**
 ```json
@@ -58,6 +60,35 @@
 **Ответ 200:** тот же формат, что у `POST /collection/runs`.
 
 **Ответ 404:** если прогона с таким `id` нет.
+
+---
+
+## Дашборд
+
+### `GET /api/v2/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD&topN=10&outsiderN=10`
+
+Главный борд: топ-N самых активных + N «аутсайдеров» (наименее активные из тех, у кого хотя бы 1 коммит) за период.
+
+**Параметры:**
+- `from`, `to` — опциональны. Если опущены, бэк подставляет **последние 30 дней** (`today-30..today`).
+- `topN` — сколько активных вернуть, default `10`.
+- `outsiderN` — сколько аутсайдеров вернуть, default `10`.
+
+**Ответ 200:**
+```json
+{
+  "from": "2026-04-23",
+  "to":   "2026-05-23",
+  "topActive": [
+    { "email": "boris@x5.ru", "commits": 47, "mergeCommits": 3, "addedLines": 1820, "deletedLines": 850, "testAddedLines": 320 }
+  ],
+  "outsiders": [
+    { "email": "junior@x5.ru", "commits": 2, "mergeCommits": 0, "addedLines": 18, "deletedLines": 5, "testAddedLines": 0 }
+  ]
+}
+```
+
+> Если активных авторов меньше чем `topN + outsiderN`, списки могут пересекаться — это намеренно: «верх» и «низ» одного маленького списка.
 
 ---
 
@@ -136,7 +167,9 @@
 
 ### `GET /api/v2/users/{email}/profile?from=YYYY-MM-DD&to=YYYY-MM-DD`
 
-Профиль пользователя за период: запись в `unified_user`, агрегированный `summary` из daily stats, первые 500 коммитов и карточки Kaiten (если у пользователя есть `kaiten_id`).
+Профиль пользователя за период: запись в `unified_user`, агрегированный `summary` из daily stats, первые 500 коммитов и **карточки Kaiten live** (если у пользователя есть `kaiten_id`).
+
+> **Карточки Kaiten тянутся напрямую из Kaiten API при каждом запросе** — не из локальной БД. Фильтр: карточки, обновлённые после `from`. Используется в основном кейсе «открыть профиль с дашборда», поэтому `from`/`to` тоже **опциональны** — без них берётся последние 30 дней.
 
 **Ответ 200:**
 ```json

@@ -32,9 +32,11 @@ public class UsersController {
     @GetMapping("/{email}/profile")
     public ResponseEntity<UserProfileResponse> profile(
             @PathVariable String email,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return getUserProfile.findProfile(new Email(email), new Period(from, to))
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        // Дефолт: последние 30 дней — основной кейс «открыть профиль с главного борда».
+        Period period = DashboardController.resolvePeriod(from, to);
+        return getUserProfile.findProfile(new Email(email), period)
                 .map(UserProfileResponse::from)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());

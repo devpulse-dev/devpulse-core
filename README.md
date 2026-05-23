@@ -1,5 +1,7 @@
 # Markable Dev Analytics
 
+[![CI](https://github.com/dev-Markable/markable-dev-analytics-core/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-Markable/markable-dev-analytics-core/actions/workflows/ci.yml)
+
 Сервис аналитики активности разработчиков: собирает коммиты из Git-репозиториев и карточки задач из Kaiten, агрегирует ежедневную статистику по авторам и отдаёт её через REST API для фронта.
 
 > **Документы:**
@@ -123,15 +125,31 @@ mvn -pl bootstrap spring-boot:run
 
 ## Тесты
 
-| Тип | Где | Запускается |
-|---|---|---|
-| Unit (domain) | `domain/src/test/` | каждый коммит |
-| Unit (use cases с Mockito) | `application/src/test/` | каждый коммит |
-| Unit (адаптеры — парсеры, rate-limiter) | `adapter-*/src/test/` | каждый коммит |
-| Integration (Testcontainers + Postgres) | `adapter-persistence/src/test/` | `mvn verify` |
-| ArchUnit (правила гексагона) | `bootstrap/src/test/` | каждый коммит |
+| Тип | Где | Фаза Maven | Конвенция имени |
+|---|---|---|---|
+| Unit (domain) | `domain/src/test/` | `test` (Surefire) | `*Test` |
+| Unit (use cases с Mockito) | `application/src/test/` | `test` (Surefire) | `*Test` |
+| Unit (адаптеры — парсеры, rate-limiter) | `adapter-*/src/test/` | `test` (Surefire) | `*Test` |
+| MockMvc (REST slice) | `adapter-rest/src/test/` | `test` (Surefire) | `*Test` |
+| ArchUnit (правила гексагона) | `bootstrap/src/test/` | `test` (Surefire) | `*Test` |
+| Integration (Testcontainers + Postgres) | `adapter-persistence/src/test/` | `verify` (Failsafe) | `*IT` |
+| Smoke (полный Spring-контекст) | `bootstrap/src/test/` | `verify` (Failsafe) | `*IT` |
 
 Стиль: русский `@DisplayName`, `assertAll` для множественных проверок, параметризация через `@ParameterizedTest` где имеет смысл.
+
+## CI / CD
+
+GitHub Actions workflow в [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) на каждый push в `main`/`master` и pull request:
+
+| Джоба | Что делает | Время |
+|---|---|---|
+| `Compile` | `mvn package -DskipTests` — быстрый smoke на компиляцию | ~2 мин |
+| `Unit tests` | `mvn test` — Surefire по всем модулям, без Docker | ~3–4 мин |
+| `Integration tests` | `mvn verify -Dsurefire.skip=true` — Failsafe (`*IT`), поднимает Postgres-контейнеры | ~5–7 мин |
+
+Unit и integration джобы запускаются **параллельно** после успешного compile. При падении автоматически прикрепляются артефакты с surefire/failsafe-отчётами.
+
+Concurrency-группа отменяет старый прогон при пуше нового коммита в ту же ветку.
 
 ---
 

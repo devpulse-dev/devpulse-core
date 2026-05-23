@@ -147,6 +147,18 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+
+        <!--
+            Активируем Failsafe для всех модулей: классы *IT (Testcontainers integration)
+            запускаются на фазе `mvn verify`. Surefire (`mvn test`) их не трогает —
+            это удобно для CI-разделения «быстрых unit» и «медленных integration» джоб.
+        -->
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+            </plugin>
+        </plugins>
     </build>
 
 </project>

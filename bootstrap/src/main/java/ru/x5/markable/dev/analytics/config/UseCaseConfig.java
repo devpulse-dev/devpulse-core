@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import ru.x5.markable.dev.analytics.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetCollectionRunUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetDailyStatsUseCase;
+import ru.x5.markable.dev.analytics.application.port.in.GetDashboardUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetUserCommitsUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetUserProfileUseCase;
@@ -14,13 +15,13 @@ import ru.x5.markable.dev.analytics.application.port.out.CollectionRunRepository
 import ru.x5.markable.dev.analytics.application.port.out.CommitRepository;
 import ru.x5.markable.dev.analytics.application.port.out.DailyStatsRepository;
 import ru.x5.markable.dev.analytics.application.port.out.GitGateway;
-import ru.x5.markable.dev.analytics.application.port.out.KaitenCardRepository;
 import ru.x5.markable.dev.analytics.application.port.out.KaitenGateway;
 import ru.x5.markable.dev.analytics.application.port.out.KaitenUserRepository;
 import ru.x5.markable.dev.analytics.application.port.out.UnifiedUserRepository;
 import ru.x5.markable.dev.analytics.application.service.CollectDailyStatsService;
 import ru.x5.markable.dev.analytics.application.service.GetCollectionRunService;
 import ru.x5.markable.dev.analytics.application.service.GetDailyStatsService;
+import ru.x5.markable.dev.analytics.application.service.GetDashboardService;
 import ru.x5.markable.dev.analytics.application.service.GetPeriodSummaryService;
 import ru.x5.markable.dev.analytics.application.service.GetUserCommitsService;
 import ru.x5.markable.dev.analytics.application.service.GetUserProfileService;
@@ -48,12 +49,12 @@ public class UseCaseConfig {
             KaitenGateway kaitenGateway,
             CommitRepository commitRepository,
             DailyStatsRepository dailyStatsRepository,
-            KaitenCardRepository kaitenCardRepository,
+            KaitenUserRepository kaitenUserRepository,
             UnifiedUserRepository unifiedUserRepository,
             CollectionRunRepository collectionRunRepository) {
         return new CollectDailyStatsService(
                 gitGateway, kaitenGateway,
-                commitRepository, dailyStatsRepository, kaitenCardRepository,
+                commitRepository, dailyStatsRepository, kaitenUserRepository,
                 unifiedUserRepository, collectionRunRepository);
     }
 
@@ -96,8 +97,13 @@ public class UseCaseConfig {
             UnifiedUserRepository unifiedUserRepository,
             DailyStatsRepository dailyStatsRepository,
             CommitRepository commitRepository,
-            KaitenCardRepository kaitenCardRepository) {
+            KaitenGateway kaitenGateway) {
         return new GetUserProfileService(
-                unifiedUserRepository, dailyStatsRepository, commitRepository, kaitenCardRepository);
+                unifiedUserRepository, dailyStatsRepository, commitRepository, kaitenGateway);
+    }
+
+    @Bean
+    GetDashboardUseCase getDashboardUseCase(DailyStatsRepository dailyStatsRepository) {
+        return new GetDashboardService(dailyStatsRepository);
     }
 }

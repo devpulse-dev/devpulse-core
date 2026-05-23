@@ -6,7 +6,7 @@ import lombok.RequiredArgsConstructor;
 import ru.x5.markable.dev.analytics.application.port.in.GetUserProfileUseCase;
 import ru.x5.markable.dev.analytics.application.port.out.CommitRepository;
 import ru.x5.markable.dev.analytics.application.port.out.DailyStatsRepository;
-import ru.x5.markable.dev.analytics.application.port.out.KaitenCardRepository;
+import ru.x5.markable.dev.analytics.application.port.out.KaitenGateway;
 import ru.x5.markable.dev.analytics.application.port.out.UnifiedUserRepository;
 import ru.x5.markable.dev.analytics.domain.common.PageRequest;
 import ru.x5.markable.dev.analytics.domain.common.Period;
@@ -19,8 +19,11 @@ import ru.x5.markable.dev.analytics.domain.model.user.UnifiedUser;
 
 /**
  * Профиль пользователя: {@link UnifiedUser} + агрегированная {@link AuthorSummary}
- * за период + список коммитов (первая страница, {@value #PROFILE_PAGE_SIZE}) + карточки Kaiten,
- * где автор — участник (если у пользователя есть {@code kaiten_id}).
+ * за период + список коммитов (первая страница, {@value #PROFILE_PAGE_SIZE}) + карточки Kaiten.
+ *
+ * <p><b>Карточки Kaiten тянутся live</b> через {@link KaitenGateway}, а не из локальной БД.
+ * Это намеренно: массовый сбор карточек выключен (бюджет Kaiten-API тратится только когда
+ * фронт реально открывает профиль). Фильтр — карточки, обновлённые после {@code period.from}.</p>
  *
  * <p>Если пользователя нет в {@code unified_user} — возвращает {@link Optional#empty()}.</p>
  */
@@ -32,7 +35,7 @@ public final class GetUserProfileService implements GetUserProfileUseCase {
     private final UnifiedUserRepository unifiedUserRepository;
     private final DailyStatsRepository dailyStatsRepository;
     private final CommitRepository commitRepository;
-    private final KaitenCardRepository kaitenCardRepository;
+    private final KaitenGateway kaitenGateway;
 
     @Override
     public Optional<Profile> findProfile(Email email, Period period) {
@@ -47,8 +50,9 @@ public final class GetUserProfileService implements GetUserProfileUseCase {
 
         List<Commit> commits = commitRepository.findByAuthor(email, period, new PageRequest(0, PROFILE_PAGE_SIZE));
 
+        // Карточки — live из Kaiten API. Только если у пользователя есть kaiten_id.
         List<KaitenCard> cards = user.kaiten()
-                .map(kid -> kaitenCardRepository.findByMemberAndPeriod(kid, period))
+                .map(kid -> kaitenGateway.fetchCardsForMember(kid, period.fromAtStartOfDay()))
                 .orElseGet(List::of);
 
         return Optional.of(new Profile(user, summary, commits, cards));

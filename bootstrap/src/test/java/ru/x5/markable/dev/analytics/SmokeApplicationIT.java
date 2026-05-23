@@ -16,6 +16,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.x5.markable.dev.analytics.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetCollectionRunUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetDailyStatsUseCase;
+import ru.x5.markable.dev.analytics.application.port.in.GetDashboardUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetUserCommitsUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetUserProfileUseCase;
@@ -40,7 +41,7 @@ import ru.x5.markable.dev.analytics.application.port.out.UnifiedUserRepository;
 @SpringBootTest(classes = Application.class)
 @Testcontainers
 @DisplayName("Smoke: Spring-контекст поднимается, граф полный")
-class SmokeApplicationTest {
+class SmokeApplicationIT {
 
     @Container
     @SuppressWarnings("resource")
@@ -72,6 +73,7 @@ class SmokeApplicationTest {
     @Autowired GetUserProfileUseCase getUserProfile;
     @Autowired GetUserCommitsUseCase getUserCommits;
     @Autowired GetCollectionRunUseCase getCollectionRun;
+    @Autowired GetDashboardUseCase getDashboard;
     // out-ports
     @Autowired GitGateway gitGateway;
     @Autowired KaitenGateway kaitenGateway;
@@ -97,6 +99,7 @@ class SmokeApplicationTest {
                 () -> assertThat(getUserProfile).as("GetUserProfile").isNotNull(),
                 () -> assertThat(getUserCommits).as("GetUserCommits").isNotNull(),
                 () -> assertThat(getCollectionRun).as("GetCollectionRun").isNotNull(),
+                () -> assertThat(getDashboard).as("GetDashboard").isNotNull(),
                 // out-ports
                 () -> assertThat(gitGateway).as("GitGateway").isNotNull(),
                 () -> assertThat(kaitenGateway).as("KaitenGateway").isNotNull(),

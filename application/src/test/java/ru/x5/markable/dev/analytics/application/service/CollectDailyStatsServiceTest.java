@@ -30,8 +30,8 @@ import ru.x5.markable.dev.analytics.application.port.out.CollectionRunRepository
 import ru.x5.markable.dev.analytics.application.port.out.CommitRepository;
 import ru.x5.markable.dev.analytics.application.port.out.DailyStatsRepository;
 import ru.x5.markable.dev.analytics.application.port.out.GitGateway;
-import ru.x5.markable.dev.analytics.application.port.out.KaitenCardRepository;
 import ru.x5.markable.dev.analytics.application.port.out.KaitenGateway;
+import ru.x5.markable.dev.analytics.application.port.out.KaitenUserRepository;
 import ru.x5.markable.dev.analytics.application.port.out.UnifiedUserRepository;
 import ru.x5.markable.dev.analytics.domain.common.TaskNumber;
 import ru.x5.markable.dev.analytics.domain.model.collection.CollectionRun;
@@ -39,14 +39,13 @@ import ru.x5.markable.dev.analytics.domain.model.collection.CollectionStatus;
 import ru.x5.markable.dev.analytics.domain.model.git.Commit;
 import ru.x5.markable.dev.analytics.domain.model.git.CommitHash;
 import ru.x5.markable.dev.analytics.domain.model.git.RepoName;
-import ru.x5.markable.dev.analytics.domain.model.kaiten.KaitenCard;
+import ru.x5.markable.dev.analytics.domain.model.kaiten.KaitenUser;
 import ru.x5.markable.dev.analytics.domain.model.stats.DailyAuthorStats;
 import ru.x5.markable.dev.analytics.domain.model.user.Email;
 import ru.x5.markable.dev.analytics.domain.model.user.KaitenUserId;
-import ru.x5.markable.dev.analytics.domain.model.user.UnifiedUser;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("CollectDailyStatsService (оркестрация Git + Kaiten + журнал прогона)")
+@DisplayName("CollectDailyStatsService (git + sync пользователей Kaiten, без карточек)")
 class CollectDailyStatsServiceTest {
 
     private static final RepoName REPO = new RepoName("xrg-core");
@@ -59,16 +58,16 @@ class CollectDailyStatsServiceTest {
     @Mock private KaitenGateway kaitenGateway;
     @Mock private CommitRepository commitRepository;
     @Mock private DailyStatsRepository dailyStatsRepository;
-    @Mock private KaitenCardRepository kaitenCardRepository;
+    @Mock private KaitenUserRepository kaitenUserRepository;
     @Mock private UnifiedUserRepository unifiedUserRepository;
     @Mock private CollectionRunRepository collectionRunRepository;
 
     @InjectMocks private CollectDailyStatsService service;
 
     @Test
-    @DisplayName("Happy path: git → commits + daily stats → kaiten cards, прогон фиксируется как SUCCESS")
-    void happyPathSavesAllAndMarksSuccess() {
-        // git: один репо, batch из 2 коммитов (один новый, один уже в БД)
+    @DisplayName("Happy path: git stats + sync kaiten users + связывание unified_user, прогон SUCCESS")
+    void happyPathSavesAllAndSyncsKaitenUsers() {
+        // git: один репо, batch из 2 коммитов (один новый, один дубликат)
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
         when(gitGateway.prepare(REPO)).thenReturn(REPO);
         stubStreamCommits(List.of(commit(SHA_NEW), commit(SHA_DUP)));
@@ -78,9 +77,11 @@ class CollectDailyStatsServiceTest {
         when(unifiedUserRepository.findOrCreateAll(anyCollection()))
                 .thenReturn(Map.of(AUTHOR, 42L));
 
-        // kaiten: один пользователь с kaiten_id → одна страница из одной карточки
-        when(unifiedUserRepository.findAll()).thenReturn(List.of(userWithKaiten(42L, 7L)));
-        stubStreamCards(List.of(card(100L)));
+        // kaiten: возвращаем двух пользователей — один с email (привязка), один без
+        when(kaitenGateway.fetchAllUsers()).thenReturn(List.of(
+                kaitenUser(7L, AUTHOR, "Boris"),
+                kaitenUser(8L, null, "Service Account")
+        ));
 
         CollectionRun result = service.run(SINCE);
 
@@ -98,28 +99,20 @@ class CollectDailyStatsServiceTest {
         assertAll("happy path",
                 () -> assertThat(result.status())
                         .as("итоговый статус").isEqualTo(CollectionStatus.SUCCESS),
-                () -> assertThat(runs.getAllValues().get(0).status())
-                        .as("первая запись — RUNNING").isEqualTo(CollectionStatus.RUNNING),
-                () -> assertThat(runs.getAllValues().get(1).status())
-                        .as("вторая — SUCCESS").isEqualTo(CollectionStatus.SUCCESS),
+                () -> assertThat(runs.getAllValues().get(0).status()).isEqualTo(CollectionStatus.RUNNING),
+                () -> assertThat(runs.getAllValues().get(1).status()).isEqualTo(CollectionStatus.SUCCESS),
                 () -> assertThat(savedCommits.getValue())
-                        .as("дубликат отфильтрован, сохраняется только новый коммит")
                         .extracting(c -> c.hash().value())
                         .containsExactly(SHA_NEW),
-                () -> assertThat(savedStats.getValue())
-                        .as("daily stat по одному ключу (email,date,repo) с проставленным userId")
-                        .hasSize(1)
-                        .first()
-                        .satisfies(s -> {
-                            assertThat(s.userId()).isEqualTo(42L);
-                            assertThat(s.repo()).isEqualTo(REPO);
-                            assertThat(s.authorEmail()).isEqualTo(AUTHOR);
-                        }),
-                () -> verify(kaitenCardRepository).upsertAll(anyCollection()));
+                () -> assertThat(savedStats.getValue()).hasSize(1),
+                () -> verify(kaitenUserRepository).upsertAll(anyCollection()),
+                // Привязка идёт только для kaiten-юзера с email
+                () -> verify(unifiedUserRepository).updateKaitenId(
+                        eq(AUTHOR), eq(new KaitenUserId(7L)), eq("Boris"), any()));
     }
 
     @Test
-    @DisplayName("Падение git ⇒ FAILED, Kaiten НЕ дёргается")
+    @DisplayName("Падение git ⇒ FAILED, Kaiten users НЕ синхронизируются")
     void gitFailureMarksFailedAndSkipsKaiten() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
         when(gitGateway.prepare(REPO)).thenReturn(REPO);
@@ -131,7 +124,7 @@ class CollectDailyStatsServiceTest {
         assertAll("git упал",
                 () -> assertThat(result.status()).isEqualTo(CollectionStatus.FAILED),
                 () -> assertThat(result.error()).hasValue("boom"),
-                () -> verify(kaitenGateway, never()).streamCards(any(), any(), any()),
+                () -> verify(kaitenGateway, never()).fetchAllUsers(),
                 () -> verify(collectionRunRepository, times(2)).save(any()));
     }
 
@@ -145,19 +138,29 @@ class CollectDailyStatsServiceTest {
         when(unifiedUserRepository.findOrCreateAll(anyCollection()))
                 .thenReturn(Map.of(AUTHOR, 1L));
 
-        when(unifiedUserRepository.findAll()).thenReturn(List.of(userWithKaiten(1L, 9L)));
-        doThrow(new RuntimeException("kaiten 429"))
-                .when(kaitenGateway).streamCards(any(), any(), any());
+        when(kaitenGateway.fetchAllUsers()).thenThrow(new RuntimeException("kaiten 429"));
 
         CollectionRun result = service.run(SINCE);
 
         assertAll("kaiten упал, git ок",
-                () -> assertThat(result.status())
-                        .as("прогон всё равно SUCCESS — Kaiten изолирован")
-                        .isEqualTo(CollectionStatus.SUCCESS),
+                () -> assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS),
                 () -> verify(commitRepository).saveAll(anyCollection()),
                 () -> verify(dailyStatsRepository).upsertAll(anyCollection()),
-                () -> verify(kaitenCardRepository, never()).upsertAll(anyCollection()));
+                () -> verify(kaitenUserRepository, never()).upsertAll(anyCollection()));
+    }
+
+    @Test
+    @DisplayName("Kaiten вернул пустой список — НЕ зовём upsertAll и updateKaitenId")
+    void emptyKaitenResponseSkipsLink() {
+        when(gitGateway.configuredRepos()).thenReturn(List.of());
+        when(kaitenGateway.fetchAllUsers()).thenReturn(List.of());
+
+        CollectionRun result = service.run(SINCE);
+
+        assertAll("пустой Kaiten",
+                () -> assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS),
+                () -> verify(kaitenUserRepository, never()).upsertAll(anyCollection()),
+                () -> verify(unifiedUserRepository, never()).updateKaitenId(any(), any(), any(), any()));
     }
 
     @Test
@@ -166,7 +169,7 @@ class CollectDailyStatsServiceTest {
         LocalDateTime lastUntil = LocalDateTime.of(2026, 5, 20, 10, 0);
         when(collectionRunRepository.findLastSuccessfulUntil()).thenReturn(Optional.of(lastUntil));
         when(gitGateway.configuredRepos()).thenReturn(List.of());
-        when(unifiedUserRepository.findAll()).thenReturn(List.of());
+        when(kaitenGateway.fetchAllUsers()).thenReturn(List.of());
 
         service.run(null);
 
@@ -174,21 +177,7 @@ class CollectDailyStatsServiceTest {
         verify(collectionRunRepository, atLeastOnce()).save(runs.capture());
 
         assertThat(runs.getAllValues().get(0).sinceDate())
-                .as("стартовали ровно с lastUntil + 1 сек")
                 .isEqualTo(lastUntil.plusSeconds(1));
-    }
-
-    @Test
-    @DisplayName("Нет пользователей с kaiten_id ⇒ карточки не зовём, но прогон SUCCESS")
-    void skipsKaitenWhenNoMemberIds() {
-        when(gitGateway.configuredRepos()).thenReturn(List.of());
-        when(unifiedUserRepository.findAll()).thenReturn(List.of(userWithoutKaiten(1L)));
-
-        CollectionRun result = service.run(SINCE);
-
-        assertAll("kaiten пропущен по отсутствию member ids",
-                () -> assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS),
-                () -> verify(kaitenGateway, never()).streamCards(any(), any(), any()));
     }
 
     /* ------------ helpers ------------ */
@@ -200,15 +189,6 @@ class CollectDailyStatsServiceTest {
             handler.accept(batch);
             return null;
         }).when(gitGateway).streamCommits(eq(REPO), any(), any(), any());
-    }
-
-    private void stubStreamCards(List<KaitenCard> page) {
-        doAnswer(inv -> {
-            @SuppressWarnings("unchecked")
-            Consumer<List<KaitenCard>> handler = inv.getArgument(2);
-            handler.accept(page);
-            return null;
-        }).when(kaitenGateway).streamCards(any(), any(), any());
     }
 
     private static Commit commit(String hash) {
@@ -223,27 +203,7 @@ class CollectDailyStatsServiceTest {
                 REPO);
     }
 
-    private static UnifiedUser userWithKaiten(long id, long kaitenId) {
-        LocalDateTime now = LocalDateTime.now();
-        return new UnifiedUser(id, AUTHOR, "boris", "Boris", null,
-                new KaitenUserId(kaitenId), null, now, now, now);
-    }
-
-    private static UnifiedUser userWithoutKaiten(long id) {
-        LocalDateTime now = LocalDateTime.now();
-        return new UnifiedUser(id, AUTHOR, "boris", "Boris", null,
-                null, null, now, now, now);
-    }
-
-    private static KaitenCard card(long id) {
-        return new KaitenCard(
-                new ru.x5.markable.dev.analytics.domain.model.kaiten.KaitenCardId(id),
-                "title " + id, "desc", "active",
-                "Backlog", "Board", "Space",
-                null, null,
-                LocalDateTime.now(), LocalDateTime.now(), null,
-                false,
-                "https://kaiten.x5.ru/" + id,
-                List.of());
+    private static KaitenUser kaitenUser(long id, Email email, String fullName) {
+        return new KaitenUser(new KaitenUserId(id), email, "user" + id, fullName, "https://avatar/" + id, LocalDateTime.now());
     }
 }

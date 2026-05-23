@@ -24,4 +24,12 @@ public interface KaitenGateway {
     void streamCards(List<KaitenUserId> memberFilter,
                      LocalDateTime updatedAfter,
                      Consumer<List<KaitenCard>> pageHandler);
+
+    /**
+     * Live-fetch карточек одного участника, обновлённых после {@code updatedAfter}.
+     *
+     * <p>В отличие от {@link #streamCards}, собирает все страницы в список и возвращает целиком.
+     * Используется query-сценариями (например профиль пользователя), где нужен синхронный ответ.</p>
+     */
+    List<KaitenCard> fetchCardsForMember(KaitenUserId memberId, LocalDateTime updatedAfter);
 }

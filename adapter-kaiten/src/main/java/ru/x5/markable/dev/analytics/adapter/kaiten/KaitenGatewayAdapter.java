@@ -85,4 +85,11 @@ class KaitenGatewayAdapter implements KaitenGateway {
         }
         log.info("Стримили {} карточек Kaiten", total);
     }
+
+    @Override
+    public List<KaitenCard> fetchCardsForMember(KaitenUserId memberId, LocalDateTime updatedAfter) {
+        List<KaitenCard> accumulator = new ArrayList<>();
+        streamCards(List.of(memberId), updatedAfter, accumulator::addAll);
+        return accumulator;
+    }
 }

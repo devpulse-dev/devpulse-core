@@ -22,7 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ru.x5.markable.dev.analytics.application.port.in.GetUserProfileUseCase;
 import ru.x5.markable.dev.analytics.application.port.out.CommitRepository;
 import ru.x5.markable.dev.analytics.application.port.out.DailyStatsRepository;
-import ru.x5.markable.dev.analytics.application.port.out.KaitenCardRepository;
+import ru.x5.markable.dev.analytics.application.port.out.KaitenGateway;
 import ru.x5.markable.dev.analytics.application.port.out.UnifiedUserRepository;
 import ru.x5.markable.dev.analytics.domain.common.PageRequest;
 import ru.x5.markable.dev.analytics.domain.common.Period;
@@ -43,7 +43,7 @@ class QueryUseCasesTest {
     @Mock DailyStatsRepository dailyStatsRepository;
     @Mock CommitRepository commitRepository;
     @Mock UnifiedUserRepository unifiedUserRepository;
-    @Mock KaitenCardRepository kaitenCardRepository;
+    @Mock KaitenGateway kaitenGateway;
 
     @Nested
     @DisplayName("GetDailyStatsService")
@@ -122,11 +122,11 @@ class QueryUseCasesTest {
                     () -> assertThat(result).isEmpty(),
                     () -> verifyNoInteractions(dailyStatsRepository),
                     () -> verifyNoInteractions(commitRepository),
-                    () -> verifyNoInteractions(kaitenCardRepository));
+                    () -> verifyNoInteractions(kaitenGateway));
         }
 
         @Test
-        @DisplayName("Есть kaiten_id → дёргаем kaiten cards, AuthorSummary агрегирован из daily stats")
+        @DisplayName("Есть kaiten_id → дёргаем kaiten cards live из gateway, summary из daily stats")
         void profileWithKaiten() {
             UnifiedUser user = userWithKaiten(7L);
             when(unifiedUserRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
@@ -135,7 +135,7 @@ class QueryUseCasesTest {
                     day(LocalDate.of(2026, 5, 2), 2)
             ));
             when(commitRepository.findByAuthor(eq(EMAIL), eq(PERIOD), any())).thenReturn(List.of());
-            when(kaitenCardRepository.findByMemberAndPeriod(new KaitenUserId(7L), PERIOD)).thenReturn(List.of());
+            when(kaitenGateway.fetchCardsForMember(eq(new KaitenUserId(7L)), any())).thenReturn(List.of());
 
             GetUserProfileUseCase.Profile p = service().findProfile(EMAIL, PERIOD).orElseThrow();
 
@@ -143,11 +143,11 @@ class QueryUseCasesTest {
                     () -> assertThat(p.user()).isSameAs(user),
                     () -> assertThat(p.summary().commits()).as("3 + 2").isEqualTo(5),
                     () -> assertThat(p.summary().email()).isEqualTo(EMAIL),
-                    () -> verify(kaitenCardRepository).findByMemberAndPeriod(new KaitenUserId(7L), PERIOD));
+                    () -> verify(kaitenGateway).fetchCardsForMember(eq(new KaitenUserId(7L)), any()));
         }
 
         @Test
-        @DisplayName("Нет kaiten_id → cards пустые, репозиторий карточек НЕ зовём")
+        @DisplayName("Нет kaiten_id → cards пустые, KaitenGateway НЕ зовём")
         void profileWithoutKaiten() {
             UnifiedUser user = userWithoutKaiten();
             when(unifiedUserRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
@@ -158,12 +158,29 @@ class QueryUseCasesTest {
 
             assertAll("профиль без kaiten",
                     () -> assertThat(p.cards()).isEmpty(),
-                    () -> verify(kaitenCardRepository, never()).findByMemberAndPeriod(any(), any()));
+                    () -> verify(kaitenGateway, never()).fetchCardsForMember(any(), any()));
         }
 
         private GetUserProfileService service() {
             return new GetUserProfileService(
-                    unifiedUserRepository, dailyStatsRepository, commitRepository, kaitenCardRepository);
+                    unifiedUserRepository, dailyStatsRepository, commitRepository, kaitenGateway);
+        }
+    }
+
+    @Nested
+    @DisplayName("GetDashboardService")
+    class DashboardService {
+        @Test
+        @DisplayName("делегирует в репозиторий, прокидывает period")
+        void delegates() {
+            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of(
+                    day(LocalDate.of(2026, 5, 1), 5)));
+
+            var d = new GetDashboardService(dailyStatsRepository).get(PERIOD, 10, 10);
+
+            assertAll("dashboard",
+                    () -> assertThat(d.period()).isEqualTo(PERIOD),
+                    () -> assertThat(d.topActive()).hasSize(1));
         }
     }
 

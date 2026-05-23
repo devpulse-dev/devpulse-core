@@ -1,5 +1,10 @@
 # План рефакторинга v1 → v2
 
+> **Статус:** рефакторинг (Сессии 1–7) завершён ✅. Дальше — фичи поверх готового каркаса.
+> Текущая активная работа описана в разделе [«Фичи»](#фичи) в конце документа.
+
+
+
 Документ — единый источник правды по тому, что мы делаем и почему. Сюда же кладём решения, чтобы при возвращении к проекту через неделю/месяц не пришлось гадать «а это зачем».
 
 ---
@@ -227,3 +232,34 @@ markable-dev-analytics/
 | Поля `hour`/`collectedAt`/`repositoryName` забывались в `CommitDetails` | Domain `Commit` — record, поля обязательны, забыть нельзя |
 | `LastExportTracker` ломался при первой ошибке | `CollectionRun` — отдельные записи на каждый прогон, курсор берётся из последнего SUCCESS |
 | N+1 в `saveDailyStatsForRepo` | Один upsert на весь батч |
+
+---
+
+## Фичи
+
+После завершения рефакторинга работаем поверх готового каркаса. Каждая фича — отдельный раздел ниже.
+
+### Фича 1 — Главный борд + ленивый Kaiten ✅
+
+**Изменения требований:**
+1. Запуск сбора по шедулеру убран — только ручной триггер с фронта (`POST /api/v2/collection/runs`).
+2. При сборе **не** тянем карточки Kaiten. Только sync пользователей (`kaiten_id` + `avatarUrl` в `unified_user`).
+3. На главном борде фронта — топ-N активных + N аутсайдеров за последние 30 дней.
+4. Карточки Kaiten — **live при открытии профиля** (`GET /users/{email}/profile`), фильтр по `updatedAfter`.
+5. Недельная статистика — без изменений, тоже без карточек.
+
+**Что сделано:**
+
+| Слой | Изменения |
+|---|---|
+| domain | Новый `Dashboard` record. В `StatsSummarizer` — новый `dashboard(period, stats, topN, outsiderN)` (pure-функция). |
+| application | Новый `GetDashboardUseCase` + `GetDashboardService`. `CollectDailyStatsService` упрощён: вместо фазы карточек — sync `kaiten_user` + `unified_user.updateKaitenId(...)`. `GetUserProfileService` теперь дергает `KaitenGateway.fetchCardsForMember(...)` (live), а не `KaitenCardRepository`. |
+| port out | В `KaitenGateway` добавлен `fetchCardsForMember(KaitenUserId, LocalDateTime)`. `KaitenCardRepository` оставлен как legacy на случай возврата к кэшу — но из use case-ов не используется. |
+| adapter-kaiten | `KaitenGatewayAdapter.fetchCardsForMember` — поверх существующего `streamCards`. |
+| adapter-rest | Новый `DashboardController` (`/api/v2/dashboard`) с дефолтом периода = last 30 days. `UsersController#profile` — `from`/`to` теперь опциональны, дефолт тот же. Новый `DashboardResponse` DTO. |
+| тесты | `StatsSummarizerTest` — 3 новых сценария для `dashboard`. `CollectDailyStatsServiceTest` переписан под новый контракт (sync вместо cards). `QueryUseCasesTest` — заменён `KaitenCardRepository` на `KaitenGateway`, добавлена секция `DashboardService`. Новый `DashboardControllerTest` (MockMvc). Smoke-тест дополнен `GetDashboardUseCase`. |
+
+**Что НЕ менялось:**
+- Cron / `@Scheduled` — мы его и не добавляли в v2 (он был в открытых вопросах). Просто фиксируем: ручной триггер навсегда.
+- Схема БД — `kaiten_card` таблица остаётся, просто не наполняется. Если решим окончательно убрать кэш карточек — отдельная задача с миграцией drop-table.
+- Weekly stats — без изменений.
