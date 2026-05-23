@@ -3,7 +3,6 @@ package ru.x5.markable.dev.analytics;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
-import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,9 +11,6 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.x5.markable.dev.analytics.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetCollectionRunUseCase;
 import ru.x5.markable.dev.analytics.application.port.in.GetDailyStatsUseCase;
@@ -41,20 +37,20 @@ import ru.x5.markable.dev.analytics.application.port.out.UnifiedUserRepository;
  * проверка идёт только на сборку контекста.</p>
  */
 @SpringBootTest(classes = Application.class)
-@Testcontainers
 @DisplayName("Smoke: Spring-контекст поднимается, граф полный")
 class SmokeApplicationIT {
 
-    @Container
+    /**
+     * Singleton-контейнер: НЕ используем {@code @Container}/{@code @Testcontainers}-extension,
+     * иначе extension останавливает контейнер на {@code @AfterAll} и следующий тест-класс получает
+     * новый контейнер на новом порту (Spring при этом ещё держит закэшированный контекст со старым URL).
+     * Static block стартует один раз на JVM, JVM shutdown hook убирает на завершение.
+     */
     @SuppressWarnings("resource")
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("devanalytics_smoke")
             .withUsername("test")
-            .withPassword("test")
-            // Postgres пишет это сообщение дважды (init + после старта приёма соединений).
-            // Ждём оба — иначе на медленном CI Hikari может зайти раньше готовности.
-            .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\s", 2)
-                    .withStartupTimeout(Duration.ofMinutes(2)));
+            .withPassword("test");
 
     static {
         POSTGRES.start();

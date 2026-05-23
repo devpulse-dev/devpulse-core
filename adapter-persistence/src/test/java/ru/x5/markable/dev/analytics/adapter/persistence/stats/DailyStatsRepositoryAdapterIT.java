@@ -10,7 +10,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.x5.markable.dev.analytics.adapter.persistence.shared.PostgresContainerSupport;
 import ru.x5.markable.dev.analytics.application.port.out.DailyStatsRepository;
 import ru.x5.markable.dev.analytics.domain.common.Period;
@@ -19,7 +18,6 @@ import ru.x5.markable.dev.analytics.domain.model.stats.DailyAuthorStats;
 import ru.x5.markable.dev.analytics.domain.model.user.Email;
 
 @SpringBootTest
-@Testcontainers
 @DisplayName("DailyStatsRepositoryAdapter (native UPSERT + TestContainers)")
 class DailyStatsRepositoryAdapterIT extends PostgresContainerSupport {
 

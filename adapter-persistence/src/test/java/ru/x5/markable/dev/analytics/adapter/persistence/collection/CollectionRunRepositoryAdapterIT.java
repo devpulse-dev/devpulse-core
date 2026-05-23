@@ -7,13 +7,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.x5.markable.dev.analytics.adapter.persistence.shared.PostgresContainerSupport;
 import ru.x5.markable.dev.analytics.application.port.out.CollectionRunRepository;
 import ru.x5.markable.dev.analytics.domain.model.collection.CollectionRun;
 
 @SpringBootTest
-@Testcontainers
 @DisplayName("CollectionRunRepositoryAdapter (журнал запусков сбора)")
 class CollectionRunRepositoryAdapterIT extends PostgresContainerSupport {
 

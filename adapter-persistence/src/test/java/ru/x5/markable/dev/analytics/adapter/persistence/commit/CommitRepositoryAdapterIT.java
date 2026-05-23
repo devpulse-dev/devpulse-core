@@ -11,7 +11,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.x5.markable.dev.analytics.adapter.persistence.shared.PostgresContainerSupport;
 import ru.x5.markable.dev.analytics.application.port.out.CommitRepository;
 import ru.x5.markable.dev.analytics.domain.common.PageRequest;
@@ -22,7 +21,6 @@ import ru.x5.markable.dev.analytics.domain.model.git.RepoName;
 import ru.x5.markable.dev.analytics.domain.model.user.Email;
 
 @SpringBootTest
-@Testcontainers
 @DisplayName("CommitRepositoryAdapter (TestContainers + PostgreSQL)")
 class CommitRepositoryAdapterIT extends PostgresContainerSupport {
 
