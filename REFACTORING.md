@@ -122,9 +122,9 @@ markable-dev-analytics/
 | 4 | **adapter-git + adapter-kaiten** | GitProperties+CliClient+LogParser+GatewayAdapter (StructuredTaskScope), KaitenProperties+DTO+HttpClient (`@HttpExchange`)+RateLimiter+GatewayAdapter (streaming), unit-тесты | ✅ |
 | 5 | **Use cases команды (write side)** | `CollectDailyStatsService`, `SyncKaitenUsersService`, wiring в bootstrap, Mockito-тесты | ✅ |
 | 6 | **Use cases запросов + adapter-rest** | Реализация query-use cases (Profile, Weekly, Summary, DailyStats, UserCommits, CollectionRun), `StatsSummarizer` в domain, REST-контроллеры api/v2 (Collection/Stats/Users/Kaiten), DTO с `from(domain)`, RFC 7807 через `ProblemDetail`, MockMvc-тесты | ✅ |
-| 7 | **Финал** | Удаление `.old-src/`, smoke-тест в bootstrap, документация эндпоинтов | 🟡 |
+| 7 | **Финал** | Удаление `.old-src/`, smoke-тест в bootstrap, документация эндпоинтов | ✅ |
 
-### Где мы сейчас (Сессия 6 — query + REST)
+### Где мы сейчас — рефакторинг завершён ✅
 
 Сделано:
 - ✅ `domain/service/StatsSummarizer` — pure-агрегация `DailyAuthorStats → PeriodSummary` и `→ List<WeeklyStats>` (ISO weeks).
@@ -168,6 +168,17 @@ markable-dev-analytics/
 ### ADR-7. Stream-API карточек Kaiten
 **Контекст:** API карточек пагинирован, может быть много страниц, 429 на N-й странице терял всё.
 **Решение:** `KaitenGateway.streamCards(memberIds, since, pageHandler)` — отдаёт страницу через callback. Use case коммитит каждую страницу отдельной транзакцией.
+
+### ADR-8. Spring Boot 4 test slices — нюансы стека
+**Контекст:** в Spring Boot 4 web-slice-тесты пересобрали:
+- `@WebMvcTest` переехал из `spring-boot-test-autoconfigure` (пакет `…test.autoconfigure.web.servlet`) в отдельный артефакт `spring-boot-starter-webmvc-test` (пакет `…boot.webmvc.test.autoconfigure`).
+- Контроллеры в Spring Framework 7 надёжно работают как `public class` с публичными методами-хендлерами (package-private даёт молчаливые 404).
+- Тестовый якорь должен быть `@SpringBootApplication`, **не** сокращённая связка `@SpringBootConfiguration + @EnableAutoConfiguration` — иначе слайс не делает `@ComponentScan` пакета и контроллеры не находятся.
+
+**Решение:**
+- В `adapter-rest/pom.xml` добавлена test-зависимость `spring-boot-starter-webmvc-test`.
+- В `adapter-rest/src/test/java/.../TestApplication.java` — минимальный `@SpringBootApplication`-якорь (test-source, ArchUnit его не видит).
+- Контроллеры — `public class` с `public` хендлерами.
 
 ---
 
