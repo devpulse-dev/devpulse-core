@@ -76,6 +76,12 @@ jobs:
     needs: compile
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      # Ryuk (контейнер-уборщик Testcontainers) на GitHub-hosted runner иногда мешает
+      # запуску основного Postgres. JVM shutdown hook сам убирает контейнеры — Ryuk не нужен.
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+      # Disable startup check that probes Docker socket — лишняя задержка на CI.
+      TESTCONTAINERS_CHECKS_DISABLE: "true"
     steps:
       - uses: actions/checkout@v4
 

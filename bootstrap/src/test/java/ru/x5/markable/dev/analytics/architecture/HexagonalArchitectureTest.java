@@ -28,6 +28,16 @@ class HexagonalArchitectureTest {
     private static final String ADAPTER_GIT = ROOT + ".adapter.git..";
     private static final String ADAPTER_KAITEN = ROOT + ".adapter.kaiten..";
 
+    /**
+     * Composition root: {@code @SpringBootApplication} в корневом пакете + {@code .config..}
+     * с {@code @Configuration}-классами, которые wire-ят use case-ы из портов.
+     * Bootstrap по построению видит всех — это правильно. Никто не должен зависеть ОТ bootstrap.
+     */
+    private static final String[] BOOTSTRAP = {
+            ROOT,
+            ROOT + ".config..",
+    };
+
     private static final String[] FORBIDDEN_FOR_DOMAIN = {
             "org.springframework..",
             "jakarta.persistence..",
@@ -62,18 +72,22 @@ class HexagonalArchitectureTest {
                 .layer("adapter-persistence").definedBy(ADAPTER_PERSISTENCE)
                 .layer("adapter-git").definedBy(ADAPTER_GIT)
                 .layer("adapter-kaiten").definedBy(ADAPTER_KAITEN)
+                .layer("bootstrap").definedBy(BOOTSTRAP)
 
-                .whereLayer("adapter-rest").mayNotBeAccessedByAnyLayer()
-                .whereLayer("adapter-persistence").mayNotBeAccessedByAnyLayer()
-                .whereLayer("adapter-git").mayNotBeAccessedByAnyLayer()
-                .whereLayer("adapter-kaiten").mayNotBeAccessedByAnyLayer()
+                .whereLayer("bootstrap").mayNotBeAccessedByAnyLayer()
+                .whereLayer("adapter-rest").mayOnlyBeAccessedByLayers("bootstrap")
+                .whereLayer("adapter-persistence").mayOnlyBeAccessedByLayers("bootstrap")
+                .whereLayer("adapter-git").mayOnlyBeAccessedByLayers("bootstrap")
+                .whereLayer("adapter-kaiten").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("application")
                         .mayOnlyBeAccessedByLayers(
+                                "bootstrap",
                                 "adapter-rest", "adapter-persistence",
                                 "adapter-git", "adapter-kaiten")
                 .whereLayer("domain")
                         .mayOnlyBeAccessedByLayers(
-                                "application", "adapter-rest", "adapter-persistence",
+                                "bootstrap", "application",
+                                "adapter-rest", "adapter-persistence",
                                 "adapter-git", "adapter-kaiten");
 
         rule.check(CLASSES);
