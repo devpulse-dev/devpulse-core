@@ -31,6 +31,14 @@ public record DailyAuthorStats(
         }
     }
 
+    /** Возвращает копию с проставленным {@code userId} (для связывания с unified_user). */
+    public DailyAuthorStats withUserId(Long userId) {
+        return new DailyAuthorStats(
+                id, authorEmail, date, repo,
+                commits, mergeCommits, addedLines, deletedLines, testAddedLines,
+                lastUpdated, userId);
+    }
+
     /** Сложение двух дневных агрегатов одного и того же ключа. */
     public DailyAuthorStats plus(DailyAuthorStats other) {
         if (!authorEmail.equals(other.authorEmail)

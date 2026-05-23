@@ -1,492 +1,150 @@
 # Markable Dev Analytics
 
-Система аналитики активности разработчиков в Git-репозиториях с интеграцией AI и Kaiten для генерации сводок.
+Сервис аналитики активности разработчиков: собирает коммиты из Git-репозиториев и карточки задач из Kaiten, агрегирует ежедневную статистику по авторам и отдаёт её через REST API для фронта.
 
-## Описание проекта
+> **Статус:** в процессе рефакторинга v1 → v2. Подробный план и трекинг сессий — в [`REFACTORING.md`](./REFACTORING.md).
 
-Markable Dev Analytics — это Spring Boot приложение для сбора, анализа и визуализации статистики работы разработчиков с Git-репозиториями. Система автоматически анализирует коммиты, собирает метрики активности и предоставляет REST API для получения аналитических данных. Также поддерживается генерация AI-сводок на основе статистики пользователя и интеграция с системой управления задачами Kaiten.
-
-## Основные возможности
-
-- 📊 **Сбор статистики коммитов** — автоматический анализ Git-репозиториев с подсчётом добавленных/удалённых строк
-- 👤 **Профили пользователей** — детальная статистика по каждому разработчику
-- 📅 **Ежедневная статистика** — отслеживание активности по дням и неделям
-- 🤖 **AI-сводки** — генерация аналитических отчётов с помощью искусственного интеллекта
-- 🔍 **Детализация коммитов** — информация о задачах, сообщениях и изменениях
-- 📈 **Агрегированная статистика** — суммарные показатели за период
-- ⚡ **Асинхронная обработка** — параллельный анализ нескольких репозиториев
-- 🎯 **Интеграция с Kaiten** — синхронизация карточек задач и связывание с коммитами
-- 🔗 **Унифицированные пользователи** — объединение пользователей из разных систем
+---
 
 ## Технологический стек
 
-### Backend
-- **Java 17** — язык программирования
-- **Spring Boot 3.2.4** — фреймворк
-- **Spring Data JPA** — работа с базой данных
-- **Spring Web** — REST API
-- **Lombok** — сокращение кода
-- **MapStruct 1.5.5** — маппинг объектов
+| Слой | Технология |
+|---|---|
+| Язык | **Java 25** (preview features включены там, где это даёт выигрыш) |
+| Framework | **Spring Boot 4.0** |
+| Persistence | Spring Data JPA + Hibernate + PostgreSQL |
+| Миграции | Liquibase (YAML) |
+| HTTP-клиенты | Spring `@HttpExchange` interface clients |
+| Конкуррентность | Virtual threads + `StructuredTaskScope` (GA в 25) |
+| Тесты | JUnit 5, AssertJ, Mockito, Testcontainers, ArchUnit 1.4.2 |
+| Сборка | Maven multi-module |
+| Логи | SLF4J → Log4j2 (Spring Boot starter) |
 
-### База данных
-- **PostgreSQL** — основная база данных
-- **Liquibase 4.20.0** — управление миграциями
+### Что нам даёт Java 25 (и почему не Java 21)
 
-### Интеграции
-- **Git** — анализ репозиториев через командную строку
-- **Redis** — кэширование
-- **AI API** — генерация сводок (OpenAI-совместимый формат)
-- **Kaiten API** — интеграция с системой управления задачами
+| Фича | В 21 | В 25 | Где используем |
+|---|---|---|---|
+| Virtual threads | ✅ stable | ✅ stable | I/O-bound: git CLI, JDBC, Kaiten HTTP — без ручных `Executor` |
+| Structured Concurrency | ⚠️ preview | ✅ **stable** | fan-out по репозиториям в `adapter-git`, отмена при ошибке одного |
+| Scoped Values | preview | ✅ stable | request-scoped state (correlation id, period) без `ThreadLocal` |
+| Stream Gatherers | ❌ | ✅ stable | агрегация daily stats, оконные операции |
+| Pattern matching for switch | ✅ | ✅ улучшено | домен (`CollectionStatus`, и т.п.) |
+| Markdown в Javadoc | ❌ | ✅ | косметика |
 
-### Тестирование
-- **JUnit 5.10.2** — модульное тестирование
-- **Spring Boot Test** — интеграционное тестирование
+---
 
-## Архитектура проекта
+## Архитектура: гексагон + multi-module
+
+Каждый модуль — отдельный maven-артефакт. Зависимости направлены **только внутрь** (адаптеры → application → domain). За это отвечает ArchUnit-тест в `bootstrap`, который падает при попытке нарушить направление.
 
 ```
-src/main/java/ru/x5/markable/dev/analytics/
-├── Main.java                          # Точка входа приложения
-├── commons/                           # Общие компоненты
-│   ├── config/                        # Конфигурация (WebConfig)
-│   └── exceptions/                    # Исключения (ApiException, UnprocessableEntityException)
-├── gitlab/                            # Основной функционал Git-аналитики
-│   ├── client/                        # Внешние клиенты
-│   │   ├── AiClient.java             # Клиент для AI API
-│   │   └── GitClient.java            # Клиент для Git (через CLI)
-│   ├── config/                        # Конфигурации
-│   │   ├── AiProperties.java         # Настройки AI
-│   │   ├── AsyncConfig.java          # Асинхронное выполнение
-│   │   ├── GitProperties.java        # Настройки Git
-│   │   ├── RedisConfig.java          # Настройки Redis
-│   │   └── RestTemplateConfig.java   # Конфигурация HTTP клиента
-│   ├── exception/                     # Исключения домена
-│   ├── interactor/                    # Интеракторы (AnalysisInteractor)
-│   ├── mapper/                        # Мапперы (AuthorStatsMapper, CommitDetailsMapper)
-│   ├── model/                         # Доменные модели
-│   │   ├── AuthorAggregate.java      # Агрегат статистики автора
-│   │   └── CommitDetail.java         # Детали коммита
-│   ├── persistence/                    # Слой персистентности
-│   │   ├── entity/                   # Сущности БД
-│   │   │   ├── AnalysisRun.java
-│   │   │   ├── AnalysisStatus.java
-│   │   │   ├── AuthorStats.java
-│   │   │   ├── CommitDetails.java
-│   │   │   ├── DailyAuthorStats.java
-│   │   │   ├── LastExportTracker.java
-│   │   │   ├── RepoStats.java
-│   │   │   └── UnifiedUser.java      # Унифицированный пользователь
-│   │   └── repository/               # Репозитории JPA
-│   ├── rest/                          # REST API
-│   │   ├── controller/               # Контроллеры
-│   │   │   ├── AnalysisController.java
-│   │   │   ├── AiSummaryController.java
-│   │   │   ├── GlobalExceptionHandler.java
-│   │   │   └── UserProfileController.java
-│   │   └── dto/                      # DTO объекты
-│   ├── service/                       # Бизнес-логика
-│   │   ├── AiSummaryService.java
-│   │   ├── AnalysisService.java
-│   │   ├── CommitDetailsService.java
-│   │   ├── DailyStatsService.java
-│   │   ├── ExportTrackerService.java
-│   │   ├── UnifiedUserService.java   # Сервис унифицированных пользователей
-│   │   ├── UserProfileService.java
-│   │   └── impl/                     # Реализации сервисов
-│   │       └── helper/               # Helper классы для сервисов
-│   │           ├── GitCommitCollector.java
-│   │           ├── StatsAggregator.java
-│   │           ├── StatsPersistenceHelper.java
-│   │           ├── WeeklyStatsBuilder.java
-│   │           ├── UserProfileDataFetcher.java
-│   │           ├── KaitenCardFetcher.java
-│   │           ├── UserProfileSummaryGenerator.java
-│   │           ├── TaskBuilder.java
-│   │           └── UserSyncHelper.java
-│   └── utill/                         # Утилиты
-│       └── CommitMessageParser.java  # Парсер сообщений коммитов
-└── kaiten/                            # Интеграция с Kaiten
-    ├── client/                        # Клиент Kaiten API
-    │   └── KaitenClient.java
-    ├── config/                        # Конфигурации Kaiten
-    │   ├── KaitenConfig.java
-    │   └── KaitenProperties.java
-    ├── mapper/                        # Мапперы Kaiten
-    │   ├── KaitenCardMapper.java
-    │   ├── KaitenCommentMapper.java
-    │   ├── KaitenSpaceMapper.java
-    │   └── KaitenUserMapper.java
-    ├── persistence/                    # Слой персистентности Kaiten
-    │   ├── entity/                   # Сущности БД Kaiten
-    │   │   ├── KaitenCard.java
-    │   │   ├── KaitenCardComment.java
-    │   │   ├── KaitenCardMember.java
-    │   │   └── KaitenUser.java
-    │   └── repository/               # Репозитории JPA Kaiten
-    ├── rest/                          # REST API Kaiten
-    │   ├── controller/               # Контроллеры Kaiten
-    │   │   ├── KaitenAdminController.java
-    │   │   └── KaitenStatsController.java
-    │   └── dto/                      # DTO объекты Kaiten
-    │       ├── card/                 # DTO карточек
-    │       └── ...                   # Другие DTO
-    └── service/                       # Бизнес-логика Kaiten
-        ├── KaitenCardCollectorService.java
-        ├── KaitenCardMemberService.java
-        ├── KaitenCardService.java
-        ├── KaitenSpaceService.java
-        ├── KaitenStatsService.java
-        ├── KaitenUserSyncService.java
-        └── impl/                     # Реализации сервисов Kaiten
+markable-dev-analytics/
+├── pom.xml                       # parent (packaging=pom)
+│
+├── domain/                       # ⬅️ pure Java, никаких фреймворков (даже Lombok)
+│                                 #    records, value objects (Email, RepoName, Period…),
+│                                 #    domain services (AuthorAggregator, CommitMessageParser…)
+│
+├── application/                  # use cases + ports (in/out)
+│                                 # port/in/  — что система умеет (CollectDailyStatsUseCase…)
+│                                 # port/out/ — интерфейсы для адаптеров (GitGateway, *Repository…)
+│                                 # service/  — реализации use cases (POJO + Lombok, без Spring)
+│
+├── adapter-rest/                 # IN-адаптер: REST controllers + DTO (api/v2)
+├── adapter-persistence/          # OUT: JPA entities + Spring Data + Liquibase
+├── adapter-git/                  # OUT: git CLI client (реализация GitGateway)
+├── adapter-kaiten/               # OUT: Kaiten HTTP client (реализация KaitenGateway)
+│
+└── bootstrap/                    # @SpringBootApplication, application.yml, wiring (@Configuration)
+                                  # + ArchUnit-тесты гексагона
 ```
 
-## Схема базы данных
+### Правила слоёв (enforced ArchUnit)
 
-### Таблицы Git-аналитики
+- `domain` — **никаких** зависимостей от Spring, JPA, Jackson, Hibernate, **даже Lombok**.
+- `application` — без Spring/JPA/Jackson/Hibernate. Lombok можно.
+- Адаптеры между собой **не зависят** — общаются только через порты в `application`.
+- `bootstrap` — единственный, кто видит всех и собирает граф через `@Configuration`.
 
-- **analysis_run** — информация о запусках анализа
-- **author_stats** — агрегированная статистика авторов
-- **repo_stats** — статистика по репозиториям
-- **daily_author_stats** — ежедневная статистика авторов
-- **commit_details** — детальная информация о коммитах
-- **last_export_tracker** — трекер последней выгрузки данных
-- **unified_user** — унифицированные пользователи (объединение Git и Kaiten)
+---
 
-### Таблицы Kaiten
+## Структура БД
 
-- **kaiten_user** — пользователи Kaiten
-- **kaiten_card** — карточки Kaiten
-- **kaiten_card_comment** — комментарии к карточкам
-- **kaiten_card_member** — участники карточек
+PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibase/migration/`. Перенесены 1-в-1 из v1, плюс одна новая (`015-create-collection-run.yaml`) под журнал прогонов сбора.
 
-### Миграции
+Ключевые таблицы:
 
-Миграции базы данных управляются через Liquibase и находятся в `src/main/resources/liquibase/migration/`:
+| Таблица | Назначение |
+|---|---|
+| `commit_details` | Один git-коммит со статистикой строк, привязкой к UnifiedUser и `kaiten_card_id` (если в сообщении был номер задачи) |
+| `daily_author_stats` | Дневной агрегат (commits, lines added/deleted, test added) по ключу `(email, date, repository_name)` |
+| `unified_user` | Один человек = один `id`. Объединяет git author по email и Kaiten user через `kaiten_id` |
+| `kaiten_user` / `kaiten_card` / `kaiten_card_member` | Зеркало Kaiten API |
+| `collection_run` | Журнал прогонов сбора: started/finished, since/until, status, error |
 
-- `001-init.yaml` — инициализация основных таблиц
-- `002-create-last-export-tracker.yaml` — трекер выгрузок
-- `003-create-daily-author-stats.yaml` — ежедневная статистика
-- `004-add-repository-name-to-daily-stats.yaml` — добавление имени репозитория
-- `005-create-commit-details.yaml` — детали коммитов
-- `006-add-task-and-message-to-commit-details.yaml` — задачи и сообщения
-- `007-create-kaiten-user.yaml` — пользователи Kaiten
-- `008-create-kaiten-card.yaml` — карточки Kaiten
-- `009-create-kaiten-card-comment.yaml` — комментарии к карточкам
-- `010-add-kaiten-card-to-commit.yaml` — связь коммитов с карточками
-- `011-create-unified-user.yaml` — унифицированные пользователи
-- `012-add-user-id-to-commit-details.yaml` — связь коммитов с пользователями
-- `013-add-user-id-to-daily-stats.yaml` — связь статистики с пользователями
-- `014-create-kaiten-card-member.yaml` — участники карточек
+---
 
-## REST API
+## Локальный запуск
 
-### Анализ и статистика
-
-#### Запуск анализа
-```http
-POST /api/v1/analysis
-Content-Type: application/json
-
-{
-  "since": "2024-01-01",
-  "until": "2024-12-31"
-}
-```
-
-#### Сбор ежедневной статистики
-```http
-POST /api/v1/analysis/daily/collect
-```
-
-#### Получение ежедневной статистики коммитов
-```http
-GET /api/v1/analysis/daily
-```
-
-#### Получение ежедневной статистики по пользователям
-```http
-GET /api/v1/analysis/daily/detailed
-```
-
-#### Суммарная статистика за период
-```http
-GET /api/v1/analysis/summary
-```
-
-#### Недельная статистика
-```http
-GET /api/v1/analysis/weekly
-```
-
-### Профили пользователей
-
-#### Получение профиля пользователя
-```http
-GET /api/v1/users/{email}?start=2024-01-01&end=2024-12-31
-```
-
-#### Получение коммитов пользователя
-```http
-GET /api/v1/users/{email}/commits
-```
-
-### AI-сводки
-
-#### Генерация AI-сводки для пользователя
-```http
-GET /api/v1/users/{email}/summary
-```
-
-### Kaiten API
-
-#### Синхронизация всех пользователей Kaiten
-```http
-POST /api/v1/kaiten/admin/sync-users
-```
-
-#### Сбор карточек для команды
-```http
-POST /api/v1/kaiten/admin/collect-cards/team
-Content-Type: application/json
-
-{
-  "emails": ["user1@example.com", "user2@example.com"]
-}
-```
-
-#### Сбор карточек для всех пользователей
-```http
-POST /api/v1/kaiten/admin/collect-cards/all
-```
-
-#### Получение статистики Kaiten
-```http
-GET /api/v1/kaiten/stats
-```
-
-## Конфигурация
-
-### application.yml
-
-```yaml
-spring:
-  application:
-    name: markable-dev-analytics
-  datasource:
-    driver-class-name: org.postgresql.Driver
-    url: jdbc:postgresql://localhost:5432/devanalytics
-    username: postgres
-    password: postgres
-  jpa:
-    generate-ddl: false
-    open-in-view: false
-    show-sql: false
-    hibernate:
-      ddl-auto: none
-  liquibase:
-    enabled: true
-    change-log: liquibase/changelog.master.yml
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: 6379
-
-git:
-  repositories:
-    - https://scm.x5.ru/gkr/xrg-core.git
-    - https://scm.x5.ru/gkr/xrg-markable.git
-  token: your-gitlab-token
-  cache-directory: /path/to/git-cache/
-
-ai:
-  url: https://api-copilot.x5.ru/aigw/v1
-  api-key: your-api-key
-  model: copilot-code-large
-  timeout: 30000
-
-kaiten:
-  url: https://your-kaiten-instance.com
-  api-key: your-kaiten-api-key
-  space-id: your-space-id
-
-server:
-  port: 8080
-```
-
-### Переменные окружения
-
-- `REDIS_HOST` — хост Redis (по умолчанию: localhost)
-- `SPRING_DATASOURCE_URL` — URL базы данных
-- `SPRING_DATASOURCE_USERNAME` — пользователь БД
-- `SPRING_DATASOURCE_PASSWORD` — пароль БД
-- `KAITEN_URL` — URL инстанса Kaiten
-- `KAITEN_API_KEY` — API ключ Kaiten
-- `KAITEN_SPACE_ID` — ID пространства Kaiten
-
-## Установка и запуск
-
-### Требования
-
-- Java 17+
-- Maven 3.6+
-- PostgreSQL 12+
-- Redis 6+
-- Git (для анализа репозиториев)
-
-### Сборка проекта
+> **Требования:** Java 25, Maven 3.9+, Docker (для интеграционных тестов).
 
 ```bash
-mvn clean install
+# Сборка + все тесты (unit + Testcontainers integration + ArchUnit)
+mvn clean verify
+
+# Только компиляция
+mvn -q compile
+
+# Только тесты
+mvn -q test
+
+# Запуск приложения (после первой `mvn install` или из IDE)
+mvn -pl bootstrap spring-boot:run
 ```
 
-### Запуск приложения
+### Конфиг
 
-```bash
-mvn spring-boot:run
-```
+`bootstrap/src/main/resources/application.yml` — Postgres connection, git-репы для сбора, Kaiten endpoint/token. Чувствительные значения — через env переменные.
 
-Или через JAR:
+---
 
-```bash
-java -jar target/markable-dev-analytics-1.0-SNAPSHOT.jar
-```
+## Архитектурные принципы
 
-### Настройка базы данных
+1. **Изоляция фаз сбора.** Падение Kaiten НЕ откатывает уже сохранённую git-статистику. У каждой фазы своя транзакция, ошибка одной фазы не утаскивает за собой другую.
+2. **Курсор по успешным прогонам.** Следующий сбор стартует с конца последнего `SUCCESS` в `collection_run`. Неудачный прогон не двигает курсор.
+3. **Bulk-операции по умолчанию.** `INSERT ... ON CONFLICT DO UPDATE` для daily stats, batch `findOrCreateAll` для пользователей, batch save для коммитов. N+1 запрещён.
+4. **Streaming пагинация Kaiten.** Каждая страница карточек коммитится отдельной транзакцией — при 429 на поздних страницах уже сохранённое остаётся в БД.
+5. **Структурная конкуррентность.** Параллелизм по репозиториям — через `StructuredTaskScope`, а не `CompletableFuture` + ручной `Executor`. Виртуальные потоки — для I/O.
+6. **Никакой бизнес-логики в адаптерах.** Парсинг git output, агрегация по дню — в `domain`. Адаптер git только запускает CLI и распарсивает вывод.
 
-1. Создайте базу данных PostgreSQL:
+---
 
-```sql
-CREATE DATABASE devanalytics;
-```
+## Тесты
 
-2. Приложение автоматически применит миграции Liquibase при первом запуске
+| Тип | Где | Запускается |
+|---|---|---|
+| Unit (domain) | `domain/src/test/` | каждый коммит |
+| Unit (use cases с Mockito) | `application/src/test/` | каждый коммит |
+| Unit (адаптеры — парсеры, rate-limiter) | `adapter-*/src/test/` | каждый коммит |
+| Integration (Testcontainers + Postgres) | `adapter-persistence/src/test/` | `mvn verify` |
+| ArchUnit (правила гексагона) | `bootstrap/src/test/` | каждый коммит |
 
-### Настройка Redis
+Стиль: русский `@DisplayName`, `assertAll` для множественных проверок, параметризация через `@ParameterizedTest` где имеет смысл.
 
-Убедитесь, что Redis запущен:
+---
 
-```bash
-redis-server
-```
+## Что выпилено из v1 (НЕ переносится)
 
-## Использование
+- `AiSummaryService` + `AiClient` + всё `ai.*` в конфиге.
+- Старый синхронный `/api/v1/analysis` + `AnalysisRun`/`AnalysisInteractor`/`AnalysisService` — дублировал daily stats.
+- Redis-кэш и `RedisConfig`.
+- Ручной `AsyncConfig` + `Executors.newFixedThreadPool(5)` — заменено на virtual threads + `StructuredTaskScope`.
+- Ручные `RestTemplate` + кастомный retry на каждый клиент — заменено на `@HttpExchange` + единый адаптивный rate-limiter.
 
-### 1. Настройка репозиториев
+См. подробности в [`REFACTORING.md`](./REFACTORING.md).
 
-Добавьте URL анализируемых Git-репозиториев в `application.yml`:
+---
 
-```yaml
-git:
-  repositories:
-    - https://your-gitlab.com/group/project.git
-  token: your-access-token
-```
+## Дальнейшая работа
 
-### 2. Запуск анализа
-
-Отправьте запрос на анализ за период:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/analysis \
-  -H "Content-Type: application/json" \
-  -d '{"since":"2024-01-01","until":"2024-12-31"}'
-```
-
-### 3. Сбор ежедневной статистики
-
-Запустите сбор ежедневной статистики:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/analysis/daily/collect
-```
-
-### 4. Получение профиля пользователя
-
-```bash
-curl http://localhost:8080/api/v1/users/user@example.com
-```
-
-### 5. Генерация AI-сводки
-
-```bash
-curl http://localhost:8080/api/v1/users/user@example.com/summary
-```
-
-## Разработка
-
-### Структура кода
-
-Проект следует принципам чистой архитектуры с разделением на слои:
-
-- **Controller** — обработка HTTP запросов
-- **Service** — бизнес-логика
-- **Repository** — доступ к данным
-- **Client** — внешние интеграции
-- **Mapper** — преобразование сущностей
-
-### Добавление новых фич
-
-1. Создайте DTO в `rest/dto/`
-2. Добавьте метод в контроллер
-3. Реализуйте бизнес-логику в сервисе
-4. При необходимости добавьте репозиторий
-5. Создайте миграцию Liquibase для изменений в БД
-
-### Тестирование
-
-```bash
-mvn test
-```
-
-## Особенности реализации
-
-### Асинхронная обработка
-
-Анализ репозиториев выполняется асинхронно с использованием `CompletableFuture` для параллельной обработки нескольких репозиториев.
-
-### Кэширование Git-репозиториев
-
-Репозитории клонируются в локальную директорию и обновляются при последующих запусках для оптимизации производительности.
-
-### AI-интеграция
-
-Система поддерживает OpenAI-совместимый API для генерации сводок. При недоступности AI используется fallback-механизм.
-
-### Парсинг коммитов
-
-Сообщения коммитов анализируются для извлечения информации о задачах и контексте изменений.
-
-### Helper классы
-
-Для улучшения читаемости и поддерживаемости кода, большие сервисы были разбиты на специализированные helper классы:
-
-#### Git-аналитика
-- **GitCommitCollector** — сбор и парсинг Git-коммитов
-- **StatsAggregator** — агрегация статистики по дням и неделям
-- **StatsPersistenceHelper** — сохранение статистики в базу данных
-- **WeeklyStatsBuilder** — построение недельной статистики
-- **UserProfileDataFetcher** — получение данных профиля пользователя
-- **KaitenCardFetcher** — получение и фильтрация карточек Kaiten
-- **UserProfileSummaryGenerator** — генерация сводок профиля
-- **TaskBuilder** — построение DTO задач с коммитами
-- **UserSyncHelper** — синхронизация пользователей с кэшированием
-
-### Интеграция с Kaiten
-
-Система поддерживает полную интеграцию с системой управления задачами Kaiten:
-- Синхронизация пользователей
-- Сбор карточек задач
-- Связывание коммитов с карточками
-- Отслеживание участников карточек
-
-### Унифицированные пользователи
-
-Система объединяет пользователей из разных систем (Git и Kaiten) в единую модель для удобства работы и анализа.
-
-## Лицензия
-
-[Укажите лицензию проекта]
-
-## Контакты
-
-Для вопросов и предложений обращайтесь к команде разработки.
+Текущий прогресс и следующие шаги — в [`REFACTORING.md`](./REFACTORING.md), раздел «Roadmap».
