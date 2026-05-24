@@ -27,4 +27,13 @@ public record PeriodSummary(
         Objects.requireNonNull(period, "period required");
         topAuthors = topAuthors == null ? List.of() : List.copyOf(topAuthors);
     }
+
+    /** Возвращает копию с новым списком top-авторов (для enrichment displayName/avatarUrl). */
+    public PeriodSummary withTopAuthors(List<AuthorSummary> newTop) {
+        return new PeriodSummary(
+                period,
+                totalCommits, totalMergeCommits, totalAddedLines, totalDeletedLines, totalTestAddedLines,
+                uniqueAuthors,
+                newTop);
+    }
 }

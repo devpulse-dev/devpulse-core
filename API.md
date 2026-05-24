@@ -65,30 +65,48 @@
 
 ## Дашборд
 
-### `GET /api/v2/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD&topN=10&outsiderN=10`
+### `GET /api/v2/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD&page=0&size=20`
 
-Главный борд: топ-N самых активных + N «аутсайдеров» (наименее активные из тех, у кого хотя бы 1 коммит) за период.
+Главный борд: **paginated** список всех активных авторов за период (имеющих ≥ 1 коммит).
+Отсортирован по убыванию **не-мердж коммитов** (`commits − mergeCommits`) — отражает «реальную работу», мерджи не накручивают позицию в топе.
+
+> Фронт может показать первую страницу как «топ» и последнюю как «аутсайдеры». Раздельных секций в API больше нет — один list + pagination.
 
 **Параметры:**
 - `from`, `to` — опциональны. Если опущены, бэк подставляет **последние 30 дней** (`today-30..today`).
-- `topN` — сколько активных вернуть, default `10`.
-- `outsiderN` — сколько аутсайдеров вернуть, default `10`.
+- `page` — 0-based номер страницы, default `0`.
+- `size` — размер страницы, default `20`, max `500`.
 
 **Ответ 200:**
 ```json
 {
   "from": "2026-04-23",
   "to":   "2026-05-23",
-  "topActive": [
-    { "email": "boris@x5.ru", "commits": 47, "mergeCommits": 3, "addedLines": 1820, "deletedLines": 850, "testAddedLines": 320 }
-  ],
-  "outsiders": [
-    { "email": "junior@x5.ru", "commits": 2, "mergeCommits": 0, "addedLines": 18, "deletedLines": 5, "testAddedLines": 0 }
+  "page": 0,
+  "size": 20,
+  "totalElements": 47,
+  "totalPages": 3,
+  "hasNext": true,
+  "items": [
+    {
+      "email": "boris@x5.ru",
+      "displayName": "Boris",
+      "avatarUrl": "https://kaiten.x5.ru/.../avatar.png",
+      "commits": 50,
+      "nonMergeCommits": 45,
+      "mergeCommits": 5,
+      "addedLines": 1820,
+      "deletedLines": 850,
+      "testAddedLines": 320
+    }
   ]
 }
 ```
 
-> Если активных авторов меньше чем `topN + outsiderN`, списки могут пересекаться — это намеренно: «верх» и «низ» одного маленького списка.
+**Особенности:**
+- `displayName` и `avatarUrl` подтягиваются из `unified_user` по email. Если автор ещё не связан с Kaiten — оба будут `null`.
+- `nonMergeCommits` — производная (`commits − mergeCommits`), показывается для прозрачности ранжирования.
+- Enrichment делается только для авторов на текущей странице — не тратим ресурсы на batch-фетч профилей для всех 47 авторов, если фронт смотрит только первые 20.
 
 ---
 
@@ -97,6 +115,8 @@
 ### `GET /api/v2/stats/daily?from=YYYY-MM-DD&to=YYYY-MM-DD`
 
 Дневные агрегаты за период (по ключу `email × date × repo`).
+
+> Здесь `displayName`/`avatarUrl` **не** возвращаются — дневных записей много (тысячи за период), enrichment дорогой. Если нужны профили — фронт может агрегировать по `email` на своей стороне и подтянуть из `/dashboard` или `/users/{email}/profile`.
 
 **Ответ 200:**
 ```json
@@ -119,7 +139,7 @@
 
 ### `GET /api/v2/stats/weekly?from=YYYY-MM-DD&to=YYYY-MM-DD`
 
-Группировка по ISO-неделям, для каждой недели — totals и per-author breakdown. Список отсортирован по возрастанию `weekStart`.
+Группировка по ISO-неделям, для каждой недели — totals и per-author breakdown с enriched `displayName`/`avatarUrl`. Список отсортирован по возрастанию `weekStart`.
 
 **Ответ 200:**
 ```json
@@ -134,15 +154,27 @@
     "totalDeletedLines": 850,
     "totalTestAddedLines": 320,
     "authors": [
-      { "email": "boris@x5.ru", "commits": 12, "mergeCommits": 1, "addedLines": 480, "deletedLines": 200, "testAddedLines": 90 }
+      {
+        "email": "boris@x5.ru",
+        "displayName": "Boris",
+        "avatarUrl": "https://kaiten.x5.ru/.../avatar.png",
+        "commits": 12,
+        "nonMergeCommits": 11,
+        "mergeCommits": 1,
+        "addedLines": 480,
+        "deletedLines": 200,
+        "testAddedLines": 90
+      }
     ]
   }
 ]
 ```
 
+> `displayName`/`avatarUrl` могут быть `null` — если автор ещё не связан с Kaiten (нет записи в `unified_user`).
+
 ### `GET /api/v2/stats/summary?from=YYYY-MM-DD&to=YYYY-MM-DD`
 
-Сводка за период: totals + топ-10 авторов по убыванию коммитов.
+Сводка за период: totals + топ-10 авторов с enriched `displayName`/`avatarUrl`. Топ отсортирован по убыванию **всех** коммитов (включая мерджи) — это исторически так, для top-N это менее критично чем для дашборда.
 
 **Ответ 200:**
 ```json
@@ -151,12 +183,22 @@
   "to":   "2026-05-31",
   "totalCommits": 312,
   "totalMergeCommits": 18,
-  "totalAddedLines": 12_400,
-  "totalDeletedLines": 5_800,
-  "totalTestAddedLines": 2_120,
+  "totalAddedLines": 12400,
+  "totalDeletedLines": 5800,
+  "totalTestAddedLines": 2120,
   "uniqueAuthors": 14,
   "topAuthors": [
-    { "email": "boris@x5.ru", "commits": 47, "mergeCommits": 3, "addedLines": 1820, "deletedLines": 850, "testAddedLines": 320 }
+    {
+      "email": "boris@x5.ru",
+      "displayName": "Boris",
+      "avatarUrl": "https://kaiten.x5.ru/.../avatar.png",
+      "commits": 47,
+      "nonMergeCommits": 44,
+      "mergeCommits": 3,
+      "addedLines": 1820,
+      "deletedLines": 850,
+      "testAddedLines": 320
+    }
   ]
 }
 ```
@@ -267,3 +309,93 @@
 | 400 | `urn:markable:problem:bad-request` *(title: Malformed request)* | Не пришёл обязательный query-параметр, не распарсилась дата. |
 | 404 | (без тела) | Ресурс не найден (профиль / прогон сбора). |
 | 500 | `urn:markable:problem:internal` | Внутренняя ошибка сервера. Детали в логах сервера. |
+
+---
+
+## Migration notes для фронта (что меняется в Фиче 2)
+
+Бэк выкатил две связанные правки. Фронту нужно адаптироваться по ним обоим.
+
+### 1. `/api/v2/dashboard` — новый paginated-контракт
+
+**Было:**
+```json
+{
+  "from": "...", "to": "...",
+  "topActive":  [ AuthorSummary, ... ],
+  "outsiders":  [ AuthorSummary, ... ]
+}
+```
+
+**Стало:**
+```json
+{
+  "from": "...", "to": "...",
+  "page": 0, "size": 20, "totalElements": 47, "totalPages": 3, "hasNext": true,
+  "items":      [ AuthorSummary, ... ]
+}
+```
+
+**Параметры запроса:**
+- ❌ Убрали: `topN`, `outsiderN`.
+- ✅ Добавили: `page` (0-based, default `0`), `size` (default `20`, max `500`).
+
+**Что делать фронту:**
+- Заменить запрос `?topN=10&outsiderN=10` на `?page=0&size=20`.
+- Раздельных секций «top» и «outsiders» больше нет. Если нужна секция аутсайдеров — берём последнюю страницу (`page = totalPages - 1`).
+- Сортировка теперь по **не-мердж коммитам** (`commits − mergeCommits`), убывающе. Tie-breaker — email алфавитно. Это значит порядок страниц стабильный, можно безопасно prefetch'ить.
+
+### 2. `AuthorSummary` поменялся — новые поля во **всех** эндпоинтах, где он возвращается
+
+Затронуты: `/dashboard`, `/stats/weekly`, `/stats/summary`. (`/stats/daily` использует другой тип, без изменений.)
+
+**Было:**
+```ts
+type AuthorSummary = {
+  email: string;
+  commits: number;
+  mergeCommits: number;
+  addedLines: number;
+  deletedLines: number;
+  testAddedLines: number;
+};
+```
+
+**Стало:**
+```ts
+type AuthorSummary = {
+  email: string;
+  displayName: string | null;     // ⬅️ new
+  avatarUrl:   string | null;     // ⬅️ new
+  commits: number;
+  nonMergeCommits: number;        // ⬅️ new (computed: commits - mergeCommits)
+  mergeCommits: number;
+  addedLines: number;
+  deletedLines: number;
+  testAddedLines: number;
+};
+```
+
+**Что делать фронту:**
+- Обновить TS-тип (или регенерировать из OpenAPI, когда подключим — Фича отложена).
+- На карточке автора показывать `avatarUrl` (если есть — иначе плейсхолдер с инициалами `email[0]`) и `displayName` (если есть — иначе fallback на email или часть email до `@`).
+- Если фронт где-то отображает «количество коммитов автора», уточнить: использовать `commits` (общее число, включая мерджи) или `nonMergeCommits` (реальная работа). На дашборде логично показывать `nonMergeCommits` — это и есть метрика ранжирования. Можно показать оба числа в виде `45 + 5 мерджей`.
+
+**Откуда берётся профиль:**
+- `displayName` и `avatarUrl` тянутся бэком из таблицы `unified_user` по `email`.
+- Запись в `unified_user` появляется автоматически при первом коммите автора. Поля `displayName`/`avatarUrl` заполняются на этапе **sync Kaiten users** в `POST /api/v2/collection/runs` — если у автора email совпадает с email-ом пользователя в Kaiten, бэк подставляет имя и URL аватара из Kaiten-профиля.
+- Поэтому возможны три состояния:
+  1. Автор **не из Kaiten** (внешний контрибьютор / сервисный аккаунт) → `displayName=null, avatarUrl=null`.
+  2. Автор есть в Kaiten, но **сбор ещё не запускался** → `null, null`.
+  3. Автор в Kaiten + был sync → оба поля заполнены.
+
+### 3. Чек-лист миграции
+
+- [ ] Заменить `topN`/`outsiderN` на `page`/`size` в запросе дашборда.
+- [ ] Обновить TS-типы `DashboardResponse` и `AuthorSummary`.
+- [ ] Перерендер дашборда как paginated списка (table/grid с пагинацией снизу или infinite scroll).
+- [ ] Аватары на карточках авторов с fallback на инициалы из email.
+- [ ] Решить семантику числа коммитов: `commits` vs `nonMergeCommits` (рекомендую отображать оба или только non-merge).
+- [ ] Передёргать `POST /api/v2/collection/runs` хотя бы раз после деплоя — чтобы заполнились `kaiten_id`/`avatarUrl`/`name` в `unified_user`.
+
+Если вопросы по полям или нужно дополнить контракт — пингуйте, обновим.

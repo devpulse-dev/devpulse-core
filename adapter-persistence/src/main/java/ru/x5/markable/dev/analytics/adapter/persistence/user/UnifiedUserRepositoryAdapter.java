@@ -87,6 +87,21 @@ class UnifiedUserRepositoryAdapter implements UnifiedUserRepository {
     }
 
     @Override
+    public List<UnifiedUser> findByEmails(Collection<Email> emails) {
+        if (emails == null || emails.isEmpty()) {
+            return List.of();
+        }
+        // Email хранится в нижнем регистре — нормализуем заранее для batch IN.
+        List<String> normalized = emails.stream()
+                .filter(e -> e != null && e.value() != null)
+                .map(e -> e.value().toLowerCase())
+                .distinct()
+                .toList();
+        if (normalized.isEmpty()) return List.of();
+        return jpa.findByEmailIn(normalized).stream().map(mapper::toDomain).toList();
+    }
+
+    @Override
     @Transactional
     public void updateKaitenId(Email email, KaitenUserId kaitenId, String name, String avatarUrl) {
         jpa.findByEmail(email.value()).ifPresent(user -> {

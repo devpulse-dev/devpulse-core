@@ -16,6 +16,15 @@ public interface UnifiedUserRepository {
     Optional<UnifiedUser> findByEmail(Email email);
 
     /**
+     * Batch-чтение пользователей по списку email — один SELECT с {@code WHERE email IN (?)}.
+     *
+     * <p>Возвращает только реально существующие записи (без create). Используется
+     * для enrichment-сценариев — например, подтянуть {@code avatarUrl}/{@code name}
+     * к списку авторов в дашборде.</p>
+     */
+    List<UnifiedUser> findByEmails(Collection<Email> emails);
+
+    /**
      * Batch find-or-create по списку email.
      *
      * <p>Гарантирует: каждый указанный email будет иметь запись в {@code unified_user}

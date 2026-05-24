@@ -23,7 +23,8 @@ class KaitenRateLimiterTest {
             /*maxRetries*/     3,
             /*initBackoffMs*/  1,
             /*maxBackoffMs*/   5,
-            /*pageSize*/       100);
+            /*pageSize*/       100,
+            /*insecureSsl*/    false);
 
     private final KaitenRateLimiter limiter = new KaitenRateLimiter(FAST_PROPS);
 

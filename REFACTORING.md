@@ -263,3 +263,36 @@ markable-dev-analytics/
 - Cron / `@Scheduled` — мы его и не добавляли в v2 (он был в открытых вопросах). Просто фиксируем: ручной триггер навсегда.
 - Схема БД — `kaiten_card` таблица остаётся, просто не наполняется. Если решим окончательно убрать кэш карточек — отдельная задача с миграцией drop-table.
 - Weekly stats — без изменений.
+
+### Фича 2 — Paginated dashboard + enrichment + non-merge sort ✅
+
+**Что хотел фронт:**
+1. Дашборд возвращает **все** активные авторы paginated (для скролла/таблицы), а не только top-10 + outsider-10.
+2. На карточке автора нужны `displayName` и `avatarUrl` из `unified_user` — чтобы не делать N запросов профиля.
+3. Уточнение: в топе должны быть «реально работающие», а не тимлиды-мерджеры.
+
+**Архитектурные решения:**
+
+| Было | Стало |
+|---|---|
+| `Dashboard(period, List<AuthorSummary> topActive, List<AuthorSummary> outsiders)` | `Dashboard(period, Page<AuthorSummary> authors)` |
+| Сортировка по `commits desc` (включая мерджи) | Сортировка по `nonMergeCommits desc` + tiebreak по email |
+| `AuthorSummary(email, commits, …)` | `AuthorSummary(email, displayName, avatarUrl, commits, …)` + computed `nonMergeCommits()` |
+| `StatsSummarizer.dashboard(period, stats, topN, outsiderN)` → `Dashboard` | `StatsSummarizer.activeAuthorsByActivity(stats)` → `List<AuthorSummary>` (pagination — детали use case) |
+| `GetDashboardUseCase.get(period, topN, outsiderN)` | `GetDashboardUseCase.get(period, PageRequest)` |
+| REST: `?topN=10&outsiderN=10`, ответ `{topActive, outsiders}` | REST: `?page=0&size=20`, ответ `{page, size, totalElements, totalPages, hasNext, items}` |
+
+**Доменный примитив `Page<T>`** добавлен в `domain.common` — обёртка с `items + totalElements + page + size` и static-фабрикой `Page.of(allSorted, request)`. Spring `Page` мы наверх не таскаем (domain без Spring).
+
+**Enrichment-стратегия:** профили (`displayName`, `avatarUrl`) подтягиваются из `unified_user` через новый `UnifiedUserRepository.findByEmails` — один SELECT `WHERE email IN (?)`. Делается **только для авторов текущей страницы**, не для всего набора — экономим запросы когда фронт листает большой dashboard.
+
+**Тесты обновлены:** `StatsSummarizerTest` (новые сценарии под `activeAuthorsByActivity` с проверкой не-мердж сортировки), `QueryUseCasesTest.DashboardService` (paginated + enrichment + skip enrich при пустых stats), `DashboardControllerTest` (новый paginated contract с проверкой default 30 days + page/size override).
+
+**Enrichment покрывает все три эндпоинта c `AuthorSummary`:**
+- `/dashboard` — enrichment **только для текущей страницы** (экономим запросы).
+- `/stats/weekly` — один batch-fetch на все недели сразу, потом per-week mapping.
+- `/stats/summary` — top-N (≤10), тривиальный batch.
+
+Общий helper [`AuthorSummaryEnricher`](application/src/main/java/ru/x5/markable/dev/analytics/application/service/AuthorSummaryEnricher.java) — два метода: `enrich(list)` для плоского случая и `batchEnricher(groups)` для weekly (общий fetch + раздача по группам).
+
+`/stats/daily` — намеренно **без** enrichment: записей тысячи, цена не оправдана. Если фронту нужны аватары на дневном уровне — агрегирует по email на своей стороне и тянет профили через `/dashboard` или `/users/{email}/profile`.

@@ -11,7 +11,6 @@ import java.util.Map;
 import ru.x5.markable.dev.analytics.domain.common.Period;
 import ru.x5.markable.dev.analytics.domain.model.stats.AuthorSummary;
 import ru.x5.markable.dev.analytics.domain.model.stats.DailyAuthorStats;
-import ru.x5.markable.dev.analytics.domain.model.stats.Dashboard;
 import ru.x5.markable.dev.analytics.domain.model.stats.PeriodSummary;
 import ru.x5.markable.dev.analytics.domain.model.stats.WeeklyStats;
 import ru.x5.markable.dev.analytics.domain.model.user.Email;
@@ -63,30 +62,25 @@ public final class StatsSummarizer {
     }
 
     /**
-     * Дашборд: {@code topN} самых активных + {@code outsiderN} наименее активных
-     * (среди тех, у кого за период есть хотя бы 1 коммит).
+     * Все активные авторы за период (имеющие &ge; 1 коммит), отсортированы по убыванию
+     * не-мердж коммитов. Use case применит к этому списку pagination через {@link
+     * ru.x5.markable.dev.analytics.domain.common.Page#of}.
      *
-     * <p>Если разных авторов меньше чем {@code topN + outsiderN}, два списка могут
-     * пересекаться — это намеренно: при маленькой команде «топ» и «аутсайдер» —
-     * это просто два угла одного списка.</p>
+     * <p>Авторы здесь без {@code displayName}/{@code avatarUrl} — те enriche use case'ом
+     * из {@code unified_user}.</p>
      */
-    public static Dashboard dashboard(Period period, Collection<DailyAuthorStats> stats,
-                                      int topN, int outsiderN) {
-        if (topN < 0 || outsiderN < 0) {
-            throw new IllegalArgumentException("topN/outsiderN must be >= 0");
-        }
+    public static List<AuthorSummary> activeAuthorsByActivity(Collection<DailyAuthorStats> stats) {
         Map<Email, AuthorAcc> byAuthor = new HashMap<>();
         for (DailyAuthorStats s : stats) {
             byAuthor.computeIfAbsent(s.authorEmail(), k -> new AuthorAcc()).add(s);
         }
-        List<AuthorSummary> all = byAuthor.entrySet().stream()
+        return byAuthor.entrySet().stream()
                 .map(e -> e.getValue().toSummary(e.getKey()))
-                .sorted(Comparator.comparingLong(AuthorSummary::commits).reversed())
+                .sorted(Comparator
+                        .comparingLong(AuthorSummary::nonMergeCommits).reversed()
+                        // Стабильность при ничьей: алфавит email — детерминированный порядок страниц.
+                        .thenComparing(a -> a.email().value()))
                 .toList();
-
-        List<AuthorSummary> top = all.stream().limit(topN).toList();
-        List<AuthorSummary> outsiders = all.reversed().stream().limit(outsiderN).toList();
-        return new Dashboard(period, top, outsiders);
     }
 
     /**
@@ -140,7 +134,9 @@ public final class StatsSummarizer {
         }
 
         AuthorSummary toSummary(Email email) {
-            return new AuthorSummary(email, commits, mergeCommits, addedLines, deletedLines, testAddedLines);
+            // displayName и avatarUrl — null; enrichment делает use case из unified_user.
+            return new AuthorSummary(email, null, null,
+                    commits, mergeCommits, addedLines, deletedLines, testAddedLines);
         }
     }
 

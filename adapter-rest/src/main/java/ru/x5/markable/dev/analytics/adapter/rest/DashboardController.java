@@ -10,13 +10,15 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import ru.x5.markable.dev.analytics.adapter.rest.dto.DashboardResponse;
 import ru.x5.markable.dev.analytics.application.port.in.GetDashboardUseCase;
+import ru.x5.markable.dev.analytics.domain.common.PageRequest;
 import ru.x5.markable.dev.analytics.domain.common.Period;
 
 /**
- * Главный борд фронта: топ-N активных + N аутсайдеров.
+ * Главный борд: paginated список всех активных авторов за период,
+ * отсортированных по не-мердж коммитам по убыванию.
  *
  * <p>Если {@code from}/{@code to} не переданы — берётся последний 30-дневный период
- * ({@code today-30..today}). Это удобный дефолт для основной страницы.</p>
+ * ({@code today-30..today}). Это удобный дефолт для основной страницы фронта.</p>
  */
 @RestController
 @RequestMapping("/api/v2/dashboard")
@@ -24,8 +26,7 @@ import ru.x5.markable.dev.analytics.domain.common.Period;
 public class DashboardController {
 
     private static final int DEFAULT_WINDOW_DAYS = 30;
-    private static final int DEFAULT_TOP_N = 10;
-    private static final int DEFAULT_OUTSIDER_N = 10;
+    private static final int DEFAULT_PAGE_SIZE = 20;
 
     private final GetDashboardUseCase getDashboard;
 
@@ -33,10 +34,11 @@ public class DashboardController {
     public ResponseEntity<DashboardResponse> get(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(defaultValue = "" + DEFAULT_TOP_N) int topN,
-            @RequestParam(defaultValue = "" + DEFAULT_OUTSIDER_N) int outsiderN) {
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) int size) {
         Period period = resolvePeriod(from, to);
-        return ResponseEntity.ok(DashboardResponse.from(getDashboard.get(period, topN, outsiderN)));
+        return ResponseEntity.ok(DashboardResponse.from(
+                getDashboard.get(period, new PageRequest(page, size))));
     }
 
     /** Подставляет дефолтные границы периода если фронт их опустил. */

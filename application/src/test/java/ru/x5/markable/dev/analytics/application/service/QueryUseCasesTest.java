@@ -3,6 +3,7 @@ package ru.x5.markable.dev.analytics.application.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -63,16 +64,36 @@ class QueryUseCasesTest {
     @DisplayName("GetWeeklyStatsService")
     class Weekly {
         @Test
-        @DisplayName("берёт daily stats и группирует по ISO-неделям")
-        void groupsByWeek() {
+        @DisplayName("группирует по ISO-неделям + enrich displayName/avatarUrl из unified_user")
+        void groupsByWeekAndEnriches() {
             when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of(
-                    day(LocalDate.of(2026, 5, 4), 1),    // ISO week 19
-                    day(LocalDate.of(2026, 5, 11), 2)    // ISO week 20
+                    day(EMAIL, LocalDate.of(2026, 5, 4), 1, 0),    // ISO week 19
+                    day(EMAIL, LocalDate.of(2026, 5, 11), 2, 0)    // ISO week 20
+            ));
+            when(unifiedUserRepository.findByEmails(anyCollection())).thenReturn(List.of(
+                    userWithProfile(EMAIL, "Boris", "https://avatar/b")
             ));
 
-            var weeks = new GetWeeklyStatsService(dailyStatsRepository).findByPeriod(PERIOD);
+            var weeks = new GetWeeklyStatsService(dailyStatsRepository, unifiedUserRepository)
+                    .findByPeriod(PERIOD);
 
-            assertThat(weeks).hasSize(2);
+            assertAll("weekly enriched",
+                    () -> assertThat(weeks).hasSize(2),
+                    () -> assertThat(weeks.get(0).authors().getFirst().displayName()).isEqualTo("Boris"),
+                    () -> assertThat(weeks.get(0).authors().getFirst().avatarUrl()).isEqualTo("https://avatar/b"));
+        }
+
+        @Test
+        @DisplayName("пустые stats → пустой список, без обращения к unified_user")
+        void emptyWeeks() {
+            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of());
+
+            var weeks = new GetWeeklyStatsService(dailyStatsRepository, unifiedUserRepository)
+                    .findByPeriod(PERIOD);
+
+            assertAll("пустой weekly",
+                    () -> assertThat(weeks).isEmpty(),
+                    () -> verifyNoInteractions(unifiedUserRepository));
         }
     }
 
@@ -80,16 +101,37 @@ class QueryUseCasesTest {
     @DisplayName("GetPeriodSummaryService")
     class Summary {
         @Test
-        @DisplayName("период с пустым набором → нулевая сводка с указанным period")
+        @DisplayName("период с пустым набором → нулевая сводка, unified_user не зовём")
         void emptyPeriod() {
             when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of());
 
-            var s = new GetPeriodSummaryService(dailyStatsRepository).summarize(PERIOD);
+            var s = new GetPeriodSummaryService(dailyStatsRepository, unifiedUserRepository)
+                    .summarize(PERIOD);
 
             assertAll("пустая сводка",
                     () -> assertThat(s.period()).isEqualTo(PERIOD),
                     () -> assertThat(s.totalCommits()).isZero(),
-                    () -> assertThat(s.topAuthors()).isEmpty());
+                    () -> assertThat(s.topAuthors()).isEmpty(),
+                    () -> verifyNoInteractions(unifiedUserRepository));
+        }
+
+        @Test
+        @DisplayName("topAuthors enriched displayName/avatarUrl из unified_user")
+        void summaryEnrichesTopAuthors() {
+            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of(
+                    day(EMAIL, LocalDate.of(2026, 5, 1), 5, 0)
+            ));
+            when(unifiedUserRepository.findByEmails(anyCollection())).thenReturn(List.of(
+                    userWithProfile(EMAIL, "Boris", "https://avatar/b")
+            ));
+
+            var s = new GetPeriodSummaryService(dailyStatsRepository, unifiedUserRepository)
+                    .summarize(PERIOD);
+
+            assertAll("topAuthors enriched",
+                    () -> assertThat(s.topAuthors()).hasSize(1),
+                    () -> assertThat(s.topAuthors().getFirst().displayName()).isEqualTo("Boris"),
+                    () -> assertThat(s.topAuthors().getFirst().avatarUrl()).isEqualTo("https://avatar/b"));
         }
     }
 
@@ -171,24 +213,62 @@ class QueryUseCasesTest {
     @DisplayName("GetDashboardService")
     class DashboardService {
         @Test
-        @DisplayName("делегирует в репозиторий, прокидывает period")
-        void delegates() {
+        @DisplayName("paginated + enrich avatar/name из unified_user")
+        void paginatedAndEnriched() {
+            // 3 автора с разной активностью
             when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of(
-                    day(LocalDate.of(2026, 5, 1), 5)));
+                    day(EMAIL, LocalDate.of(2026, 5, 1), 10, 0),
+                    day(new Email("alice@x5.ru"), LocalDate.of(2026, 5, 2), 5, 0),
+                    day(new Email("bob@x5.ru"), LocalDate.of(2026, 5, 3), 1, 0)
+            ));
 
-            var d = new GetDashboardService(dailyStatsRepository).get(PERIOD, 10, 10);
+            // unified_user знает только Boris-а — alice/bob ещё не синканы
+            when(unifiedUserRepository.findByEmails(anyCollection())).thenReturn(List.of(
+                    userWithProfile(EMAIL, "Boris", "https://avatar/boris")
+            ));
 
-            assertAll("dashboard",
+            var d = new GetDashboardService(dailyStatsRepository, unifiedUserRepository)
+                    .get(PERIOD, new PageRequest(0, 2));
+
+            assertAll("paginated dashboard",
                     () -> assertThat(d.period()).isEqualTo(PERIOD),
-                    () -> assertThat(d.topActive()).hasSize(1));
+                    () -> assertThat(d.authors().items()).hasSize(2),
+                    () -> assertThat(d.authors().totalElements()).as("всего 3 активных").isEqualTo(3),
+                    () -> assertThat(d.authors().totalPages()).isEqualTo(2),
+                    () -> assertThat(d.authors().hasNext()).isTrue(),
+                    () -> assertThat(d.authors().items().get(0).email()).as("Boris в топе — 10 коммитов").isEqualTo(EMAIL),
+                    () -> assertThat(d.authors().items().get(0).displayName()).isEqualTo("Boris"),
+                    () -> assertThat(d.authors().items().get(0).avatarUrl()).isEqualTo("https://avatar/boris"),
+                    () -> assertThat(d.authors().items().get(1).email().value()).isEqualTo("alice@x5.ru"),
+                    () -> assertThat(d.authors().items().get(1).displayName()).as("alice не в unified_user → null").isNull());
+        }
+
+        @Test
+        @DisplayName("пустые stats → пустая страница с правильным page/size, без обращения к unified_user")
+        void emptyStats() {
+            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of());
+
+            var d = new GetDashboardService(dailyStatsRepository, unifiedUserRepository)
+                    .get(PERIOD, new PageRequest(0, 10));
+
+            assertAll("пустая страница",
+                    () -> assertThat(d.authors().items()).isEmpty(),
+                    () -> assertThat(d.authors().totalElements()).isZero(),
+                    () -> assertThat(d.authors().page()).isZero(),
+                    () -> assertThat(d.authors().size()).isEqualTo(10),
+                    () -> org.mockito.Mockito.verifyNoInteractions(unifiedUserRepository));
         }
     }
 
     /* ------------ helpers ------------ */
 
     private static DailyAuthorStats day(LocalDate date, long commits) {
+        return day(EMAIL, date, commits, /*merge*/ 0);
+    }
+
+    private static DailyAuthorStats day(Email email, LocalDate date, long commits, long merge) {
         return new DailyAuthorStats(
-                null, EMAIL, date, REPO, commits, 0, 10, 5, 1,
+                null, email, date, REPO, commits, merge, 10, 5, 1,
                 LocalDateTime.now(), null);
     }
 
@@ -201,6 +281,12 @@ class QueryUseCasesTest {
     private static UnifiedUser userWithoutKaiten() {
         LocalDateTime now = LocalDateTime.now();
         return new UnifiedUser(1L, EMAIL, "boris", "Boris", null,
+                null, null, now, now, now);
+    }
+
+    private static UnifiedUser userWithProfile(Email email, String name, String avatarUrl) {
+        LocalDateTime now = LocalDateTime.now();
+        return new UnifiedUser(1L, email, email.value().split("@")[0], name, avatarUrl,
                 null, null, now, now, now);
     }
 }

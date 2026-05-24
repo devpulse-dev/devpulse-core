@@ -39,6 +39,15 @@
         <archunit.version>1.4.2</archunit.version>
         <testcontainers.version>1.20.4</testcontainers.version>
         <assertj.version>3.26.3</assertj.version>
+
+        <!--
+            Override Spring Boot 4.0.0 BOM (там 5.0.1).
+            В Liquibase 5.0.0/5.0.1 регрес в CatalogSnapshotGenerator: на PostgreSQL
+            регистронезависимый матч ловит «дубли» каталогов → InvalidExampleException
+            «Found multiple catalogs matching ...». 4.31.1 — последний стабильный 4.x,
+            совместимый со Spring Boot 4.0.
+        -->
+        <liquibase.version>4.31.1</liquibase.version>
     </properties>
 
     <dependencyManagement>

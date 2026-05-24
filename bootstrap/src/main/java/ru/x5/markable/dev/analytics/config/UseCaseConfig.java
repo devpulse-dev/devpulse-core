@@ -78,13 +78,17 @@ public class UseCaseConfig {
     }
 
     @Bean
-    GetWeeklyStatsUseCase getWeeklyStatsUseCase(DailyStatsRepository dailyStatsRepository) {
-        return new GetWeeklyStatsService(dailyStatsRepository);
+    GetWeeklyStatsUseCase getWeeklyStatsUseCase(
+            DailyStatsRepository dailyStatsRepository,
+            UnifiedUserRepository unifiedUserRepository) {
+        return new GetWeeklyStatsService(dailyStatsRepository, unifiedUserRepository);
     }
 
     @Bean
-    GetPeriodSummaryUseCase getPeriodSummaryUseCase(DailyStatsRepository dailyStatsRepository) {
-        return new GetPeriodSummaryService(dailyStatsRepository);
+    GetPeriodSummaryUseCase getPeriodSummaryUseCase(
+            DailyStatsRepository dailyStatsRepository,
+            UnifiedUserRepository unifiedUserRepository) {
+        return new GetPeriodSummaryService(dailyStatsRepository, unifiedUserRepository);
     }
 
     @Bean
@@ -103,7 +107,9 @@ public class UseCaseConfig {
     }
 
     @Bean
-    GetDashboardUseCase getDashboardUseCase(DailyStatsRepository dailyStatsRepository) {
-        return new GetDashboardService(dailyStatsRepository);
+    GetDashboardUseCase getDashboardUseCase(
+            DailyStatsRepository dailyStatsRepository,
+            UnifiedUserRepository unifiedUserRepository) {
+        return new GetDashboardService(dailyStatsRepository, unifiedUserRepository);
     }
 }

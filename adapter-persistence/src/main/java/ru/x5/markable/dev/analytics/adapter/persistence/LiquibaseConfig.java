@@ -18,6 +18,11 @@ import org.springframework.orm.jpa.AbstractEntityManagerFactoryBean;
  *   <li>{@link AbstractEntityManagerFactoryBean} объявляется зависимым от bean {@code liquibase},
  *       чтобы Hibernate инициализировался уже после применения миграций.</li>
  * </ul>
+ *
+ * <p>Поддерживаются property-настройки {@code spring.liquibase.default-schema} и
+ * {@code spring.liquibase.liquibase-schema} — нужны для обхода JDBC-аномалии «Found multiple catalogs
+ * matching ...» на проксированных Postgres-соединениях, где {@code DatabaseMetaData.getCatalogs()}
+ * возвращает дубли. Явный schema-name пропускает Liquibase-snapshot шаг поиска каталога.</p>
  */
 @Configuration
 public class LiquibaseConfig {
@@ -26,12 +31,20 @@ public class LiquibaseConfig {
     public SpringLiquibase liquibase(
             DataSource dataSource,
             @Value("${spring.liquibase.change-log:classpath:liquibase/changelog.master.yml}") String changeLog,
-            @Value("${spring.liquibase.enabled:true}") boolean enabled
+            @Value("${spring.liquibase.enabled:true}") boolean enabled,
+            @Value("${spring.liquibase.default-schema:}") String defaultSchema,
+            @Value("${spring.liquibase.liquibase-schema:}") String liquibaseSchema
     ) {
         SpringLiquibase liquibase = new SpringLiquibase();
         liquibase.setDataSource(dataSource);
         liquibase.setChangeLog(changeLog);
         liquibase.setShouldRun(enabled);
+        if (!defaultSchema.isBlank()) {
+            liquibase.setDefaultSchema(defaultSchema);
+        }
+        if (!liquibaseSchema.isBlank()) {
+            liquibase.setLiquibaseSchema(liquibaseSchema);
+        }
         return liquibase;
     }
 

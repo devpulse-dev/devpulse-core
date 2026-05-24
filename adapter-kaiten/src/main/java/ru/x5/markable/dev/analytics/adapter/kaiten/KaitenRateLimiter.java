@@ -66,6 +66,13 @@ class KaitenRateLimiter {
                 backoff = Math.min(backoff * 2, properties.retryMaxBackoffMs());
                 attempt++;
             } catch (HttpServerErrorException | ResourceAccessException e) {
+                // SSL handshake fail / unknown certificate — это перманентная ошибка конфигурации,
+                // ретраить бессмысленно (просто проедим 5–10 минут на exp backoff). Сразу пробрасываем.
+                if (e instanceof ResourceAccessException && isSslFailure(e)) {
+                    log.error("Kaiten SSL ошибка для {}: {}. Ретрай отключён — это проблема "
+                            + "конфигурации truststore.", description, e.getMessage());
+                    throw e;
+                }
                 if (attempt >= properties.maxRetries()) {
                     log.error("Kaiten {} после {} попыток для {}", e.getClass().getSimpleName(),
                             attempt, description);
@@ -101,6 +108,20 @@ class KaitenRateLimiter {
             }
         }
         lastRequestAt = System.currentTimeMillis();
+    }
+
+    /**
+     * Проверяет, является ли ошибка SSL handshake-сбоем (любого вида: untrusted cert,
+     * hostname mismatch, и т.п.). Такие ошибки перманентны до правки truststore — ретрай не поможет.
+     */
+    private static boolean isSslFailure(Throwable e) {
+        Throwable t = e;
+        while (t != null) {
+            if (t instanceof javax.net.ssl.SSLException) return true;
+            if (t instanceof java.security.cert.CertificateException) return true;
+            t = t.getCause();
+        }
+        return false;
     }
 
     /** Парсит заголовок {@code Retry-After} (только число в секундах, без HTTP-date). */

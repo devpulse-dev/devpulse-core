@@ -13,6 +13,6 @@ public record KaitenUserDto(
         String username,
         String email,
         @JsonProperty("full_name") String fullName,
-        @JsonProperty("avatar") String avatarUrl
+        @JsonProperty("avatar_uploaded_url") String avatarUrl
 ) {
 }

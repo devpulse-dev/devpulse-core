@@ -25,4 +25,11 @@ public record WeeklyStats(
         Objects.requireNonNull(weekStart, "weekStart required");
         authors = authors == null ? List.of() : List.copyOf(authors);
     }
+
+    /** Возвращает копию с новым списком авторов (для enrichment displayName/avatarUrl в use case). */
+    public WeeklyStats withAuthors(List<AuthorSummary> newAuthors) {
+        return new WeeklyStats(year, week, weekStart,
+                totalCommits, totalMergeCommits, totalAddedLines, totalDeletedLines, totalTestAddedLines,
+                newAuthors);
+    }
 }

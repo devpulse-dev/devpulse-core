@@ -8,6 +8,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>Дефолты подобраны под наблюдаемый sliding-window лимит Kaiten (~15-30 RPS):
  * 250 мс между запросами = 4 RPS, 10 retry'ев и до 60 с backoff покрывают
  * восстановление лимита после burst'а.</p>
+ *
+ * @param insecureSsl если {@code true} — Kaiten HTTP-клиент собирается с trust-all SSL context
+ *                    (отключены проверка цепочки и hostname verification). Только для dev
+ *                    на машинах без корпоративного CA в truststore. В проде/CI — оставляйте {@code false}.
  */
 @ConfigurationProperties(prefix = "kaiten.api")
 public record KaitenProperties(
@@ -17,7 +21,8 @@ public record KaitenProperties(
         int maxRetries,
         long retryInitialBackoffMs,
         long retryMaxBackoffMs,
-        int pageSize
+        int pageSize,
+        boolean insecureSsl
 ) {
     public KaitenProperties {
         if (requestDelayMs <= 0) requestDelayMs = 250;

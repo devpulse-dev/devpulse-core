@@ -13,8 +13,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import ru.x5.markable.dev.analytics.domain.common.Period;
 import ru.x5.markable.dev.analytics.domain.model.git.RepoName;
+import ru.x5.markable.dev.analytics.domain.model.stats.AuthorSummary;
 import ru.x5.markable.dev.analytics.domain.model.stats.DailyAuthorStats;
-import ru.x5.markable.dev.analytics.domain.model.stats.Dashboard;
 import ru.x5.markable.dev.analytics.domain.model.stats.PeriodSummary;
 import ru.x5.markable.dev.analytics.domain.model.stats.WeeklyStats;
 import ru.x5.markable.dev.analytics.domain.model.user.Email;
@@ -83,53 +83,50 @@ class StatsSummarizerTest {
     }
 
     @Test
-    @DisplayName("dashboard: топ-2 и аутсайдеры-2 при 4 авторах с разной активностью")
-    void dashboardSplitsTopAndOutsiders() {
+    @DisplayName("activeAuthorsByActivity: сортирует по убыванию не-мердж коммитов")
+    void activeAuthorsSortedByNonMerge() {
         List<DailyAuthorStats> stats = List.of(
-                day(LocalDate.of(2026, 5, 1), "alpha@x5.ru", 10, 0, 0, 0, 0),
+                // alpha: 10 коммитов, ВСЕ мерджи → реальная работа = 0
+                day(LocalDate.of(2026, 5, 1), "alpha@x5.ru", 10, 10, 0, 0, 0),
+                // beta: 8 коммитов, 0 мерджей → реальная работа = 8
                 day(LocalDate.of(2026, 5, 2), "beta@x5.ru",  8, 0, 0, 0, 0),
-                day(LocalDate.of(2026, 5, 3), "gamma@x5.ru", 3, 0, 0, 0, 0),
-                day(LocalDate.of(2026, 5, 4), "delta@x5.ru", 1, 0, 0, 0, 0)
+                // gamma: 5 коммитов, 1 мердж → реальная работа = 4
+                day(LocalDate.of(2026, 5, 3), "gamma@x5.ru", 5, 1, 0, 0, 0)
         );
 
-        Dashboard d = StatsSummarizer.dashboard(MAY, stats, 2, 2);
+        List<AuthorSummary> sorted = StatsSummarizer.activeAuthorsByActivity(stats);
 
-        assertAll("dashboard",
-                () -> assertThat(d.period()).isEqualTo(MAY),
-                () -> assertThat(d.topActive())
+        assertAll("сортировка по nonMergeCommits desc",
+                () -> assertThat(sorted)
                         .extracting(a -> a.email().value())
-                        .containsExactly("alpha@x5.ru", "beta@x5.ru"),
-                () -> assertThat(d.outsiders())
-                        .extracting(a -> a.email().value())
-                        .as("снизу вверх — delta меньше всех, gamma следом")
-                        .containsExactly("delta@x5.ru", "gamma@x5.ru"));
+                        .as("beta (8) > gamma (4) > alpha (0)")
+                        .containsExactly("beta@x5.ru", "gamma@x5.ru", "alpha@x5.ru"),
+                () -> assertThat(sorted.get(0).nonMergeCommits()).isEqualTo(8),
+                () -> assertThat(sorted.get(1).nonMergeCommits()).isEqualTo(4),
+                () -> assertThat(sorted.get(2).nonMergeCommits()).isZero(),
+                () -> assertThat(sorted.get(2).commits()).as("у alpha commits всё равно 10").isEqualTo(10));
     }
 
     @Test
-    @DisplayName("dashboard: пустой вход → пустые списки, период сохраняется")
-    void dashboardEmpty() {
-        Dashboard d = StatsSummarizer.dashboard(MAY, List.of(), 10, 10);
-        assertAll("пустой dashboard",
-                () -> assertThat(d.period()).isEqualTo(MAY),
-                () -> assertThat(d.topActive()).isEmpty(),
-                () -> assertThat(d.outsiders()).isEmpty());
+    @DisplayName("activeAuthorsByActivity: пустой вход → пустой список")
+    void activeAuthorsEmpty() {
+        assertThat(StatsSummarizer.activeAuthorsByActivity(List.of())).isEmpty();
     }
 
     @Test
-    @DisplayName("dashboard: маленькая команда (2 автора, topN=3, outsiderN=3) → списки пересекаются, оба <=2")
-    void dashboardSmallTeamOverlapsAllowed() {
+    @DisplayName("activeAuthorsByActivity: ничья по non-merge → стабильный порядок (alphabet by email)")
+    void activeAuthorsStableTieBreaker() {
         List<DailyAuthorStats> stats = List.of(
-                day(LocalDate.of(2026, 5, 1), "a@x5.ru", 5, 0, 0, 0, 0),
-                day(LocalDate.of(2026, 5, 2), "b@x5.ru", 2, 0, 0, 0, 0)
+                day(LocalDate.of(2026, 5, 1), "zeta@x5.ru", 5, 0, 0, 0, 0),
+                day(LocalDate.of(2026, 5, 1), "alpha@x5.ru", 5, 0, 0, 0, 0)
         );
 
-        Dashboard d = StatsSummarizer.dashboard(MAY, stats, 3, 3);
+        List<AuthorSummary> sorted = StatsSummarizer.activeAuthorsByActivity(stats);
 
-        assertAll("маленькая команда",
-                () -> assertThat(d.topActive()).hasSize(2),
-                () -> assertThat(d.outsiders()).hasSize(2),
-                () -> assertThat(d.topActive().getFirst().email().value()).isEqualTo("a@x5.ru"),
-                () -> assertThat(d.outsiders().getFirst().email().value()).isEqualTo("b@x5.ru"));
+        assertThat(sorted)
+                .as("при равных коммитах сортируется по email алфавитно")
+                .extracting(a -> a.email().value())
+                .containsExactly("alpha@x5.ru", "zeta@x5.ru");
     }
 
     @ParameterizedTest(name = "[{index}] {0}")

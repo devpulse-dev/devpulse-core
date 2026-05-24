@@ -1,6 +1,6 @@
 # Markable Dev Analytics
 
-[![CI](https://github.com/dev-Markable/markable-dev-analytics-core/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-Markable/markable-dev-analytics-core/actions/workflows/ci.yml)
+[![CI](https://github.com/devpulse-dev/DevPulse-core/actions/workflows/ci.yml/badge.svg)](https://github.com/devpulse-dev/DevPulse-core/actions/workflows/ci.yml)
 
 Сервис аналитики активности разработчиков: собирает коммиты из Git-репозиториев и карточки задач из Kaiten, агрегирует ежедневную статистику по авторам и отдаёт её через REST API для фронта.
 
@@ -42,7 +42,7 @@
 Каждый модуль — отдельный maven-артефакт. Зависимости направлены **только внутрь** (адаптеры → application → domain). За это отвечает ArchUnit-тест в `bootstrap`, который падает при попытке нарушить направление.
 
 ```
-markable-dev-analytics/
+DevPulse/
 ├── pom.xml                       # parent (packaging=pom)
 │
 ├── domain/                       # ⬅️ pure Java, никаких фреймворков (даже Lombok)
@@ -109,6 +109,42 @@ mvn -pl bootstrap spring-boot:run
 ### Конфиг
 
 `bootstrap/src/main/resources/application.yml` — Postgres connection, git-репы для сбора, Kaiten endpoint/token. Чувствительные значения — через env переменные.
+
+### SSL: подключение к корпоративному Kaiten
+
+`kaiten.x5.ru` подписан внутренним X5 CA, которого нет в стандартном Java truststore. Без этого первая же попытка `GET /api/latest/users` падает с `PKIX path building failed`.
+
+Решение — собрать локальный truststore, не трогая системный JVM:
+
+```bash
+# 1. Качаем chain с Kaiten
+openssl s_client -showcerts -connect kaiten.x5.ru:443 -servername kaiten.x5.ru </dev/null 2>/dev/null \
+  | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' > /tmp/kaiten-chain.pem
+
+# 2. Делим на отдельные сертификаты
+mkdir -p /tmp/kaiten-certs
+csplit -z -f /tmp/kaiten-certs/cert- -b "%02d.pem" /tmp/kaiten-chain.pem \
+  '/-----BEGIN CERTIFICATE-----/' '{*}'
+
+# 3. Копируем системный truststore (там Maven Central, GitHub и т.д.) — НЕ теряем их
+JAVA_HOME=$(/usr/libexec/java_home -v 25)
+cp "$JAVA_HOME/lib/security/cacerts" ./local-truststore.jks
+chmod u+w ./local-truststore.jks
+
+# 4. Добавляем X5 CA в копию
+for f in /tmp/kaiten-certs/cert-*.pem; do
+  keytool -importcert -keystore ./local-truststore.jks -storepass changeit \
+    -alias "x5-$(basename "$f" .pem)" -file "$f" -noprompt
+done
+```
+
+Файл `local-truststore.jks` в `.gitignore` — каждый разработчик создаёт сам.
+
+Запуск с custom truststore (IntelliJ Run Configuration → VM options или `MAVEN_OPTS`):
+```
+-Djavax.net.ssl.trustStore=<абс-путь>/local-truststore.jks
+-Djavax.net.ssl.trustStorePassword=changeit
+```
 
 ---
 
