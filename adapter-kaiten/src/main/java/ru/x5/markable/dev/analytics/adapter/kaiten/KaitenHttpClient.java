@@ -1,6 +1,5 @@
 package ru.x5.markable.dev.analytics.adapter.kaiten;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
@@ -31,12 +30,17 @@ interface KaitenHttpClient {
      *
      * <p>Все параметры опциональны: {@code memberIds=null} означает "не фильтровать по участникам",
      * {@code updatedAfter=null} — "за всё время".</p>
+     *
+     * <p><b>{@code updatedAfter} — {@code String}</b>: Kaiten валидирует параметр как OpenAPI
+     * {@code format: date-time} (RFC 3339, с timezone-суффиксом). Spring-сериализация
+     * {@code LocalDateTime}/{@code OffsetDateTime} в query-param варьирует по версиям —
+     * проще явно сформировать строку в адаптере и передать её сюда as-is.</p>
      */
     @GetExchange("/cards")
     List<KaitenCardDto> getCards(
             @org.springframework.web.bind.annotation.RequestParam int limit,
             @org.springframework.web.bind.annotation.RequestParam int offset,
             @org.springframework.web.bind.annotation.RequestParam(required = false, name = "member_ids") String memberIds,
-            @org.springframework.web.bind.annotation.RequestParam(required = false, name = "updated_after") LocalDateTime updatedAfter
+            @org.springframework.web.bind.annotation.RequestParam(required = false, name = "updated_after") String updatedAfter
     );
 }

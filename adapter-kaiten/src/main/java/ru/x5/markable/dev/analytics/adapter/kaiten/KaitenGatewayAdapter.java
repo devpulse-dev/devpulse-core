@@ -1,6 +1,8 @@
 package ru.x5.markable.dev.analytics.adapter.kaiten;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -55,11 +57,19 @@ class KaitenGatewayAdapter implements KaitenGateway {
         int offset = 0;
         int total = 0;
 
+        // Kaiten валидирует updated_after как OpenAPI format: date-time (RFC 3339).
+        // Формируем строку ЯВНО: 2026-04-23T00:00:00Z. Use case даёт LocalDateTime без TZ —
+        // трактуем как UTC. ISO_OFFSET_DATE_TIME с UTC offset выводит ровно "...Z".
+        String updatedAfterStr = updatedAfter == null
+                ? null
+                : updatedAfter.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        log.debug("Kaiten /cards updated_after={}", updatedAfterStr);
+
         while (true) {
             int currentOffset = offset;
             List<KaitenCardDto> rawPage = rateLimiter.execute(
                     "GET /cards?limit=" + limit + "&offset=" + currentOffset,
-                    () -> http.getCards(limit, currentOffset, memberIdsCsv, updatedAfter));
+                    () -> http.getCards(limit, currentOffset, memberIdsCsv, updatedAfterStr));
 
             if (!rawPage.isEmpty()) {
                 List<KaitenCard> mapped = new ArrayList<>(rawPage.size());
