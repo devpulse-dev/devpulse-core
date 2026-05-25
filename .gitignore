@@ -8,6 +8,11 @@
 # Локальный truststore с корпоративными X5 CA — каждый разработчик создаёт сам,
 # см. README раздел «SSL: подключение к корпоративному Kaiten».
 /local-truststore.jks
+
+# Spring profile с реальными секретами (токены git/kaiten, и т.п.) — каждый
+# разработчик копирует из application-local.yml.example и заполняет своими значениями.
+**/application-local.yml
+**/application-local-*.yml
 /*.iml
 /**/*.iml
 /**/*.log

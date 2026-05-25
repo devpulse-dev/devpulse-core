@@ -21,7 +21,13 @@ class CommitMessageParserTest {
             "'KAITEN-101 something',         '101'",
             "'fixed #4242 issue',            '4242'",
             "'wip [555] WIP',                '555'",
-            "'12345 initial commit',         '12345'"
+            "'12345 initial commit',         '12345'",
+            // Kaiten "spaceId-cardId" в начале — возвращаем cardId (вторую группу), не spaceId.
+            // spaceId может быть разной длины (3–5 цифр).
+            "'1700-2963977 [ТЕХДОЛГ] тесты', '2963977'",
+            "'12345-9999 fix bug',           '9999'",
+            "'999-7654321 feature',          '7654321'",
+            "'  1700-100 fix',               '100'"
     })
     @DisplayName("Извлекает номер задачи из поддерживаемых форматов")
     void extractsTaskNumberFromKnownFormats(String message, String expected) {
@@ -44,15 +50,26 @@ class CommitMessageParserTest {
     @Test
     @DisplayName("Несколько форматов в одном сообщении: возвращает первый сматчившийся")
     void picksFirstMatchingPattern() {
-        // Паттерны проверяются в порядке: TASK-/KAITEN-, #, [], standalone-число.
+        // Порядок паттернов: spaceId-cardId, TASK-/KAITEN-, #, [], standalone.
+        // Здесь spaceId-cardId не подходит (нет ведущих цифр) — выигрывает TASK-N.
         var result = CommitMessageParser.extractTaskNumber("TASK-100 closes #200 and [300]");
 
         assertAll("результат парсинга при множественных вхождениях",
-                () -> assertThat(result)
-                        .as("должен быть найден какой-то номер")
-                        .isPresent(),
+                () -> assertThat(result).isPresent(),
                 () -> assertThat(result.map(TaskNumber::value))
                         .as("приоритет — TASK-N паттерн")
                         .contains("100"));
+    }
+
+    @Test
+    @DisplayName("spaceId-cardId побеждает standalone-число — НЕ берём spaceId как номер задачи")
+    void kaitenPatternBeatsStandalone() {
+        var result = CommitMessageParser.extractTaskNumber("1700-2963977 [ТЕХДОЛГ] тесты");
+
+        assertAll("приоритет Kaiten spaceId-cardId",
+                () -> assertThat(result).isPresent(),
+                () -> assertThat(result.map(TaskNumber::value))
+                        .as("возвращаем cardId (2963977), а НЕ spaceId (1700)")
+                        .contains("2963977"));
     }
 }

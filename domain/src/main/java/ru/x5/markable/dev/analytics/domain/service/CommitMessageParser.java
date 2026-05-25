@@ -10,8 +10,12 @@ import ru.x5.markable.dev.analytics.domain.common.TaskNumber;
  *
  * <p>Извлекает номер задачи (Kaiten card id) из сообщения. Поддерживает форматы:
  * <ul>
- *   <li>{@code TASK-12345}, {@code #12345}, {@code [12345]}</li>
- *   <li>Просто число в начале сообщения: {@code 12345 fix bug}</li>
+ *   <li><b>{@code <spaceId>-<cardId>} в начале</b> — наш основной случай Kaiten.
+ *       Например {@code "1700-2963977 [ТЕХДОЛГ] ..."} → возвращаем {@code 2963977}
+ *       (cardId, а не spaceId). Длина spaceId не фиксирована (3–5 цифр).</li>
+ *   <li>{@code TASK-12345}, {@code KAITEN-12345}</li>
+ *   <li>{@code #12345}, {@code [12345]}</li>
+ *   <li>Просто число в начале сообщения: {@code "12345 fix bug"}</li>
  * </ul>
  *
  * <p>Stateless, без зависимостей. Изолируем в utility-классе с приватным конструктором.</p>
@@ -19,6 +23,9 @@ import ru.x5.markable.dev.analytics.domain.common.TaskNumber;
 public final class CommitMessageParser {
 
     private static final Pattern[] PATTERNS = {
+            // Kaiten "spaceId-cardId" в начале сообщения — самый специфичный паттерн, идёт первым.
+            // Возвращаем cardId (вторая группа цифр), не spaceId.
+            Pattern.compile("^\\s*\\d+-(\\d+)\\b"),
             Pattern.compile("(?i)(?:TASK|KAITEN)[\\s\\-#:]+(\\d+)"),
             Pattern.compile("#(\\d+)"),
             Pattern.compile("\\[(\\d+)]"),

@@ -5,11 +5,9 @@ import ru.x5.markable.dev.analytics.domain.model.stats.AuthorSummary;
 /**
  * Краткая статистика автора в ответах REST.
  *
- * <p>{@code displayName} и {@code avatarUrl} могут быть {@code null}, если автор не связан
- * с записью в {@code unified_user} (например, ещё ни разу не синхронизировался с Kaiten).</p>
- *
- * <p>{@code nonMergeCommits} — производная метрика «реальной работы»
- * ({@code commits − mergeCommits}). По ней идёт ранжирование в дашборде.</p>
+ * <p>{@code displayName}, {@code avatarUrl} — могут быть {@code null} (нет записи в unified_user).
+ * {@code activity} — заполняется только эндпоинтом {@code /dashboard} (в weekly/summary будет {@code null}).
+ * {@code nonMergeCommits} — производная метрика ({@code commits − mergeCommits}).</p>
  */
 public record AuthorSummaryResponse(
         String email,
@@ -20,7 +18,8 @@ public record AuthorSummaryResponse(
         long mergeCommits,
         long addedLines,
         long deletedLines,
-        long testAddedLines
+        long testAddedLines,
+        ActivityScoreResponse activity
 ) {
     public static AuthorSummaryResponse from(AuthorSummary s) {
         return new AuthorSummaryResponse(
@@ -30,6 +29,7 @@ public record AuthorSummaryResponse(
                 s.commits(),
                 s.nonMergeCommits(),
                 s.mergeCommits(),
-                s.addedLines(), s.deletedLines(), s.testAddedLines());
+                s.addedLines(), s.deletedLines(), s.testAddedLines(),
+                s.activity() == null ? null : ActivityScoreResponse.from(s.activity()));
     }
 }

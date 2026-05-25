@@ -1,0 +1,34 @@
+# Пересчёт task_number и kaiten_card_id в commit_details для коммитов Kaiten-формата
+# "<spaceId>-<cardId>" (например "1700-2963977 ..."). До фикса парсер брал spaceId (1700)
+# вместо cardId (2963977) — миграция переписывает таблицу.
+#
+# Затрагиваются только записи, у которых:
+#   1. commit_message начинается с "<digits>-<digits> ...";
+#   2. task_number равен первой группе цифр (spaceId), а не второй (cardId).
+#
+# Записи с другими форматами (TASK-N, #N, [N], standalone-число) не трогаем.
+databaseChangeLog:
+  - changeSet:
+      id: 016-recompute-task-number-from-space-card
+      author: markable-dev
+      changes:
+        - sql:
+            comment: "Пересчёт task_number → вторая группа цифр после дефиса (PostgreSQL regex)"
+            splitStatements: false
+            stripComments: false
+            sql: |
+              UPDATE commit_details
+              SET
+                  task_number    = substring(commit_message FROM '^\s*\d+-(\d+)\b'),
+                  kaiten_card_id = CAST(substring(commit_message FROM '^\s*\d+-(\d+)\b') AS BIGINT)
+              WHERE commit_message ~ '^\s*\d+-\d+'
+                AND substring(commit_message FROM '^\s*\d+-(\d+)\b') IS NOT NULL;
+      rollback:
+        # Откат: вернуть task_number к первой группе (spaceId). kaiten_card_id придётся
+        # пересоздавать вручную — точную исходную мы не знаем (могла быть null или другое).
+        - sql:
+            sql: |
+              UPDATE commit_details
+              SET task_number = substring(commit_message FROM '^\s*(\d+)-\d+\b'),
+                  kaiten_card_id = CAST(substring(commit_message FROM '^\s*(\d+)-\d+\b') AS BIGINT)
+              WHERE commit_message ~ '^\s*\d+-\d+';

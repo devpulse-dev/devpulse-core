@@ -109,7 +109,10 @@ public class UseCaseConfig {
     @Bean
     GetDashboardUseCase getDashboardUseCase(
             DailyStatsRepository dailyStatsRepository,
-            UnifiedUserRepository unifiedUserRepository) {
-        return new GetDashboardService(dailyStatsRepository, unifiedUserRepository);
+            UnifiedUserRepository unifiedUserRepository,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${scoring.expected-commits-per-30-days:50}") double expectedCommitsPer30Days) {
+        return new GetDashboardService(dailyStatsRepository, unifiedUserRepository,
+                expectedCommitsPer30Days);
     }
 }

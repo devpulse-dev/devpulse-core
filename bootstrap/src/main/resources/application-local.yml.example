@@ -1,0 +1,33 @@
+# =============================================================================
+# ШАБЛОН для локальной разработки.
+#
+# 1. Скопировать в `application-local.yml` (этот файл в .gitignore — никогда не коммитится):
+#    cp bootstrap/src/main/resources/application-local.yml.example \
+#       bootstrap/src/main/resources/application-local.yml
+#
+# 2. Подставить реальные значения ниже (токены, репозитории).
+#
+# 3. Запускать приложение с активным профилем `local`:
+#    - IntelliJ Run Configuration → Active profiles: local
+#    - Через CLI: SPRING_PROFILES_ACTIVE=local mvn -pl bootstrap spring-boot:run
+#    - Через VM options: -Dspring.profiles.active=local
+#
+# Spring автоматически наложит этот файл поверх application.yml — приоритет
+# у профиля local выше базового.
+# =============================================================================
+
+git:
+  repositories:
+    - https://scm.x5.ru/gkr/xrg-core.git
+    - https://scm.x5.ru/gkr/xrg-markable.git
+    # … добавить остальные
+  token: PASTE_YOUR_GIT_TOKEN_HERE
+  # cache-directory можно не указывать — берётся ${user.home}/Documents/git-cache/
+
+kaiten:
+  api:
+    url: https://kaiten.x5.ru/api/latest
+    token: PASTE_YOUR_KAITEN_TOKEN_HERE
+    # Для машин без корпоративного X5 CA в JVM truststore.
+    # См. README раздел «SSL: подключение к корпоративному Kaiten».
+    insecure-ssl: true

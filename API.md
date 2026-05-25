@@ -105,8 +105,46 @@
 
 **Особенности:**
 - `displayName` и `avatarUrl` подтягиваются из `unified_user` по email. Если автор ещё не связан с Kaiten — оба будут `null`.
-- `nonMergeCommits` — производная (`commits − mergeCommits`), показывается для прозрачности ранжирования.
-- Enrichment делается только для авторов на текущей странице — не тратим ресурсы на batch-фетч профилей для всех 47 авторов, если фронт смотрит только первые 20.
+- `nonMergeCommits` — производная (`commits − mergeCommits`).
+- **`activity`** — рассчитанный {@link ActivityScore} (см. ниже). Сортировка дашборда — по `activity.score desc`. Только на этом эндпоинте, в weekly/summary `activity = null`.
+- Enrichment делается только для авторов на текущей странице.
+
+#### Activity score
+
+Композитная метрика для оценки активности разработчика за период.
+
+```
+score = volumeFactor × qualityFactor
+```
+
+| Поле | Что это |
+|---|---|
+| `score` | финал, 1.0 = норма команды |
+| `category` | `INACTIVE` / `BELOW_AVERAGE` / `ACTIVE` / `STAR` |
+| `volumeFactor` | `nonMergeCommits / expectedCommits` (baseline 50 коммитов / 30 дней, масштабируется под длину запрошенного периода) |
+| `qualityFactor` | 0.3..1.0 от среднего числа строк на коммит: 10–200 = здорово (1.0), &lt; 5 = микро-коммиты (штраф), &gt; 500 = бомбы (штраф) |
+| `avgLinesPerCommit` | для тултипа на фронте |
+
+**Пороги категорий:**
+| score | category |
+|---|---|
+| `< 0.2` | `INACTIVE` |
+| `0.2..0.6` | `BELOW_AVERAGE` |
+| `0.6..1.5` | `ACTIVE` |
+| `≥ 1.5` | `STAR` |
+
+Пример:
+```json
+"activity": {
+  "score": 0.92,
+  "category": "ACTIVE",
+  "volumeFactor": 0.92,
+  "qualityFactor": 1.0,
+  "avgLinesPerCommit": 47.5
+}
+```
+
+Baseline настраивается через `scoring.expected-commits-per-30-days` в `application.yml` (default `50`).
 
 ---
 
@@ -389,13 +427,36 @@ type AuthorSummary = {
   2. Автор есть в Kaiten, но **сбор ещё не запускался** → `null, null`.
   3. Автор в Kaiten + был sync → оба поля заполнены.
 
-### 3. Чек-лист миграции
+### 3. Activity score у авторов на дашборде
+
+В каждом `AuthorSummary` на `/dashboard` теперь есть поле `activity` с композитным score'ом — он же отвечает за сортировку (вместо просто `nonMergeCommits`).
+
+**TS-тип:**
+```ts
+type ActivityScore = {
+  score: number;             // 1.0 ≈ норма команды
+  category: 'INACTIVE' | 'BELOW_AVERAGE' | 'ACTIVE' | 'STAR';
+  volumeFactor: number;      // объём активности
+  qualityFactor: number;     // 0.3..1.0 от средней длины коммита
+  avgLinesPerCommit: number;
+};
+```
+
+В weekly/summary `activity` будет `null`. На daily — поля нет совсем.
+
+**Что отображать на карточке:**
+- Бейдж с category (4 цвета: серый/жёлтый/зелёный/синий например).
+- Tooltip с разбивкой: «Объём: 0.92, Качество: 1.0, Avg строк/коммит: 47».
+- Если фронт хочет «outsiders» секцию — это `category === 'INACTIVE' || 'BELOW_AVERAGE'` (или последняя страница списка).
+
+### 4. Чек-лист миграции
 
 - [ ] Заменить `topN`/`outsiderN` на `page`/`size` в запросе дашборда.
-- [ ] Обновить TS-типы `DashboardResponse` и `AuthorSummary`.
-- [ ] Перерендер дашборда как paginated списка (table/grid с пагинацией снизу или infinite scroll).
+- [ ] Обновить TS-типы `DashboardResponse`, `AuthorSummary`, добавить `ActivityScore`.
+- [ ] Перерендер дашборда как paginated списка.
 - [ ] Аватары на карточках авторов с fallback на инициалы из email.
-- [ ] Решить семантику числа коммитов: `commits` vs `nonMergeCommits` (рекомендую отображать оба или только non-merge).
+- [ ] Бейдж категории + tooltip с разбивкой score.
+- [ ] Решить семантику числа коммитов: `commits` vs `nonMergeCommits` (рекомендую `nonMergeCommits` как основное).
 - [ ] Передёргать `POST /api/v2/collection/runs` хотя бы раз после деплоя — чтобы заполнились `kaiten_id`/`avatarUrl`/`name` в `unified_user`.
 
 Если вопросы по полям или нужно дополнить контракт — пингуйте, обновим.

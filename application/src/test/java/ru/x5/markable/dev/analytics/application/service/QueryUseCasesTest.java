@@ -227,7 +227,7 @@ class QueryUseCasesTest {
                     userWithProfile(EMAIL, "Boris", "https://avatar/boris")
             ));
 
-            var d = new GetDashboardService(dailyStatsRepository, unifiedUserRepository)
+            var d = new GetDashboardService(dailyStatsRepository, unifiedUserRepository, 50.0)
                     .get(PERIOD, new PageRequest(0, 2));
 
             assertAll("paginated dashboard",
@@ -240,7 +240,15 @@ class QueryUseCasesTest {
                     () -> assertThat(d.authors().items().get(0).displayName()).isEqualTo("Boris"),
                     () -> assertThat(d.authors().items().get(0).avatarUrl()).isEqualTo("https://avatar/boris"),
                     () -> assertThat(d.authors().items().get(1).email().value()).isEqualTo("alice@x5.ru"),
-                    () -> assertThat(d.authors().items().get(1).displayName()).as("alice не в unified_user → null").isNull());
+                    () -> assertThat(d.authors().items().get(1).displayName()).as("alice не в unified_user → null").isNull(),
+                    // У каждого автора должен быть рассчитан activity score.
+                    () -> assertThat(d.authors().items().get(0).activity())
+                            .as("Boris — activity заполнен").isNotNull(),
+                    () -> assertThat(d.authors().items().get(0).activity().score())
+                            .as("Boris (10 коммитов в месячном периоде на baseline 50) — score > 0")
+                            .isPositive(),
+                    () -> assertThat(d.authors().items().get(1).activity())
+                            .as("Alice тоже scored, даже без enrichment").isNotNull());
         }
 
         @Test
@@ -248,7 +256,7 @@ class QueryUseCasesTest {
         void emptyStats() {
             when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of());
 
-            var d = new GetDashboardService(dailyStatsRepository, unifiedUserRepository)
+            var d = new GetDashboardService(dailyStatsRepository, unifiedUserRepository, 50.0)
                     .get(PERIOD, new PageRequest(0, 10));
 
             assertAll("пустая страница",

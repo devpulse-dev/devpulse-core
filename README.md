@@ -108,7 +108,34 @@ mvn -pl bootstrap spring-boot:run
 
 ### Конфиг
 
-`bootstrap/src/main/resources/application.yml` — Postgres connection, git-репы для сбора, Kaiten endpoint/token. Чувствительные значения — через env переменные.
+`bootstrap/src/main/resources/application.yml` — базовая конфигурация, **без секретов**. Все чувствительные значения (токены Git/Kaiten, список приватных репозиториев) подставляются через **профиль `local`** или env-переменные.
+
+#### Настройка локальной разработки
+
+1. Скопировать шаблон в свой local-профиль:
+   ```bash
+   cp bootstrap/src/main/resources/application-local.yml.example \
+      bootstrap/src/main/resources/application-local.yml
+   ```
+2. Открыть `application-local.yml` и подставить реальные значения: `git.token`, `kaiten.api.token`, список `git.repositories`. Файл в `.gitignore` — не закоммитится.
+3. Запускать приложение с активным профилем:
+   - **IntelliJ Run Configuration** → Active profiles: `local`
+   - **CLI**: `SPRING_PROFILES_ACTIVE=local mvn -pl bootstrap spring-boot:run`
+   - **VM options**: `-Dspring.profiles.active=local`
+
+#### Что в `application.yml` (коммитится) vs в `application-local.yml` (только локально)
+
+| | application.yml (репо) | application-local.yml (локально) |
+|---|---|---|
+| Postgres URL/user/password | дефолты на localhost | можно переопределить |
+| Hibernate / Liquibase / server / actuator | да | — |
+| `git.repositories` | пустой `[]` | реальный список репозиториев |
+| `git.token` | пустой | ваш токен SCM |
+| `kaiten.api.url` | пустой | `https://kaiten.x5.ru/api/latest` |
+| `kaiten.api.token` | пустой | ваш токен Kaiten |
+| `kaiten.api.insecure-ssl` | `false` (правильное поведение) | `true` если нет X5 CA в truststore |
+
+Никогда не вставляйте реальные токены в `application.yml` как fallback `${TOKEN:значение}`. Этот файл коммитится — токены утекают в git-историю навсегда.
 
 ### SSL: подключение к корпоративному Kaiten
 

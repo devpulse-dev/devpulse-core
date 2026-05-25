@@ -29,3 +29,7 @@ databaseChangeLog:
       file: liquibase/migration/014-create-kaiten-card-member.yaml
   - include:
       file: liquibase/migration/015-create-collection-run.yaml
+  - include:
+      file: liquibase/migration/016-fix-task-number-from-space-card.yaml
+  - include:
+      file: liquibase/migration/016-fix-task-number-from-space-card.yaml
