@@ -1,0 +1,25 @@
+databaseChangeLog:
+  - changeSet:
+      id: 013-add-user-id-to-daily-stats
+      author: boris.osechinskiy
+      changes:
+        - addColumn:
+            tableName: daily_author_stats
+            columns:
+              - column:
+                  name: user_id
+                  type: BIGINT
+
+        - addForeignKeyConstraint:
+            baseTableName: daily_author_stats
+            baseColumnNames: user_id
+            referencedTableName: unified_user
+            referencedColumnNames: id
+            constraintName: fk_daily_stats_user
+
+        - createIndex:
+            indexName: idx_daily_stats_user_id
+            tableName: daily_author_stats
+            columns:
+              - column:
+                  name: user_id

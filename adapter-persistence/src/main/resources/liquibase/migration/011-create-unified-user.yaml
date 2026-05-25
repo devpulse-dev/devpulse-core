@@ -1,0 +1,62 @@
+databaseChangeLog:
+  - changeSet:
+      id: 011-create-unified-user
+      author: boris.osechinskiy
+      changes:
+        - createTable:
+            tableName: unified_user
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: email
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: username
+                  type: VARCHAR(100)
+              - column:
+                  name: name
+                  type: VARCHAR(255)
+              - column:
+                  name: avatar_url
+                  type: VARCHAR
+              - column:
+                  name: kaiten_id
+                  type: BIGINT
+              - column:
+                  name: gitlab_id
+                  type: INT
+              - column:
+                  name: last_synced_at
+                  type: TIMESTAMP
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+
+        - createIndex:
+            indexName: idx_unified_user_email
+            tableName: unified_user
+            columns:
+              - column:
+                  name: email
+        - createIndex:
+            indexName: idx_unified_user_kaiten_id
+            tableName: unified_user
+            columns:
+              - column:
+                  name: kaiten_id
+        - createIndex:
+            indexName: idx_unified_user_gitlab_id
+            tableName: unified_user
+            columns:
+              - column:
+                  name: gitlab_id

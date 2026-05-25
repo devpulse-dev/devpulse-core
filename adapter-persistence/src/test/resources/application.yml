@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: adapter-persistence-it
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 100
+        order_inserts: true
+        order_updates: true
+
+  liquibase:
+    enabled: true
+    change-log: classpath:liquibase/changelog.master.yml
+
+  # datasource.url/username/password подставляются динамически из @DynamicPropertySource
+
+logging:
+  level:
+    liquibase: INFO
+    org.hibernate.SQL: WARN

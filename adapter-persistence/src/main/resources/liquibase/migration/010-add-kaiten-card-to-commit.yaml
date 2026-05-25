@@ -1,0 +1,21 @@
+databaseChangeLog:
+  - changeSet:
+      id: 010-add-kaiten-card-to-commit
+      author: boris.osechinskiy
+      changes:
+        - addColumn:
+            tableName: commit_details
+            columns:
+              - column:
+                  name: kaiten_card_id
+                  type: BIGINT
+              - column:
+                  name: kaiten_card_title
+                  type: VARCHAR(500)
+
+        - createIndex:
+            indexName: idx_commit_kaiten_card
+            tableName: commit_details
+            columns:
+              - column:
+                  name: kaiten_card_id

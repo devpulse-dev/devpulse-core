@@ -1,0 +1,25 @@
+databaseChangeLog:
+  - changeSet:
+      id: 012-add-user-id-to-commit-details
+      author: boris.osechinskiy
+      changes:
+        - addColumn:
+            tableName: commit_details
+            columns:
+              - column:
+                  name: user_id
+                  type: BIGINT
+
+        - addForeignKeyConstraint:
+            baseTableName: commit_details
+            baseColumnNames: user_id
+            referencedTableName: unified_user
+            referencedColumnNames: id
+            constraintName: fk_commit_user
+
+        - createIndex:
+            indexName: idx_commit_user_id
+            tableName: commit_details
+            columns:
+              - column:
+                  name: user_id

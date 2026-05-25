@@ -1,0 +1,39 @@
+databaseChangeLog:
+  - changeSet:
+      id: 007-create-kaiten-user
+      author: boris.osechinskiy
+      changes:
+        - createTable:
+            tableName: kaiten_user
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: username
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: email
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: name
+                  type: VARCHAR(255)
+              - column:
+                  name: avatar_url
+                  type: VARCHAR
+              - column:
+                  name: last_synced_at
+                  type: TIMESTAMP
+
+        - createIndex:
+            indexName: idx_kaiten_user_email
+            tableName: kaiten_user
+            columns:
+              - column:
+                  name: email

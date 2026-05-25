@@ -1,0 +1,71 @@
+package ru.x5.markable.dev.analytics.adapter.persistence.commit;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import ru.x5.markable.dev.analytics.application.port.out.CommitRepository;
+import ru.x5.markable.dev.analytics.application.port.out.UnifiedUserRepository;
+import ru.x5.markable.dev.analytics.domain.common.Period;
+import ru.x5.markable.dev.analytics.domain.model.git.Commit;
+import ru.x5.markable.dev.analytics.domain.model.git.CommitHash;
+import ru.x5.markable.dev.analytics.domain.model.user.Email;
+
+@Component
+@Log4j2
+@RequiredArgsConstructor
+class CommitRepositoryAdapter implements CommitRepository {
+
+    private final CommitDetailsJpaRepository jpa;
+    private final CommitEntityMapper mapper;
+    private final UnifiedUserRepository unifiedUsers;
+
+    @Override
+    public Set<CommitHash> findExistingHashes(Collection<CommitHash> hashes) {
+        if (hashes == null || hashes.isEmpty()) return Set.of();
+        List<String> values = hashes.stream().map(CommitHash::value).toList();
+        Set<CommitHash> result = new HashSet<>();
+        for (String v : jpa.findExistingHashes(values)) {
+            result.add(new CommitHash(v));
+        }
+        return result;
+    }
+
+    @Override
+    @Transactional
+    public void saveAll(Collection<Commit> commits) {
+        if (commits == null || commits.isEmpty()) return;
+
+        // 1 batch find-or-create — все user_id одним SQL
+        Set<Email> uniqueAuthors = new HashSet<>();
+        commits.forEach(c -> uniqueAuthors.add(c.authorEmail()));
+        Map<Email, Long> userByEmail = unifiedUsers.findOrCreateAll(uniqueAuthors);
+
+        List<CommitDetailsEntity> entities = new ArrayList<>(commits.size());
+        for (Commit c : commits) {
+            entities.add(mapper.toEntity(c, userByEmail.get(c.authorEmail())));
+        }
+        jpa.saveAll(entities);
+        log.debug("Saved {} commits", entities.size());
+    }
+
+    @Override
+    public List<Commit> findByAuthor(Email email, Period period,
+                                     ru.x5.markable.dev.analytics.domain.common.PageRequest page) {
+        return jpa.findByAuthorAndPeriod(
+                        email.value(),
+                        period.fromAtStartOfDay(),
+                        period.toAtEndOfDay(),
+                        PageRequest.of(page.page(), page.size()))
+                .stream()
+                .map(mapper::toDomain)
+                .toList();
+    }
+}
