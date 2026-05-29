@@ -3,6 +3,7 @@ package ru.x5.devpulse.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
+import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
 import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetDashboardUseCase;
@@ -21,6 +22,7 @@ import ru.x5.devpulse.application.port.out.KaitenUserRepository;
 import ru.x5.devpulse.application.port.out.TransactionRunner;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.application.service.CollectDailyStatsService;
+import ru.x5.devpulse.application.service.CollectGitStatsService;
 import ru.x5.devpulse.application.service.GetCollectionRunService;
 import ru.x5.devpulse.application.service.GetDailyStatsService;
 import ru.x5.devpulse.application.service.GetDashboardService;
@@ -45,29 +47,40 @@ public class UseCaseConfig {
 
     /* ---------- command-side ---------- */
 
+    /**
+     * Orchestrator — координирует git-фазу и kaiten-фазу. Сам в I/O не лезет.
+     * Реализует public-port {@link CollectDailyStatsUseCase} (его дёргает REST).
+     */
     @Bean
     CollectDailyStatsUseCase collectDailyStatsUseCase(
-            GitGateway gitGateway,
-            KaitenGateway kaitenGateway,
-            CommitRepository commitRepository,
-            DailyStatsRepository dailyStatsRepository,
-            KaitenUserRepository kaitenUserRepository,
-            UnifiedUserRepository unifiedUserRepository,
+            CollectGitStatsUseCase collectGitStats,
+            SyncKaitenUsersUseCase syncKaitenUsers,
             CollectionRunRepository collectionRunRepository,
-            CollectionLock collectionLock,
-            TransactionRunner transactionRunner) {
+            CollectionLock collectionLock) {
         return new CollectDailyStatsService(
-                gitGateway, kaitenGateway,
-                commitRepository, dailyStatsRepository, kaitenUserRepository,
-                unifiedUserRepository, collectionRunRepository, collectionLock,
-                transactionRunner);
+                collectGitStats, syncKaitenUsers, collectionRunRepository, collectionLock);
     }
 
+    /** Worker — только git-фаза. Не имеет понятия про CollectionRun/lock. */
+    @Bean
+    CollectGitStatsUseCase collectGitStatsUseCase(
+            GitGateway gitGateway,
+            CommitRepository commitRepository,
+            DailyStatsRepository dailyStatsRepository,
+            UnifiedUserRepository unifiedUserRepository,
+            TransactionRunner transactionRunner) {
+        return new CollectGitStatsService(
+                gitGateway, commitRepository, dailyStatsRepository,
+                unifiedUserRepository, transactionRunner);
+    }
+
+    /** Worker — kaiten users sync (upsert kaiten_user + link unified_user.kaiten_id). */
     @Bean
     SyncKaitenUsersUseCase syncKaitenUsersUseCase(
             KaitenGateway kaitenGateway,
-            KaitenUserRepository kaitenUserRepository) {
-        return new SyncKaitenUsersService(kaitenGateway, kaitenUserRepository);
+            KaitenUserRepository kaitenUserRepository,
+            UnifiedUserRepository unifiedUserRepository) {
+        return new SyncKaitenUsersService(kaitenGateway, kaitenUserRepository, unifiedUserRepository);
     }
 
     /* ---------- query-side ---------- */
