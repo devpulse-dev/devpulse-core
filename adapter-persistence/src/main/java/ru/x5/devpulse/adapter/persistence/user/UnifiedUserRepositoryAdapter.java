@@ -29,7 +29,9 @@ class UnifiedUserRepositoryAdapter implements UnifiedUserRepository {
 
     @Override
     public Optional<UnifiedUser> findByEmail(Email email) {
-        return jpa.findByEmail(email.value()).map(mapper::toDomain);
+        // Email в БД хранится в lowercase (инвариант с миграции 020 + UNIQUE INDEX по LOWER).
+        // Нормализуем тут, пока Email value object не нормализует сам — это #12.
+        return jpa.findByEmail(email.value().toLowerCase()).map(mapper::toDomain);
     }
 
     @Override
@@ -37,9 +39,13 @@ class UnifiedUserRepositoryAdapter implements UnifiedUserRepository {
     public Map<Email, Long> findOrCreateAll(Collection<Email> emails) {
         if (emails == null || emails.isEmpty()) return Map.of();
 
+        // Нормализуем сразу: один LOWER на все дальнейшие операции (SELECT + INSERT + result key).
+        // Без этого race с разным регистром (`Boris@x5.ru` vs `boris@x5.ru`) приводил бы к
+        // duplicate-key violation на UNIQUE INDEX по LOWER(email) — fail-soft через retry,
+        // но дороже одного SELECT в начале.
         Set<String> normalized = new HashSet<>();
         for (Email e : emails) {
-            if (e != null) normalized.add(e.value());
+            if (e != null && e.value() != null) normalized.add(e.value().toLowerCase());
         }
         if (normalized.isEmpty()) return Map.of();
 
@@ -56,7 +62,7 @@ class UnifiedUserRepositoryAdapter implements UnifiedUserRepository {
         for (String email : normalized) {
             if (!containsEmail(result, email)) {
                 toCreate.add(UnifiedUserEntity.builder()
-                        .email(email)
+                        .email(email)                  // уже lowercase
                         .username(localPart(email))
                         .createdAt(now)
                         .updatedAt(now)
@@ -104,7 +110,8 @@ class UnifiedUserRepositoryAdapter implements UnifiedUserRepository {
     @Override
     @Transactional
     public void updateKaitenId(Email email, KaitenUserId kaitenId, String name, String avatarUrl) {
-        jpa.findByEmail(email.value()).ifPresent(user -> {
+        // см. findByEmail — нормализация на стороне адаптера, пока Email не делает это сам (#12).
+        jpa.findByEmail(email.value().toLowerCase()).ifPresent(user -> {
             user.setKaitenId(kaitenId.value());
             user.setName(name);
             user.setAvatarUrl(avatarUrl);

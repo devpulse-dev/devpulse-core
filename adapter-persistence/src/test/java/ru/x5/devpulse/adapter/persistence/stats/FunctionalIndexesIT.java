@@ -32,7 +32,8 @@ class FunctionalIndexesIT extends PostgresContainerSupport {
     @ParameterizedTest(name = "[{index}] {0}.{1}")
     @CsvSource({
             "commit_details, idx_commit_details_email_lower_date",
-            "daily_author_stats, idx_daily_stats_email_lower_date"
+            "daily_author_stats, idx_daily_stats_email_lower_date",
+            "unified_user, uq_unified_user_email_lower"
     })
     @DisplayName("Индекс существует в pg_indexes")
     void indexExists(String table, String indexName) {
@@ -49,7 +50,9 @@ class FunctionalIndexesIT extends PostgresContainerSupport {
             "commit_details, idx_commit_details_email_lower_date, lower",
             "commit_details, idx_commit_details_email_lower_date, commit_date",
             "daily_author_stats, idx_daily_stats_email_lower_date, lower",
-            "daily_author_stats, idx_daily_stats_email_lower_date, date"
+            "daily_author_stats, idx_daily_stats_email_lower_date, date",
+            "unified_user, uq_unified_user_email_lower, UNIQUE",
+            "unified_user, uq_unified_user_email_lower, lower"
     })
     @DisplayName("Определение индекса включает функциональное выражение")
     void indexDefinitionContainsExpression(String table, String indexName, String fragment) {

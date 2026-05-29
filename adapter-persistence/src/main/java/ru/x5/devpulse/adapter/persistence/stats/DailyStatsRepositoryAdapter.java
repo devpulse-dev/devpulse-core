@@ -122,6 +122,13 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
     //   merge_commits — подмножество (счётчик мерджей).
     // Если поменять commits на FILTER (is_merge=false), получится "20 commits, 36 merges" — что
     // даёт nonMergeCommits = 0 в Java-логике и сломанный дашборд (см. фикс этого бага).
+    //
+    // ВАЖНО про user_id:
+    //   Берём из unified_user через subquery с LOWER(email) — это единственный source of truth.
+    //   Старая версия использовала `MAX(cd.user_id)` из commit_details, что было недетерминированно
+    //   при наличии дублей-юзеров с разным регистром (см. ревью пункт #11). Миграция 020 удалила
+    //   дубли и добавила UNIQUE INDEX по LOWER(email), но subquery страхует от регрессии:
+    //   user_id всегда из текущего snapshot'а unified_user, не из старых строк commit_details.
     private static final String RECOMPUTE_SQL = """
             INSERT INTO daily_author_stats
                 (email, date, repository_name, commits, merge_commits,
@@ -136,7 +143,9 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
                 COALESCE(SUM(cd.deleted_lines),   0)                       AS deleted_lines,
                 COALESCE(SUM(cd.test_added_lines), 0)                      AS test_added_lines,
                 NOW()                                                      AS last_updated,
-                MAX(cd.user_id)                                            AS user_id
+                (SELECT u.id FROM unified_user u
+                  WHERE LOWER(u.email) = LOWER(cd.email)
+                  LIMIT 1)                                                 AS user_id
             FROM commit_details cd
             WHERE LOWER(cd.email) = ANY (?)
               AND CAST(cd.commit_date AS DATE) BETWEEN ? AND ?

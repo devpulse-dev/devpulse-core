@@ -96,7 +96,6 @@ class CollectDailyStatsServiceTest {
     @DisplayName("Happy path: сохранение коммитов + recompute daily_stats + sync kaiten users")
     void happyPath() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
-        when(gitGateway.prepare(REPO)).thenReturn(REPO);
         stubStreamCommits(List.of(commit(SHA_NEW), commit(SHA_DUP)));
 
         when(commitRepository.findExistingHashes(anyCollection()))
@@ -140,7 +139,6 @@ class CollectDailyStatsServiceTest {
     @DisplayName("Cleanup zombies: коммиты из БД, отсутствующие в git, удаляются")
     void cleansUpRebaseZombies() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
-        when(gitGateway.prepare(REPO)).thenReturn(REPO);
         // git отдал только SHA_NEW
         stubStreamCommits(List.of(commit(SHA_NEW)));
         when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
@@ -164,7 +162,6 @@ class CollectDailyStatsServiceTest {
     @DisplayName("Нет zombies → deleteByHashes не вызывается вообще")
     void noZombiesNoDelete() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
-        when(gitGateway.prepare(REPO)).thenReturn(REPO);
         stubStreamCommits(List.of(commit(SHA_NEW)));
         when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
         when(commitRepository.findHashesByRepoAndPeriod(eq(REPO), any()))
@@ -180,7 +177,6 @@ class CollectDailyStatsServiceTest {
     @DisplayName("Падение git ⇒ FAILED, Kaiten не зовём, recompute не делаем")
     void gitFailureMarksFailedAndSkipsKaiten() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
-        when(gitGateway.prepare(REPO)).thenReturn(REPO);
         doThrow(new RuntimeException("boom"))
                 .when(gitGateway).streamCommits(any(), any(), any(), any());
 
@@ -198,7 +194,6 @@ class CollectDailyStatsServiceTest {
     @DisplayName("Падение Kaiten изолировано ⇒ git stats и recompute сохранены, прогон SUCCESS")
     void kaitenFailureDoesNotRollbackGitStats() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
-        when(gitGateway.prepare(REPO)).thenReturn(REPO);
         stubStreamCommits(List.of(commit(SHA_NEW)));
         when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
         when(commitRepository.findHashesByRepoAndPeriod(eq(REPO), any()))
@@ -218,7 +213,6 @@ class CollectDailyStatsServiceTest {
     @DisplayName("Нет коммитов и нет zombies → recompute НЕ зовём (нет затронутых авторов)")
     void noCommitsNoRecompute() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
-        when(gitGateway.prepare(REPO)).thenReturn(REPO);
         // git вообще ничего не вернул
         doAnswer(inv -> null)
                 .when(gitGateway).streamCommits(eq(REPO), any(), any(), any());
@@ -254,8 +248,6 @@ class CollectDailyStatsServiceTest {
         RepoName r1 = new RepoName("r1");
         RepoName r2 = new RepoName("r2");
         when(gitGateway.configuredRepos()).thenReturn(List.of(r1, r2));
-        when(gitGateway.prepare(r1)).thenReturn(r1);
-        when(gitGateway.prepare(r2)).thenReturn(r2);
         doAnswer(inv -> null).when(gitGateway).streamCommits(any(), any(), any(), any());
         when(commitRepository.findHashesByRepoAndPeriod(any(), any())).thenReturn(Set.of());
         when(kaitenGateway.fetchAllUsers()).thenReturn(List.of());
@@ -270,7 +262,6 @@ class CollectDailyStatsServiceTest {
     @DisplayName("Падение в финальной tx (recompute упал) ⇒ run = FAILED, exception в error()")
     void txBlockFailureRollsBackAndMarksFailed() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
-        when(gitGateway.prepare(REPO)).thenReturn(REPO);
         stubStreamCommits(List.of(commit(SHA_NEW)));
         when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
         when(commitRepository.findHashesByRepoAndPeriod(eq(REPO), any())).thenReturn(Set.of());

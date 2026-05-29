@@ -44,20 +44,6 @@ class GitGatewayAdapter implements GitGateway {
     }
 
     @Override
-    public RepoName prepare(RepoName repo) {
-        String url = findUrl(repo);
-        try {
-            GitCliClient.PreparedRepo prepared = cli.prepare(url);
-            return prepared.name();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new GitOperationInterruptedException(repo, e);
-        } catch (Exception e) {
-            throw new GitOperationFailedException(repo, "не удалось подготовить репозиторий", e);
-        }
-    }
-
-    @Override
     public void streamCommits(RepoName repo,
                               LocalDateTime since,
                               LocalDateTime until,

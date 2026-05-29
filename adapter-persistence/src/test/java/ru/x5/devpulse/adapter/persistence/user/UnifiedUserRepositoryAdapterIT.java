@@ -79,4 +79,22 @@ class UnifiedUserRepositoryAdapterIT extends PostgresContainerSupport {
                 .as("при отсутствии запрошенных email возвращается пустая карта")
                 .isEmpty();
     }
+
+    @Test
+    @DisplayName("findOrCreateAll case-insensitive: разный регистр → один и тот же user_id (#11)")
+    void findOrCreateAllCaseInsensitive() {
+        Email upper = new Email("Boris.Test@x5.ru");
+        Email lower = new Email("boris.test@x5.ru");
+
+        Long idFromUpper = repo.findOrCreateAll(List.of(upper)).get(lower);
+        Long idFromLower = repo.findOrCreateAll(List.of(lower)).get(lower);
+
+        assertAll("один email — один user независимо от регистра",
+                () -> assertThat(idFromUpper)
+                        .as("первый вызов вернул user_id под lowercase ключом")
+                        .isNotNull(),
+                () -> assertThat(idFromLower)
+                        .as("повторный вызов другого регистра вернул тот же user_id")
+                        .isEqualTo(idFromUpper));
+    }
 }

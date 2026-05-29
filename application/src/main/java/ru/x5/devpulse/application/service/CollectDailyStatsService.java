@@ -168,16 +168,16 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
                                       LocalDateTime since,
                                       LocalDateTime until,
                                       Period period) {
-        RepoName prepared = gitGateway.prepare(repo);
-        log.info("Стримим коммиты из {}", prepared.value());
+        log.info("Стримим коммиты из {}", repo.value());
 
         // Накапливаем хеши и authors реально пришедшие из git.
-        // gitGateway.streamCommits отдаёт batch'и из reader-thread'а; persistCommitBatch
-        // делает свой @Transactional saveAll — короткая tx на каждый батч.
+        // gitGateway.streamCommits сам инициализирует локальный кеш (clone/fetch) ровно один раз
+        // и отдаёт batch'и из reader-thread'а; persistCommitBatch делает свой @Transactional
+        // saveAll — короткая tx на каждый батч.
         Set<CommitHash> seenInGit = new HashSet<>();
         Set<Email> repoAffected = new HashSet<>();
 
-        gitGateway.streamCommits(prepared, since, until, batch -> {
+        gitGateway.streamCommits(repo, since, until, batch -> {
             for (Commit c : batch) {
                 seenInGit.add(c.hash());
                 if (c.authorEmail() != null) repoAffected.add(c.authorEmail());
@@ -189,12 +189,12 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
         // Используем Supplier-перегрузку (с явным return null) — Runnable-overload в интерфейсе
         // default, и mock-фреймворки его по умолчанию не вызывают.
         transactionRunner.inTransaction(() -> {
-            Set<CommitHash> inDb = commitRepository.findHashesByRepoAndPeriod(prepared, period);
+            Set<CommitHash> inDb = commitRepository.findHashesByRepoAndPeriod(repo, period);
             Set<CommitHash> zombies = new HashSet<>(inDb);
             zombies.removeAll(seenInGit);
             if (!zombies.isEmpty()) {
                 log.info("Repo {}: {} zombie-коммитов (rebase/force-push) — удаляем",
-                        prepared.value(), zombies.size());
+                        repo.value(), zombies.size());
                 commitRepository.deleteByHashes(zombies);
             }
             if (!repoAffected.isEmpty()) {
