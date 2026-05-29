@@ -39,3 +39,5 @@ databaseChangeLog:
       file: liquibase/migration/019-add-functional-indexes-for-recompute.yaml
   - include:
       file: liquibase/migration/020-dedup-unified-user-and-lower-unique.yaml
+  - include:
+      file: liquibase/migration/021-drop-dead-kaiten-card-tables.yaml
