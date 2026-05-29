@@ -27,6 +27,7 @@ git:
 kaiten:
   api:
     url: https://kaiten.x5.ru/api/latest
+    web-base-url: https://kaiten.x5.ru
     token: PASTE_YOUR_KAITEN_TOKEN_HERE
     # Для машин без корпоративного X5 CA в JVM truststore.
     # См. README раздел «SSL: подключение к корпоративному Kaiten».

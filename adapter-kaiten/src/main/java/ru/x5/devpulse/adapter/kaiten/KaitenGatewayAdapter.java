@@ -72,20 +72,11 @@ class KaitenGatewayAdapter implements KaitenGateway {
                     () -> http.getCards(limit, currentOffset, memberIdsCsv, updatedAfterStr));
 
             if (!rawPage.isEmpty()) {
+                // url собирает маппер из properties.webBaseUrl() — никакой захардкоженной строки.
+                String webBaseUrl = properties.webBaseUrl();
                 List<KaitenCard> mapped = new ArrayList<>(rawPage.size());
                 for (KaitenCardDto dto : rawPage) {
-                    KaitenCard card = mapper.toDomain(dto);
-                    // url задаётся адаптером: Kaiten API его не возвращает.
-                    mapped.add(new KaitenCard(
-                            card.id(), card.title(), card.description(),
-                            card.typeId(), card.columnType(), card.columnTitle(),
-                            card.boardName(), card.spaceName(),
-                            card.ownerId(), card.ownerName(),
-                            card.createdAt(), card.updatedAt(), card.closedAt(),
-                            card.archived(),
-                            "https://kaiten.x5.ru/" + card.id().value(),
-                            card.memberIds()
-                    ));
+                    mapped.add(mapper.toDomain(dto, webBaseUrl));
                 }
                 pageHandler.accept(mapped);
                 total += mapped.size();

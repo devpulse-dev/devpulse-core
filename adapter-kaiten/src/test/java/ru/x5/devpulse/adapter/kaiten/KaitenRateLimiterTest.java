@@ -18,7 +18,9 @@ class KaitenRateLimiterTest {
     // Дефолты сильно укорочены, чтобы тесты не висели секундами:
     // 1мс throttle, 1мс initial backoff, 5мс max backoff, 3 retry'я.
     private static final KaitenProperties FAST_PROPS = new KaitenProperties(
-            "http://localhost", "token",
+            /*url*/         "http://localhost",
+            /*webBaseUrl*/  null,
+            /*token*/       "token",
             /*requestDelayMs*/ 1,
             /*maxRetries*/     3,
             /*initBackoffMs*/  1,

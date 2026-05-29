@@ -50,7 +50,11 @@ git:
 # === Kaiten integration ===
 kaiten:
   api:
+    # API endpoint — для HTTP-клиента (см. KaitenHttpClient @HttpExchange).
     url: ${KAITEN_URL:}
+    # Web-UI host — для построения ссылки на карточку в /profile.cards[].url.
+    # Если не задан, KaitenCard.url = null (фронт просто не покажет ссылку).
+    web-base-url: ${KAITEN_WEB_BASE_URL:}
     token: ${KAITEN_TOKEN:}
     request-delay-ms: 250         # ≈4 RPS, safe for sliding-window limit
     max-retries: 10

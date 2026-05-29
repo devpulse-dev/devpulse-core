@@ -24,16 +24,27 @@ import ru.x5.devpulse.domain.model.user.KaitenUserId;
 interface KaitenCardMapper {
 
     @Mapping(target = "id", expression = "java(new KaitenCardId(dto.id()))")
-    @Mapping(target = "typeId", source = "typeId")
-    @Mapping(target = "columnType", source = "column.type")
-    @Mapping(target = "columnTitle", source = "column.title")
-    @Mapping(target = "boardName", source = "board.name")
-    @Mapping(target = "spaceName", source = "space.name")
-    @Mapping(target = "ownerId", source = "owner", qualifiedByName = "ownerToKaitenUserId")
-    @Mapping(target = "ownerName", source = "owner.fullName")
-    @Mapping(target = "url", ignore = true)              // дополняется адаптером
-    @Mapping(target = "memberIds", source = "members", qualifiedByName = "membersToIds")
-    KaitenCard toDomain(KaitenCardDto dto);
+    @Mapping(target = "typeId", source = "dto.typeId")
+    @Mapping(target = "columnType", source = "dto.column.type")
+    @Mapping(target = "columnTitle", source = "dto.column.title")
+    @Mapping(target = "boardName", source = "dto.board.name")
+    @Mapping(target = "spaceName", source = "dto.space.name")
+    @Mapping(target = "ownerId", source = "dto.owner", qualifiedByName = "ownerToKaitenUserId")
+    @Mapping(target = "ownerName", source = "dto.owner.fullName")
+    @Mapping(target = "url", expression = "java(buildCardUrl(webBaseUrl, dto.id()))")
+    @Mapping(target = "memberIds", source = "dto.members", qualifiedByName = "membersToIds")
+    KaitenCard toDomain(KaitenCardDto dto, String webBaseUrl);
+
+    /**
+     * Собирает web-URL карточки: {@code {webBaseUrl}/{cardId}}. Если baseUrl не задан —
+     * возвращает {@code null} (фронт не покажет ссылку, но всё остальное работает).
+     * Хвостовые слэши в baseUrl нормализуются ({@code .../}, {@code ...//} → один).
+     */
+    default String buildCardUrl(String webBaseUrl, long cardId) {
+        if (webBaseUrl == null || webBaseUrl.isBlank()) return null;
+        String trimmed = webBaseUrl.replaceAll("/+$", "");
+        return trimmed + "/" + cardId;
+    }
 
     @Mapping(target = "id", expression = "java(new KaitenUserId(dto.id()))")
     @Mapping(target = "email", source = "email", qualifiedByName = "stringToEmail")
