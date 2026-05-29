@@ -38,6 +38,16 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Spring Cache abstraction + Caffeine — для in-memory кэша Kaiten cards (#13). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
         <!-- ArchUnit tests live here — they need ALL modules on classpath -->
         <dependency>
             <groupId>com.tngtech.archunit</groupId>

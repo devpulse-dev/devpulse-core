@@ -26,7 +26,9 @@ class KaitenRateLimiterTest {
             /*initBackoffMs*/  1,
             /*maxBackoffMs*/   5,
             /*pageSize*/       100,
-            /*insecureSsl*/    false);
+            /*insecureSsl*/    false,
+            /*connectTimeout*/ null,   // null → default 5s (см. compact ctor KaitenProperties)
+            /*readTimeout*/    null);
 
     private final KaitenRateLimiter limiter = new KaitenRateLimiter(FAST_PROPS);
 

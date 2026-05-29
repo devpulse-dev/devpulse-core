@@ -19,7 +19,7 @@ import ru.x5.devpulse.adapter.kaiten.dto.KaitenUserDto;
  * в {@link KaitenGatewayAdapter}.</p>
  */
 @HttpExchange(accept = "application/json")
-interface KaitenHttpClient {
+public interface KaitenHttpClient {
 
     /** {@code GET /users} — все пользователи Kaiten одним запросом. */
     @GetExchange("/users")

@@ -27,6 +27,17 @@ spring:
         order_inserts: true
         order_updates: true
 
+  cache:
+    type: caffeine
+    cache-names:
+      - kaiten-cards-by-member
+    # TTL для Kaiten cards. Кэш защищает /profile от: refresh страницы, повторных
+    # открытий тем же пользователем, нагрузки от 50+ одновременных сессий.
+    # 5 минут — компромисс: достаточно свежо для рабочего workflow, экономит большую
+    # долю Kaiten round-trip'ов.
+    caffeine:
+      spec: ${KAITEN_CACHE_SPEC:expireAfterWrite=5m,maximumSize=1000}
+
   liquibase:
     enabled: true
     change-log: classpath:/liquibase/changelog.master.yml

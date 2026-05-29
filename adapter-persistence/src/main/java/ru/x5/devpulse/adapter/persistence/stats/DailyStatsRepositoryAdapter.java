@@ -156,25 +156,28 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
     @Transactional
     public void recomputeFromCommits(Collection<Email> emails, Period period) {
         if (emails == null || emails.isEmpty()) return;
-        String[] normalized = emails.stream()
+        // Email.value() — lowercase (инвариант VO). LOWER() в SQL ниже — defence in depth
+        // на случай старых не-нормализованных строк в commit_details (миграция 020 их
+        // привела к lowercase, но defensive LOWER страхует от регрессии).
+        String[] values = emails.stream()
                 .filter(e -> e != null && e.value() != null)
-                .map(e -> e.value().toLowerCase())
+                .map(Email::value)
                 .distinct()
                 .toArray(String[]::new);
-        if (normalized.length == 0) return;
+        if (values.length == 0) return;
 
         int deleted = jdbcTemplate.update(DELETE_SQL, ps -> {
-            ps.setArray(1, ps.getConnection().createArrayOf("text", normalized));
+            ps.setArray(1, ps.getConnection().createArrayOf("text", values));
             ps.setObject(2, period.from());
             ps.setObject(3, period.to());
         });
         int inserted = jdbcTemplate.update(RECOMPUTE_SQL, ps -> {
-            ps.setArray(1, ps.getConnection().createArrayOf("text", normalized));
+            ps.setArray(1, ps.getConnection().createArrayOf("text", values));
             ps.setObject(2, period.from());
             ps.setObject(3, period.to());
         });
         log.info("Пересобрали daily_stats для {} авторов в [{}..{}]: -{} +{}",
-                normalized.length, period.from(), period.to(), deleted, inserted);
+                values.length, period.from(), period.to(), deleted, inserted);
     }
 
     @Override

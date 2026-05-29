@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenCardDto;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenUserDto;
@@ -88,7 +89,19 @@ class KaitenGatewayAdapter implements KaitenGateway {
         log.info("Стримили {} карточек Kaiten", total);
     }
 
+    /**
+     * Кэшируем результат на TTL (см. {@code spring.cache.caffeine.spec} в application.yml).
+     *
+     * <p><b>Ключ:</b> {@code memberId.value() + ':' + updatedAfter}. Один пользователь с одним
+     * фильтром по периоду — один кэш-bucket. При refresh страницы фронт получит cached версию,
+     * Kaiten API не дёргается.</p>
+     *
+     * <p><b>Что НЕ кэшируем:</b> {@code streamCards()} (используется при сборе — там нужна
+     * свежая выборка), {@code fetchAllUsers()} (тоже сбор-side).</p>
+     */
     @Override
+    @Cacheable(value = "kaiten-cards-by-member",
+               key = "#memberId.value() + ':' + #updatedAfter")
     public List<KaitenCard> fetchCardsForMember(KaitenUserId memberId, LocalDateTime updatedAfter) {
         List<KaitenCard> accumulator = new ArrayList<>();
         streamCards(List.of(memberId), updatedAfter, accumulator::addAll);
