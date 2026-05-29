@@ -8,6 +8,7 @@ import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
+import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
 import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
@@ -60,9 +61,25 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
     private final KaitenUserRepository kaitenUserRepository;
     private final UnifiedUserRepository unifiedUserRepository;
     private final CollectionRunRepository collectionRunRepository;
+    private final CollectionLock collectionLock;
 
+    /**
+     * Запуск сбора.
+     *
+     * <p><b>Конкуренция:</b> метод защищён distributed lock'ом ({@link CollectionLock}).
+     * Если другой сбор уже идёт, бросается {@link
+     * ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException}. Lock берётся
+     * ДО создания CollectionRun — иначе в БД остался бы artefact 'STARTED' с unfinished
+     * статусом, который бы дезинформировал {@code resolveSince()}.</p>
+     */
     @Override
     public CollectionRun run(LocalDateTime since) {
+        try (CollectionLock.Handle ignored = collectionLock.acquireOrThrow()) {
+            return doRun(since);
+        }
+    }
+
+    private CollectionRun doRun(LocalDateTime since) {
         LocalDateTime effectiveSince = resolveSince(since);
         LocalDateTime until = LocalDateTime.now();
 

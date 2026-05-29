@@ -9,6 +9,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException;
 
 /**
  * Глобальный обработчик ошибок REST API.
@@ -20,8 +21,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @Slf4j
 class ApiExceptionHandler {
 
-    private static final URI BAD_REQUEST = URI.create("urn:markable:problem:bad-request");
-    private static final URI INTERNAL = URI.create("urn:markable:problem:internal");
+    private static final URI BAD_REQUEST = URI.create("urn:devpulse:problem:bad-request");
+    private static final URI CONFLICT = URI.create("urn:devpulse:problem:conflict");
+    private static final URI INTERNAL = URI.create("urn:devpulse:problem:internal");
 
     @ExceptionHandler(IllegalArgumentException.class)
     ProblemDetail handleBadDomainInput(IllegalArgumentException ex) {
@@ -42,6 +44,22 @@ class ApiExceptionHandler {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
         pd.setType(BAD_REQUEST);
         pd.setTitle("Malformed request");
+        return pd;
+    }
+
+    /**
+     * Сбор уже идёт — параллельный запуск не разрешён.
+     *
+     * <p>409 — потому что это конфликт состояния ресурса (collection runner) с запросом,
+     * а не невалидный input. Фронт должен показать «сбор уже идёт» и дать GET по последнему
+     * CollectionRun.</p>
+     */
+    @ExceptionHandler(CollectionAlreadyRunningException.class)
+    ProblemDetail handleAlreadyRunning(CollectionAlreadyRunningException ex) {
+        log.warn("409: {}", ex.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        pd.setType(CONFLICT);
+        pd.setTitle("Collection already running");
         return pd;
     }
 

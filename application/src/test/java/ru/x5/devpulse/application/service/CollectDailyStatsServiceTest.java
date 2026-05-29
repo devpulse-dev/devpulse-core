@@ -1,6 +1,7 @@
 package ru.x5.devpulse.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
@@ -8,9 +9,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
@@ -18,6 +21,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,6 +29,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException;
+import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
 import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
@@ -61,8 +67,18 @@ class CollectDailyStatsServiceTest {
     @Mock private KaitenUserRepository kaitenUserRepository;
     @Mock private UnifiedUserRepository unifiedUserRepository;
     @Mock private CollectionRunRepository collectionRunRepository;
+    @Mock private CollectionLock collectionLock;
+    @Mock private CollectionLock.Handle lockHandle;
 
     @InjectMocks private CollectDailyStatsService service;
+
+    @BeforeEach
+    void stubLockAcquired() {
+        // Дефолт: lock свободен, handle закрывается без побочных эффектов.
+        // lenient — потому что тест "lock занят" переопределяет этот стаб, и STRICT_STUBS
+        // иначе пожалуется на «не использованный» first stubbing.
+        lenient().when(collectionLock.acquireOrThrow()).thenReturn(lockHandle);
+    }
 
     @Test
     @DisplayName("Happy path: сохранение коммитов + recompute daily_stats + sync kaiten users")
@@ -218,6 +234,39 @@ class CollectDailyStatsServiceTest {
 
         assertThat(runs.getAllValues().get(0).sinceDate())
                 .isEqualTo(lastUntil.plusSeconds(1));
+    }
+
+    @Test
+    @DisplayName("Lock занят ⇒ exception, никакой работы не начато, handle.close() не зовётся")
+    void lockAlreadyHeld_throwsAndStartsNothing() {
+        // Переопределяем дефолтный стаб: lock бросает.
+        when(collectionLock.acquireOrThrow())
+                .thenThrow(new CollectionAlreadyRunningException());
+
+        assertThatThrownBy(() -> service.run(SINCE))
+                .isInstanceOf(CollectionAlreadyRunningException.class);
+
+        // Ни git, ни kaiten, ни запись CollectionRun — всё должно быть не тронуто.
+        assertAll("ничего не сделано",
+                () -> verifyNoInteractions(gitGateway),
+                () -> verifyNoInteractions(kaitenGateway),
+                () -> verifyNoInteractions(commitRepository),
+                () -> verifyNoInteractions(dailyStatsRepository),
+                () -> verifyNoInteractions(kaitenUserRepository),
+                () -> verifyNoInteractions(unifiedUserRepository),
+                () -> verifyNoInteractions(collectionRunRepository),
+                () -> verifyNoInteractions(lockHandle));
+    }
+
+    @Test
+    @DisplayName("Happy path: handle.close() вызывается ровно один раз после успешного сбора")
+    void lockReleasedAfterSuccess() {
+        when(gitGateway.configuredRepos()).thenReturn(List.of());
+        when(kaitenGateway.fetchAllUsers()).thenReturn(List.of());
+
+        service.run(SINCE);
+
+        verify(lockHandle, times(1)).close();
     }
 
     /* ------------ helpers ------------ */

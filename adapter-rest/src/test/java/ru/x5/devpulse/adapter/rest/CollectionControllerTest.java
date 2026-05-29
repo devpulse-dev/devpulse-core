@@ -19,6 +19,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
+import ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException;
 import ru.x5.devpulse.domain.model.collection.CollectionRun;
 import ru.x5.devpulse.domain.model.collection.CollectionStatus;
 
@@ -72,5 +73,16 @@ class CollectionControllerTest {
 
         mvc.perform(get("/api/v2/collection/runs/" + id))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("POST когда сбор уже идёт → 409 Conflict + RFC 7807 problem")
+    void startWhenAlreadyRunning() throws Exception {
+        when(collectDailyStats.run(any())).thenThrow(new CollectionAlreadyRunningException());
+
+        mvc.perform(post("/api/v2/collection/runs"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("urn:devpulse:problem:conflict"))
+                .andExpect(jsonPath("$.title").value("Collection already running"));
     }
 }
