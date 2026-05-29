@@ -102,6 +102,13 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
      * <p>Сначала удаляем затронутые строки, потом вставляем заново из commit_details
      * через {@code GROUP BY (email_lower, date, repo)}. Email в commit_details может быть в
      * исходном регистре — нормализуем через {@code LOWER()} чтобы ключ совпадал с upsert.</p>
+     *
+     * <p><b>Производительность:</b> WHERE использует {@code LOWER(email)} и
+     * {@code CAST(commit_date AS DATE)}. Обычные индексы по {@code email} и {@code commit_date}
+     * для таких выражений НЕ работают (не sargable). Functional composite indexes
+     * {@code idx_commit_details_email_lower_date} и {@code idx_daily_stats_email_lower_date}
+     * добавлены миграцией 019 — их форма ОБЯЗАНА совпадать с выражениями ниже. Если
+     * меняешь {@code LOWER}/{@code CAST} здесь — синхронизируй миграцию.</p>
      */
     private static final String DELETE_SQL = """
             DELETE FROM daily_author_stats

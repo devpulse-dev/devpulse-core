@@ -1,0 +1,38 @@
+# Functional composite indexes для hot-query пересчёта daily_author_stats.
+#
+# Запросы пересчёта (в DailyStatsRepositoryAdapter) фильтруют по выражениям:
+#   WHERE LOWER(cd.email) = ANY(?) AND CAST(cd.commit_date AS DATE) BETWEEN ?..?
+#   WHERE LOWER(email) = ANY(?)    AND date BETWEEN ?..?
+# Существующие индексы по `email` и `commit_date` НЕ используются: LOWER() / CAST()
+# делают выражения "не-sargable" для обычных b-tree индексов. Postgres вынужден
+# делать seq scan, и на больших данных это становится узким местом.
+#
+# Решение — functional composite indexes (b-tree с явными выражениями), точно
+# совпадающими с тем что планировщик увидит в WHERE.
+#
+# CONCURRENTLY чтобы не блокировать writes на production-таблице (она может быть
+# большой). Это требует runInTransaction: false — CONCURRENTLY несовместим с tx.
+#
+# IF NOT EXISTS делает changeset идемпотентным: если ранее ручной hotfix-индекс
+# уже создан, повторный прогон миграции просто пропустит шаг.
+databaseChangeLog:
+  - changeSet:
+      id: 019-add-functional-indexes-for-recompute
+      author: devpulse
+      runInTransaction: false
+      changes:
+        - sql:
+            comment: "functional index для recompute по commit_details"
+            sql: |
+              CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_commit_details_email_lower_date
+              ON commit_details (LOWER(email), CAST(commit_date AS DATE));
+        - sql:
+            comment: "functional index для delete-before-recompute по daily_author_stats"
+            sql: |
+              CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_daily_stats_email_lower_date
+              ON daily_author_stats (LOWER(email), date);
+      rollback:
+        - sql:
+            sql: DROP INDEX IF EXISTS idx_commit_details_email_lower_date;
+        - sql:
+            sql: DROP INDEX IF EXISTS idx_daily_stats_email_lower_date;

@@ -35,3 +35,5 @@ databaseChangeLog:
       file: liquibase/migration/017-rebuild-daily-author-stats.yaml
   - include:
       file: liquibase/migration/018-rebuild-daily-stats-fix-commits-semantics.yaml
+  - include:
+      file: liquibase/migration/019-add-functional-indexes-for-recompute.yaml
