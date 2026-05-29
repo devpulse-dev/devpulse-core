@@ -29,6 +29,7 @@ import ru.x5.devpulse.domain.common.PageRequest;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
+import ru.x5.devpulse.domain.model.stats.UserProfile;
 import ru.x5.devpulse.domain.model.user.Email;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
@@ -179,7 +180,7 @@ class QueryUseCasesTest {
             when(commitRepository.findByAuthor(eq(EMAIL), eq(PERIOD), any())).thenReturn(List.of());
             when(kaitenGateway.fetchCardsForMember(eq(new KaitenUserId(7L)), any())).thenReturn(List.of());
 
-            GetUserProfileUseCase.Profile p = service().findProfile(EMAIL, PERIOD).orElseThrow();
+            UserProfile p = service().findProfile(EMAIL, PERIOD).orElseThrow();
 
             assertAll("профиль с kaiten",
                     () -> assertThat(p.user()).isSameAs(user),

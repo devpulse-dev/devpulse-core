@@ -16,6 +16,7 @@ import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
+import ru.x5.devpulse.domain.model.stats.UserProfile;
 import ru.x5.devpulse.domain.model.user.Email;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
 
@@ -51,7 +52,7 @@ public final class GetUserProfileService implements GetUserProfileUseCase {
     private final KaitenGateway kaitenGateway;
 
     @Override
-    public Optional<Profile> findProfile(Email email, Period period) {
+    public Optional<UserProfile> findProfile(Email email, Period period) {
         Optional<UnifiedUser> userOpt = unifiedUserRepository.findByEmail(email);
         if (userOpt.isEmpty()) {
             return Optional.empty();
@@ -71,7 +72,7 @@ public final class GetUserProfileService implements GetUserProfileUseCase {
                 .filter(filterByRelevance(commits))
                 .toList();
 
-        return Optional.of(new Profile(user, summary, commits, cards));
+        return Optional.of(new UserProfile(user, summary, commits, cards));
     }
 
     /**

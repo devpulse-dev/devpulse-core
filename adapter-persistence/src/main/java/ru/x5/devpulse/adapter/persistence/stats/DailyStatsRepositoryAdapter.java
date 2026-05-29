@@ -144,7 +144,7 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
                 COALESCE(SUM(cd.test_added_lines), 0)                      AS test_added_lines,
                 NOW()                                                      AS last_updated,
                 (SELECT u.id FROM unified_user u
-                  WHERE LOWER(u.email) = LOWER(cd.email)
+                  WHERE LOWER(u.email) = email
                   LIMIT 1)                                                 AS user_id
             FROM commit_details cd
             WHERE LOWER(cd.email) = ANY (?)

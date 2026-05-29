@@ -1,7 +1,7 @@
 package ru.x5.devpulse.adapter.rest.dto;
 
 import java.util.List;
-import ru.x5.devpulse.application.port.in.GetUserProfileUseCase;
+import ru.x5.devpulse.domain.model.stats.UserProfile;
 
 /** Профиль пользователя для REST-ответа. */
 public record UserProfileResponse(
@@ -10,7 +10,7 @@ public record UserProfileResponse(
         List<CommitResponse> commits,
         List<KaitenCardResponse> cards
 ) {
-    public static UserProfileResponse from(GetUserProfileUseCase.Profile p) {
+    public static UserProfileResponse from(UserProfile p) {
         return new UserProfileResponse(
                 UnifiedUserResponse.from(p.user()),
                 AuthorSummaryResponse.from(p.summary()),

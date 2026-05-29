@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import ru.x5.devpulse.application.port.in.GetUserCommitsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserProfileUseCase;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
+import ru.x5.devpulse.domain.model.stats.UserProfile;
 import ru.x5.devpulse.domain.model.user.Email;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
@@ -43,7 +44,7 @@ class UsersControllerTest {
         var summary = new AuthorSummary(email, "Boris", null, 10, 1, 100, 50, 20, null);
 
         when(getUserProfile.findProfile(eq(email), any()))
-                .thenReturn(Optional.of(new GetUserProfileUseCase.Profile(
+                .thenReturn(Optional.of(new UserProfile(
                         user, summary, List.of(), List.of())));
 
         mvc.perform(get("/api/v2/users/boris@x5.ru/profile")
