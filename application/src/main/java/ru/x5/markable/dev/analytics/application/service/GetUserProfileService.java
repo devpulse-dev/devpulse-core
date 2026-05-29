@@ -1,7 +1,9 @@
 package ru.x5.markable.dev.analytics.application.service;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import ru.x5.markable.dev.analytics.application.port.in.GetUserProfileUseCase;
 import ru.x5.markable.dev.analytics.application.port.out.CommitRepository;
@@ -23,7 +25,18 @@ import ru.x5.markable.dev.analytics.domain.model.user.UnifiedUser;
  *
  * <p><b>Карточки Kaiten тянутся live</b> через {@link KaitenGateway}, а не из локальной БД.
  * Это намеренно: массовый сбор карточек выключен (бюджет Kaiten-API тратится только когда
- * фронт реально открывает профиль). Фильтр — карточки, обновлённые после {@code period.from}.</p>
+ * фронт реально открывает профиль).</p>
+ *
+ * <p><b>Фильтр карточек:</b> показываем только релевантные пользователю за период:
+ * <ul>
+ *   <li>есть коммит автора по этой карточке за период (kaitenCardId из таскера коммита совпал
+ *       с id карточки) — даже если карточка уже закрыта, мы по ней работали; ИЛИ</li>
+ *   <li>карточка не закрыта ({@code columnStatus != DONE} и {@code closedAt == null}) —
+ *       висит в работе у пользователя, отображаем.</li>
+ * </ul>
+ *
+ * Карточки закрытые без коммитов автора — отсеиваем (вероятно «затянуло» по
+ * {@code updated_after}-фильтру Kaiten, к этой работе пользователь напрямую не относится).</p>
  *
  * <p>Если пользователя нет в {@code unified_user} — возвращает {@link Optional#empty()}.</p>
  */
@@ -53,9 +66,35 @@ public final class GetUserProfileService implements GetUserProfileUseCase {
         // Карточки — live из Kaiten API. Только если у пользователя есть kaiten_id.
         List<KaitenCard> cards = user.kaiten()
                 .map(kid -> kaitenGateway.fetchCardsForMember(kid, period.fromAtStartOfDay()))
-                .orElseGet(List::of);
+                .orElseGet(List::of)
+                .stream()
+                .filter(filterByRelevance(commits))
+                .toList();
 
         return Optional.of(new Profile(user, summary, commits, cards));
+    }
+
+    /**
+     * Фильтр карточек: «по карточке есть коммит автора ИЛИ карточка не закрыта».
+     * Карточки закрытые без коммитов автора отсеиваются — они «попали» в выборку из-за
+     * {@code updated_after}-фильтра Kaiten (например кто-то заархивировал карточку, в которой
+     * автор когда-то был участником), но к работе автора в этот период не относятся.
+     */
+    private static java.util.function.Predicate<KaitenCard> filterByRelevance(List<Commit> commits) {
+        Set<Long> committedCardIds = extractKaitenCardIds(commits);
+        return card -> committedCardIds.contains(card.id().value()) || !card.isClosed();
+    }
+
+    /** Собирает {@code kaiten_card_id} из коммитов (берём из taskNumber через asKaitenCardId). */
+    private static Set<Long> extractKaitenCardIds(List<Commit> commits) {
+        Set<Long> ids = new HashSet<>();
+        for (Commit c : commits) {
+            c.task().ifPresent(task -> {
+                var maybeId = task.asKaitenCardId();
+                if (maybeId.isPresent()) ids.add(maybeId.getAsLong());
+            });
+        }
+        return ids;
     }
 
     private static AuthorSummary aggregate(Email email, List<DailyAuthorStats> daily) {
