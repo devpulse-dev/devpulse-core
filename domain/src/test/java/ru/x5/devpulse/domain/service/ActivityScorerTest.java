@@ -38,7 +38,8 @@ class ActivityScorerTest {
         AuthorSummary author = new AuthorSummary(
                 new Email("a@x5.ru"), null, null,
                 commits, merges,
-                /*added*/ totalLines, /*deleted*/ 0, /*test*/ 0);
+                /*added*/ totalLines, /*deleted*/ 0, /*test*/ 0,
+                /*activity*/ null);
 
         ActivityScore score = ActivityScorer.score(author, EXPECTED);
 
@@ -53,7 +54,7 @@ class ActivityScorerTest {
     void noCommits() {
         AuthorSummary empty = new AuthorSummary(
                 new Email("ghost@x5.ru"), null, null,
-                0, 0, 0, 0, 0);
+                0, 0, 0, 0, 0, null);
 
         ActivityScore score = ActivityScorer.score(empty, EXPECTED);
 
@@ -69,7 +70,8 @@ class ActivityScorerTest {
         AuthorSummary teamlead = new AuthorSummary(
                 new Email("lead@x5.ru"), null, null,
                 /*commits*/ 100, /*merges*/ 100,
-                /*added*/ 0, /*deleted*/ 0, /*test*/ 0);
+                /*added*/ 0, /*deleted*/ 0, /*test*/ 0,
+                /*activity*/ null);
 
         ActivityScore score = ActivityScorer.score(teamlead, EXPECTED);
 
@@ -84,7 +86,8 @@ class ActivityScorerTest {
         AuthorSummary boomer = new AuthorSummary(
                 new Email("boomer@x5.ru"), null, null,
                 /*commits*/ 50, /*merges*/ 0,
-                /*added*/ 50_000, /*deleted*/ 0, /*test*/ 0); // 1000 строк/коммит
+                /*added*/ 50_000, /*deleted*/ 0, /*test*/ 0, // 1000 строк/коммит
+                /*activity*/ null);
 
         ActivityScore score = ActivityScorer.score(boomer, EXPECTED);
 
@@ -104,7 +107,8 @@ class ActivityScorerTest {
         AuthorSummary normalDev = new AuthorSummary(
                 new Email("dev@x5.ru"), null, null,
                 /*commits*/ 50, /*merges*/ 0,
-                /*added*/ 2500, /*deleted*/ 0, /*test*/ 0); // 50 строк/коммит — здорово
+                /*added*/ 2500, /*deleted*/ 0, /*test*/ 0, // 50 строк/коммит — здорово
+                /*activity*/ null);
 
         ActivityScore score = ActivityScorer.score(normalDev, EXPECTED);
 

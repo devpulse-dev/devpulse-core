@@ -192,7 +192,7 @@ devpulse/
 | Фича | Где (план/факт) |
 |---|---|
 | **Virtual threads** | `bootstrap/application.yml`: `spring.threads.virtual.enabled=true` (Spring Boot 4 GA). Tomcat и `@Async` автоматом на virtual. |
-| **`StructuredTaskScope`** | `adapter-git/GitGatewayAdapter` — fan-out по репозиториям, отмена при ошибке одного. Возможно `CollectDailyStatsService` если вернём параллелизм по репам на уровне use case. |
+| **`StructuredTaskScope`** | Зарезервировано. В коде сбор per-repo sequential — обоснование в ADR-9. Виртуальный поток используется только для git stdout reader (`GitCliClient`). |
 | **Scoped Values** | планируется в Сессии 6 — request-scoped `CorrelationId` для REST-логов. |
 | **Stream Gatherers** | в Сессии 6 — недельная агрегация со скользящим окном (`Gatherers.windowFixed(7)` и пр.). |
 | **Pattern matching for switch** | домен: `CollectionStatus`, в REST: обработка ошибок use case → HTTP-статус. |
@@ -202,7 +202,7 @@ devpulse/
 
 ## 8. Принципы, которые держим
 
-1. **Никаких `@Transactional` в use case.** Транзакции — на уровне репозитория, рисуют границы консистентности данных. Use case оркеструет.
+1. **Транзакции через port, не аннотации в use case.** Application не зависит от Spring (enforced ArchUnit). Когда use case'у нужна композитная атомарность (например cleanup + recompute), он явно оборачивает блок в `TransactionRunner.inTransaction(...)`. Adapter-методы оставляем с `@Transactional` для single-operation вызовов извне use case.
 2. **Никаких DTO в `application`.** DTO — деталь REST-адаптера. Use case принимает и возвращает domain types.
 3. **Адаптеры package-private.** Все классы адаптеров (кроме `@Configuration`-точек) с дефолтной видимостью — извне их никто не должен инстанцировать.
 4. **Конструкторная инъекция везде.** `@Autowired` поля и сеттеры запрещены. Lombok `@RequiredArgsConstructor` — норма.
@@ -351,3 +351,56 @@ dailyStatsRepo.recomputeFromCommits(affectedAuthors, period)
 **Одноразовая миграция данных:** Liquibase `017-rebuild-daily-author-stats.yaml` — TRUNCATE daily_author_stats + INSERT FROM commit_details. Накатывается автоматически при старте после деплоя. Rebase-zombie в `commit_details` миграция не трогает — их вычистит сервис при следующем `POST /api/v2/collection/runs`.
 
 **Тесты обновлены:** `CollectDailyStatsServiceTest` — happy path с проверкой recompute, отдельные сценарии cleanup zombies (есть/нет), git failure → нет recompute, kaiten failure изолирован, нет коммитов → нет recompute.
+
+---
+
+## ADR-9. Честная переоценка после architecture review
+
+Этот раздел — post-mortem на собственные обещания. После полного review нашёл расхождения между «как продавали в README» и «как сделано в коде». Фиксирую здесь, чтобы не маркетинговать архитектуру в большей степени, чем она того заслуживает.
+
+### Расхождение 1 — `StructuredTaskScope` обещан, в коде sequential
+
+**В трекере и README** значился пункт «adapter-git: GitGatewayAdapter + StructuredTaskScope» — fan-out по репозиториям через структурную конкуррентность. **В коде:** `CollectDailyStatsService.collectGitStats()` — обычный `for (RepoName repo : repos)`.
+
+**Почему не делаем параллельно сейчас:**
+
+1. **Distributed lock через advisory lock — single-writer семантика.** Два параллельных сбора уже отсечены на уровне `pg_try_advisory_lock`. Параллелизм внутри одного сбора (по репам) — другая ось, но менее ценная.
+2. **Per-repo атомарная tx (cleanup + recompute) держит row-level locks.** Если бы два потока параллельно делали recompute разных репо но пересекающихся авторов — они блокировались бы друг на друге через DELETE+INSERT в `daily_author_stats`. Получили бы deadlock'и, а не speedup.
+3. **Узкое место сбора — `git fetch` / `git log`**, а не CPU. Параллелизм добавил бы только если git'у бы хватало bandwidth/CPU на host'е. Это проверяется бенчмарком, которого у нас не было.
+
+**Если в будущем понадобится:**
+- Параллелить нужно `git fetch` (download bound) — отдельная фаза перед стримом логов.
+- Recompute оставить sequential (или агрегировать в финальную одну tx на весь сбор — но тогда теряем per-repo атомарность отказа).
+
+В коде это пометили честно (см. `GitGatewayAdapter` javadoc, README принцип 5).
+
+### Расхождение 2 — это не «rich hexagonal с DDD»
+
+В первоначальных доках упоминалось «hexagonal architecture» в контексте, который намекал на rich domain model. **Реальность:**
+
+- `domain.model.*` — это **value objects** (Email, Period, RepoName, CommitHash, TaskNumber) с инвариантами в конструкторе. Это правильно и работает.
+- `domain.model.stats.*` — DTO-records без поведения (`DailyAuthorStats`, `AuthorSummary`, `WeeklyStats`, `PeriodSummary`, `Dashboard`).
+- `domain.service.*` — pure-функции (`StatsSummarizer`, `ActivityScorer`, `CommitMessageParser`, `TestFileDetector`). Не "rich" — это **transaction scripts** в чистом виде.
+- Реальная бизнес-логика **распределена**: часть в SQL (`RECOMPUTE_SQL` агрегирует и фильтрует), часть в domain (`ActivityScorer`), часть в use case (`GetUserProfileService.filterByRelevance`), часть в record-helpers (`AuthorSummary.nonMergeCommits()`).
+
+**Это нормально для аналитического сервиса.** Аналитика — это transformation pipeline, не bounded context с инвариантами агрегата. Rich domain model был бы здесь over-engineering.
+
+**Что мы реально получили:**
+- **Ports & adapters** изоляцию (заменяемые адаптеры, тесты без I/O) — да, это работает.
+- **Direction enforcement** через ArchUnit — да, держит границы.
+- **Не rich domain** — и слава богу, не нужен здесь.
+
+«Hexagonal» в README — это про ports & adapters, не про DDD. Поправлено.
+
+### Расхождение 3 — `domain.common.Page` / `PageRequest` — это не domain primitives
+
+`Page<T>` и `PageRequest` живут в `domain.common.*`, но это не доменные понятия — это **query-level** примитивы (так же как `Period` для запросов, или `PageRequest` Spring Data). Они в domain потому что use case-ы возвращают `Page<AuthorSummary>` через port, а port не должен зависеть от Spring.
+
+Это не баг и не leakage в строгом смысле — это **прагматичное решение**: альтернатива (тащить Spring Data `Page` в application через `application/port/...`) хуже. Но называть их "domain entities" нечестно — это **shared kernel** для query-уровня.
+
+### Что нужно было бы сделать иначе, если бы делал заново
+
+- Не маркетинговать "rich domain" и "DDD" — оба термина создают неверные ожидания.
+- Не обещать `StructuredTaskScope` пока не доказан profile-driven выигрыш.
+- 8 Maven-модулей для приложения (не библиотеки) — overkill. Хватило бы 4: `domain` + `application` объединить в `core`, `adapter-rest` + `adapter-persistence` + `adapter-external` (git + kaiten) объединить, плюс `bootstrap`. ArchUnit держит границы — Maven boundaries дублируют это с лишним build-overhead. Менять сейчас уже дорого — оставлено как есть.
+

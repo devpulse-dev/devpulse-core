@@ -37,7 +37,8 @@ class DashboardControllerTest {
         AuthorSummary boris = new AuthorSummary(
                 new Email("boris@x5.ru"), "Boris", "https://avatar/1",
                 /*commits*/ 50, /*mergeCommits*/ 5,
-                /*added*/ 200, /*deleted*/ 80, /*testAdded*/ 30);
+                /*added*/ 200, /*deleted*/ 80, /*testAdded*/ 30,
+                /*activity*/ null);
         when(getDashboard.get(any(), any())).thenReturn(new Dashboard(
                 new Period(LocalDate.now().minusDays(30), LocalDate.now()),
                 new Page<>(List.of(boris), 0, 20, 1)));

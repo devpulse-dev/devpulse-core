@@ -1,17 +1,28 @@
 package ru.x5.devpulse.domain.model.stats;
 
-import java.util.Optional;
 import ru.x5.devpulse.domain.model.user.Email;
 
 /**
  * Краткая статистика автора за период.
  *
- * <p>{@code displayName} и {@code avatarUrl} опциональны — заполняются из {@code unified_user}
- * на этапе enrichment в use case'е.</p>
+ * <p><b>Lifecycle:</b> запись проходит до трёх стадий — у каждой свои nullable поля:</p>
+ * <ol>
+ *   <li><b>Aggregation</b> ({@link ru.x5.devpulse.domain.service.StatsSummarizer},
+ *       use case {@code aggregate()}). Заполнены только статистика;
+ *       {@code displayName}, {@code avatarUrl}, {@code activity} = {@code null}.</li>
+ *   <li><b>Enrichment</b> ({@code AuthorSummaryEnricher}, см. {@link #withProfile}).
+ *       Дозаполнены {@code displayName}/{@code avatarUrl} из {@code unified_user}.</li>
+ *   <li><b>Scoring</b> ({@code GetDashboardService}, см. {@link #withActivity}).
+ *       Дозаполнен {@link ActivityScore}.</li>
+ * </ol>
  *
- * <p>{@link #activity()} — рассчитанный {@link ActivityScore}. Заполняется ТОЛЬКО в use case'ах,
- * где это уместно (например {@code GetDashboardService}). В query-эндпоинтах weekly/summary —
- * остаётся {@code null}.</p>
+ * <p>В REST/weekly/summary {@code activity} остаётся {@code null} — считаем score только
+ * на дашборде. Маппер REST явно проверяет nullable и не падает.</p>
+ *
+ * <p><b>Дизайн-решение:</b> мы НЕ делаем sealed-иерархию {@code Plain}/{@code Scored} — это
+ * было бы корректнее с точки зрения "types-as-states", но избыточно для одного nullable поля.
+ * Цена: callsite-ы создают summary с явными {@code null} в конце. Это намеренно: явный {@code null}
+ * лучше скрытого secondary-constructor'а.</p>
  */
 public record AuthorSummary(
         Email email,
@@ -25,30 +36,9 @@ public record AuthorSummary(
         ActivityScore activity
 ) {
 
-    /** Конструктор без activity — для use case'ов, где score не считаем. */
-    public AuthorSummary(Email email, String displayName, String avatarUrl,
-                         long commits, long mergeCommits,
-                         long addedLines, long deletedLines, long testAddedLines) {
-        this(email, displayName, avatarUrl,
-                commits, mergeCommits, addedLines, deletedLines, testAddedLines,
-                /* activity = */ null);
-    }
-
     /** Коммиты без мерджей. Используется для сортировки «по активности». */
     public long nonMergeCommits() {
         return Math.max(0, commits - mergeCommits);
-    }
-
-    public Optional<String> name() {
-        return Optional.ofNullable(displayName);
-    }
-
-    public Optional<String> avatar() {
-        return Optional.ofNullable(avatarUrl);
-    }
-
-    public Optional<ActivityScore> activityOptional() {
-        return Optional.ofNullable(activity);
     }
 
     /** Возвращает копию с дополненными displayName и avatarUrl (для enrichment в use case). */
