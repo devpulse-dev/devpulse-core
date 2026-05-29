@@ -1,6 +1,6 @@
 spring:
   application:
-    name: markable-dev-analytics
+    name: devpulse
 
   # Java 25 virtual threads везде, где Spring их поддерживает (MVC, Async, Scheduling)
   threads:

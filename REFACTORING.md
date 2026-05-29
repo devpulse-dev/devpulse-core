@@ -66,7 +66,7 @@
 ## 3. Структура модулей
 
 ```
-markable-dev-analytics/
+devpulse/
 ├── pom.xml                       # parent, packaging=pom
 │
 ├── domain/                       # pure Java, без Spring/JPA/Jackson/Hibernate/Lombok

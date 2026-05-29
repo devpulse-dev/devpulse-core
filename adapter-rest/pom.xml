@@ -5,18 +5,18 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>ru.x5.markable.dev.analytics</groupId>
-        <artifactId>markable-dev-analytics-parent</artifactId>
+        <groupId>ru.x5.devpulse</groupId>
+        <artifactId>devpulse-parent</artifactId>
         <version>2.0.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>adapter-rest</artifactId>
-    <name>Markable Dev Analytics — REST in-adapter</name>
+    <name>DevPulse — REST in-adapter</name>
     <description>HTTP entry point. Controllers + request/response DTOs + MapStruct mappers to domain.</description>
 
     <dependencies>
         <dependency>
-            <groupId>ru.x5.markable.dev.analytics</groupId>
+            <groupId>ru.x5.devpulse</groupId>
             <artifactId>application</artifactId>
         </dependency>
 

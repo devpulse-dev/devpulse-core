@@ -1,4 +1,4 @@
-# Markable Dev Analytics
+# DevPulse
 
 [![CI](https://github.com/devpulse-dev/DevPulse-core/actions/workflows/ci.yml/badge.svg)](https://github.com/devpulse-dev/DevPulse-core/actions/workflows/ci.yml)
 
