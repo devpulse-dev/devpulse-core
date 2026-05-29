@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,7 @@ import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.GitGateway;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
 import ru.x5.devpulse.application.port.out.KaitenUserRepository;
+import ru.x5.devpulse.application.port.out.TransactionRunner;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.common.TaskNumber;
@@ -69,6 +71,7 @@ class CollectDailyStatsServiceTest {
     @Mock private CollectionRunRepository collectionRunRepository;
     @Mock private CollectionLock collectionLock;
     @Mock private CollectionLock.Handle lockHandle;
+    @Mock private TransactionRunner transactionRunner;
 
     @InjectMocks private CollectDailyStatsService service;
 
@@ -78,6 +81,15 @@ class CollectDailyStatsServiceTest {
         // lenient — потому что тест "lock занят" переопределяет этот стаб, и STRICT_STUBS
         // иначе пожалуется на «не использованный» first stubbing.
         lenient().when(collectionLock.acquireOrThrow()).thenReturn(lockHandle);
+
+        // TransactionRunner.inTransaction(Supplier) — вызываем supplier синхронно.
+        // Это эквивалентно "tx работает, всё закоммитилось". Тесты на rollback пишем
+        // через бросание exception внутри supplier и проверкой что состояние не тронуто.
+        lenient().when(transactionRunner.inTransaction(any(Supplier.class)))
+                .thenAnswer(inv -> {
+                    Supplier<?> supplier = inv.getArgument(0);
+                    return supplier.get();
+                });
     }
 
     @Test
@@ -234,6 +246,47 @@ class CollectDailyStatsServiceTest {
 
         assertThat(runs.getAllValues().get(0).sinceDate())
                 .isEqualTo(lastUntil.plusSeconds(1));
+    }
+
+    @Test
+    @DisplayName("Каждый repo обрабатывается в своей транзакции (N tx-блоков на N репо)")
+    void oneTransactionPerRepo() {
+        RepoName r1 = new RepoName("r1");
+        RepoName r2 = new RepoName("r2");
+        when(gitGateway.configuredRepos()).thenReturn(List.of(r1, r2));
+        when(gitGateway.prepare(r1)).thenReturn(r1);
+        when(gitGateway.prepare(r2)).thenReturn(r2);
+        doAnswer(inv -> null).when(gitGateway).streamCommits(any(), any(), any(), any());
+        when(commitRepository.findHashesByRepoAndPeriod(any(), any())).thenReturn(Set.of());
+        when(kaitenGateway.fetchAllUsers()).thenReturn(List.of());
+
+        service.run(SINCE);
+
+        // Финальный cleanup+recompute блок зовётся ровно один раз на репо.
+        verify(transactionRunner, times(2)).inTransaction(any(Supplier.class));
+    }
+
+    @Test
+    @DisplayName("Падение в финальной tx (recompute упал) ⇒ run = FAILED, exception в error()")
+    void txBlockFailureRollsBackAndMarksFailed() {
+        when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
+        when(gitGateway.prepare(REPO)).thenReturn(REPO);
+        stubStreamCommits(List.of(commit(SHA_NEW)));
+        when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
+        when(commitRepository.findHashesByRepoAndPeriod(eq(REPO), any())).thenReturn(Set.of());
+
+        // Имитируем падение recompute. В реальности это означает rollback — кэш zombies/recompute
+        // не применился, состояние БД до tx сохранилось.
+        doThrow(new RuntimeException("db down"))
+                .when(dailyStatsRepository).recomputeFromCommits(anyCollection(), any());
+
+        CollectionRun result = service.run(SINCE);
+
+        assertAll("recompute упал → FAILED, kaiten не зовётся",
+                () -> assertThat(result.status()).isEqualTo(CollectionStatus.FAILED),
+                () -> assertThat(result.error()).hasValueSatisfying(
+                        msg -> assertThat(msg).contains("db down")),
+                () -> verify(kaitenGateway, never()).fetchAllUsers());
     }
 
     @Test

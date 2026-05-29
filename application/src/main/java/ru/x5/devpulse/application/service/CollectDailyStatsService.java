@@ -15,6 +15,7 @@ import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.GitGateway;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
 import ru.x5.devpulse.application.port.out.KaitenUserRepository;
+import ru.x5.devpulse.application.port.out.TransactionRunner;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.collection.CollectionRun;
@@ -44,8 +45,21 @@ import ru.x5.devpulse.domain.model.user.Email;
  *       в {@code unified_user} по совпадению email.</li>
  * </ol>
  *
- * <p><b>Изоляция фаз:</b> ошибка Kaiten НЕ откатывает git-статы. Транзакции — на уровне
- * репозиториев (батч + recompute), не на use case.</p>
+ * <p><b>Изоляция фаз:</b> ошибка Kaiten НЕ откатывает git-статы.</p>
+ *
+ * <p><b>Транзакционные границы:</b></p>
+ * <ul>
+ *   <li>Каждый {@code saveAll(batch)} — своя короткая tx (через {@code @Transactional}
+ *       на adapter методе). Это держит tx максимально короткой во время длинного git log.</li>
+ *   <li>Финальные шаги cleanup zombies + recompute daily_stats для одного репо —
+ *       <b>одна общая tx</b> через {@link TransactionRunner}. Это гарантирует:
+ *       либо для репо обновлены и {@code commit_details}, и {@code daily_stats},
+ *       либо состояние репо в БД не тронуто (rollback при падении).</li>
+ *   <li>Если падение случилось в середине стрима — {@code saveAll}-батчи уже закоммичены,
+ *       но {@code lastSuccessfulUntil} не обновляется (run = FAILED). Следующий запуск
+ *       retry'нет с того же since, дубли отсекаются {@code findExistingHashes}, и cleanup
+ *       +recompute доедет до конца. <b>Идемпотентно.</b></li>
+ * </ul>
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -62,6 +76,7 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
     private final UnifiedUserRepository unifiedUserRepository;
     private final CollectionRunRepository collectionRunRepository;
     private final CollectionLock collectionLock;
+    private final TransactionRunner transactionRunner;
 
     /**
      * Запуск сбора.
@@ -134,22 +149,46 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
         Set<Email> allAffected = new HashSet<>();
 
         for (RepoName repo : repos) {
-            RepoName prepared = gitGateway.prepare(repo);
-            log.info("Стримим коммиты из {}", prepared.value());
+            allAffected.addAll(collectOneRepo(repo, since, until, period));
+        }
 
-            // Накапливаем хеши, реально пришедшие из git в этом сборе.
-            Set<CommitHash> seenInGit = new HashSet<>();
-            Set<Email> repoAffected = new HashSet<>();
+        return allAffected;
+    }
 
-            gitGateway.streamCommits(prepared, since, until, batch -> {
-                for (Commit c : batch) {
-                    seenInGit.add(c.hash());
-                    if (c.authorEmail() != null) repoAffected.add(c.authorEmail());
-                }
-                persistCommitBatch(batch);
-            });
+    /**
+     * Один репозиторий: stream коммитов + per-batch save (каждый — своя tx) → финальная
+     * atomic tx { cleanup zombies + recompute daily_stats для этого репо }.
+     *
+     * <p><b>Почему recompute per-repo, а не один в конце:</b> атомарность важна на уровне
+     * репозитория — если падение случится между repo N и repo N+1, первые N репо консистентны.
+     * Если бы recompute был общим в конце — частичный сбор оставлял бы commit_details без
+     * актуального daily_stats до следующего успешного полного сбора.</p>
+     */
+    private Set<Email> collectOneRepo(RepoName repo,
+                                      LocalDateTime since,
+                                      LocalDateTime until,
+                                      Period period) {
+        RepoName prepared = gitGateway.prepare(repo);
+        log.info("Стримим коммиты из {}", prepared.value());
 
-            // Cleanup zombies: что в БД есть, а в git'е нет — то ушло после rebase / force-push.
+        // Накапливаем хеши и authors реально пришедшие из git.
+        // gitGateway.streamCommits отдаёт batch'и из reader-thread'а; persistCommitBatch
+        // делает свой @Transactional saveAll — короткая tx на каждый батч.
+        Set<CommitHash> seenInGit = new HashSet<>();
+        Set<Email> repoAffected = new HashSet<>();
+
+        gitGateway.streamCommits(prepared, since, until, batch -> {
+            for (Commit c : batch) {
+                seenInGit.add(c.hash());
+                if (c.authorEmail() != null) repoAffected.add(c.authorEmail());
+            }
+            persistCommitBatch(batch);
+        });
+
+        // Финальная атомарная tx: cleanup + recompute видимы вместе или никак.
+        // Используем Supplier-перегрузку (с явным return null) — Runnable-overload в интерфейсе
+        // default, и mock-фреймворки его по умолчанию не вызывают.
+        transactionRunner.inTransaction(() -> {
             Set<CommitHash> inDb = commitRepository.findHashesByRepoAndPeriod(prepared, period);
             Set<CommitHash> zombies = new HashSet<>(inDb);
             zombies.removeAll(seenInGit);
@@ -158,17 +197,13 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
                         prepared.value(), zombies.size());
                 commitRepository.deleteByHashes(zombies);
             }
+            if (!repoAffected.isEmpty()) {
+                dailyStatsRepository.recomputeFromCommits(repoAffected, period);
+            }
+            return null;
+        });
 
-            allAffected.addAll(repoAffected);
-        }
-
-        // Recompute daily_stats для всех затронутых email-ов за период сбора — один SQL
-        // на всю партию вместо инкрементальных UPSERT'ов с перезаписью.
-        if (!allAffected.isEmpty()) {
-            dailyStatsRepository.recomputeFromCommits(allAffected, period);
-        }
-
-        return allAffected;
+        return repoAffected;
     }
 
     /**

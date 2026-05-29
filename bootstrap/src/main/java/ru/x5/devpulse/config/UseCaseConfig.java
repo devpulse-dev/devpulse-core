@@ -18,6 +18,7 @@ import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.GitGateway;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
 import ru.x5.devpulse.application.port.out.KaitenUserRepository;
+import ru.x5.devpulse.application.port.out.TransactionRunner;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.application.service.CollectDailyStatsService;
 import ru.x5.devpulse.application.service.GetCollectionRunService;
@@ -53,11 +54,13 @@ public class UseCaseConfig {
             KaitenUserRepository kaitenUserRepository,
             UnifiedUserRepository unifiedUserRepository,
             CollectionRunRepository collectionRunRepository,
-            CollectionLock collectionLock) {
+            CollectionLock collectionLock,
+            TransactionRunner transactionRunner) {
         return new CollectDailyStatsService(
                 gitGateway, kaitenGateway,
                 commitRepository, dailyStatsRepository, kaitenUserRepository,
-                unifiedUserRepository, collectionRunRepository, collectionLock);
+                unifiedUserRepository, collectionRunRepository, collectionLock,
+                transactionRunner);
     }
 
     @Bean
