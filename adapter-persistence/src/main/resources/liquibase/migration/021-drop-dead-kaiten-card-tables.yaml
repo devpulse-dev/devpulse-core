@@ -1,0 +1,24 @@
+# Удаление мёртвых таблиц kaiten_card / kaiten_card_member / kaiten_card_comment.
+#
+# В v2 карточки Kaiten тянутся live через KaitenGateway.fetchCardsForMember (с Caffeine кэшем
+# 5 мин). Persistent storage не используется — массовый сбор карточек в БД был отключён в
+# Фиче 1 (см. REFACTORING.md). После review-фикса #17 удаляем и схему.
+#
+# DROP CASCADE — на случай если в проде сохранились FK-зависимости (например from
+# kaiten_card_member на kaiten_card). Колонка commit_details.kaiten_card_id ОСТАЁТСЯ —
+# она хранит id карточки (не FK на нашу таблицу), используется в фильтре карточек профиля.
+databaseChangeLog:
+  - changeSet:
+      id: 021-drop-dead-kaiten-card-tables
+      author: devpulse
+      changes:
+        - sql:
+            comment: "DROP TABLE kaiten_card / member / comment — мёртвая схема"
+            splitStatements: true
+            sql: |
+              DROP TABLE IF EXISTS kaiten_card_comment CASCADE;
+              DROP TABLE IF EXISTS kaiten_card_member CASCADE;
+              DROP TABLE IF EXISTS kaiten_card CASCADE;
+      rollback:
+        - sql:
+            sql: SELECT 1;  -- мёртвую схему не воскрешаем

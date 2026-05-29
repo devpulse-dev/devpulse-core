@@ -1,0 +1,125 @@
+# Фиксируем целостность unified_user: один email = один user, независимо от регистра.
+#
+# Проблема: `unified_user.email` UNIQUE — но case-sensitive. `Boris@x5.ru` и `boris@x5.ru` —
+# легально разные строки для существующего constraint, хотя семантически один человек.
+# Если процесс сбора создал обе записи (race / разный регистр в git author email),
+# получаем дубль user'а; foreign keys в commit_details.user_id и daily_author_stats.user_id
+# указывают на случайного из них (см. RECOMPUTE_SQL: `MAX(cd.user_id)`).
+#
+# Этот changeset:
+# 1. Reassign'ит FK в commit_details/daily_author_stats к survivor'у (MIN(id) среди дублей).
+# 2. Удаляет victim'ов из unified_user.
+# 3. Нормализует email в LOWER во всех таблицах.
+# 4. Создаёт UNIQUE INDEX по LOWER(email) — на будущее блокирует появление дублей.
+#
+# Шаги 1-3 в обычной transaction (быстрые UPDATE/DELETE).
+# Шаг 4 — CONCURRENTLY (не блокирует production writes), требует runInTransaction: false.
+databaseChangeLog:
+  - changeSet:
+      id: 020a-dedup-unified-user-rows
+      author: devpulse
+      changes:
+        - sql:
+            comment: "Reassign FK refs к survivor'у и удалить дубли по LOWER(email)"
+            splitStatements: true
+            stripComments: false
+            sql: |
+              WITH ranked AS (
+                  SELECT
+                      id,
+                      LOWER(email) AS email_lower,
+                      ROW_NUMBER() OVER (PARTITION BY LOWER(email) ORDER BY id) AS rn
+                  FROM unified_user
+              ),
+              victims_to_survivors AS (
+                  SELECT
+                      r.id AS victim_id,
+                      s.id AS survivor_id
+                  FROM ranked r
+                  JOIN ranked s
+                    ON s.email_lower = r.email_lower
+                   AND s.rn = 1
+                  WHERE r.rn > 1
+              )
+              UPDATE commit_details cd
+              SET user_id = v.survivor_id
+              FROM victims_to_survivors v
+              WHERE cd.user_id = v.victim_id;
+
+              WITH ranked AS (
+                  SELECT
+                      id,
+                      LOWER(email) AS email_lower,
+                      ROW_NUMBER() OVER (PARTITION BY LOWER(email) ORDER BY id) AS rn
+                  FROM unified_user
+              ),
+              victims_to_survivors AS (
+                  SELECT
+                      r.id AS victim_id,
+                      s.id AS survivor_id
+                  FROM ranked r
+                  JOIN ranked s
+                    ON s.email_lower = r.email_lower
+                   AND s.rn = 1
+                  WHERE r.rn > 1
+              )
+              UPDATE daily_author_stats das
+              SET user_id = v.survivor_id
+              FROM victims_to_survivors v
+              WHERE das.user_id = v.victim_id;
+
+              -- Теперь FK refs обновлены, можно удалять victim'ов.
+              DELETE FROM unified_user
+              WHERE id IN (
+                  SELECT id FROM (
+                      SELECT
+                          id,
+                          ROW_NUMBER() OVER (PARTITION BY LOWER(email) ORDER BY id) AS rn
+                      FROM unified_user
+                  ) ranked
+                  WHERE rn > 1
+              );
+      rollback:
+        - sql:
+            sql: SELECT 1;  -- удалённые дубли не восстанавливаются
+
+  - changeSet:
+      id: 020b-normalize-emails-to-lower
+      author: devpulse
+      changes:
+        - sql:
+            comment: "Перевести email в lowercase во всех таблицах — теперь это инвариант"
+            splitStatements: true
+            sql: |
+              UPDATE unified_user
+              SET email = LOWER(email)
+              WHERE email <> LOWER(email);
+
+              UPDATE commit_details
+              SET email = LOWER(email)
+              WHERE email <> LOWER(email);
+
+              UPDATE daily_author_stats
+              SET email = LOWER(email)
+              WHERE email <> LOWER(email);
+
+              UPDATE kaiten_user
+              SET email = LOWER(email)
+              WHERE email IS NOT NULL AND email <> LOWER(email);
+      rollback:
+        - sql:
+            sql: SELECT 1;  -- регистр не восстанавливается
+
+  - changeSet:
+      id: 020c-unique-functional-index-on-lower-email
+      author: devpulse
+      runInTransaction: false
+      changes:
+        - sql:
+            comment: "UNIQUE INDEX по LOWER(email) — блокирует появление новых case-дублей"
+            sql: |
+              CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_unified_user_email_lower
+              ON unified_user (LOWER(email));
+      rollback:
+        - sql:
+            sql: DROP INDEX IF EXISTS uq_unified_user_email_lower;

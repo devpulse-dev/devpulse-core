@@ -66,7 +66,7 @@
 ## 3. Структура модулей
 
 ```
-markable-dev-analytics/
+devpulse/
 ├── pom.xml                       # parent, packaging=pom
 │
 ├── domain/                       # pure Java, без Spring/JPA/Jackson/Hibernate/Lombok
@@ -192,7 +192,7 @@ markable-dev-analytics/
 | Фича | Где (план/факт) |
 |---|---|
 | **Virtual threads** | `bootstrap/application.yml`: `spring.threads.virtual.enabled=true` (Spring Boot 4 GA). Tomcat и `@Async` автоматом на virtual. |
-| **`StructuredTaskScope`** | `adapter-git/GitGatewayAdapter` — fan-out по репозиториям, отмена при ошибке одного. Возможно `CollectDailyStatsService` если вернём параллелизм по репам на уровне use case. |
+| **`StructuredTaskScope`** | Зарезервировано. В коде сбор per-repo sequential — обоснование в ADR-9. Виртуальный поток используется только для git stdout reader (`GitCliClient`). |
 | **Scoped Values** | планируется в Сессии 6 — request-scoped `CorrelationId` для REST-логов. |
 | **Stream Gatherers** | в Сессии 6 — недельная агрегация со скользящим окном (`Gatherers.windowFixed(7)` и пр.). |
 | **Pattern matching for switch** | домен: `CollectionStatus`, в REST: обработка ошибок use case → HTTP-статус. |
@@ -202,7 +202,7 @@ markable-dev-analytics/
 
 ## 8. Принципы, которые держим
 
-1. **Никаких `@Transactional` в use case.** Транзакции — на уровне репозитория, рисуют границы консистентности данных. Use case оркеструет.
+1. **Транзакции через port, не аннотации в use case.** Application не зависит от Spring (enforced ArchUnit). Когда use case'у нужна композитная атомарность (например cleanup + recompute), он явно оборачивает блок в `TransactionRunner.inTransaction(...)`. Adapter-методы оставляем с `@Transactional` для single-operation вызовов извне use case.
 2. **Никаких DTO в `application`.** DTO — деталь REST-адаптера. Use case принимает и возвращает domain types.
 3. **Адаптеры package-private.** Все классы адаптеров (кроме `@Configuration`-точек) с дефолтной видимостью — извне их никто не должен инстанцировать.
 4. **Конструкторная инъекция везде.** `@Autowired` поля и сеттеры запрещены. Lombok `@RequiredArgsConstructor` — норма.
@@ -351,3 +351,181 @@ dailyStatsRepo.recomputeFromCommits(affectedAuthors, period)
 **Одноразовая миграция данных:** Liquibase `017-rebuild-daily-author-stats.yaml` — TRUNCATE daily_author_stats + INSERT FROM commit_details. Накатывается автоматически при старте после деплоя. Rebase-zombie в `commit_details` миграция не трогает — их вычистит сервис при следующем `POST /api/v2/collection/runs`.
 
 **Тесты обновлены:** `CollectDailyStatsServiceTest` — happy path с проверкой recompute, отдельные сценарии cleanup zombies (есть/нет), git failure → нет recompute, kaiten failure изолирован, нет коммитов → нет recompute.
+
+---
+
+## ADR-9. Честная переоценка после architecture review
+
+Этот раздел — post-mortem на собственные обещания. После полного review нашёл расхождения между «как продавали в README» и «как сделано в коде». Фиксирую здесь, чтобы не маркетинговать архитектуру в большей степени, чем она того заслуживает.
+
+### Расхождение 1 — `StructuredTaskScope` обещан, в коде sequential
+
+**В трекере и README** значился пункт «adapter-git: GitGatewayAdapter + StructuredTaskScope» — fan-out по репозиториям через структурную конкуррентность. **В коде:** `CollectDailyStatsService.collectGitStats()` — обычный `for (RepoName repo : repos)`.
+
+**Почему не делаем параллельно сейчас:**
+
+1. **Distributed lock через advisory lock — single-writer семантика.** Два параллельных сбора уже отсечены на уровне `pg_try_advisory_lock`. Параллелизм внутри одного сбора (по репам) — другая ось, но менее ценная.
+2. **Per-repo атомарная tx (cleanup + recompute) держит row-level locks.** Если бы два потока параллельно делали recompute разных репо но пересекающихся авторов — они блокировались бы друг на друге через DELETE+INSERT в `daily_author_stats`. Получили бы deadlock'и, а не speedup.
+3. **Узкое место сбора — `git fetch` / `git log`**, а не CPU. Параллелизм добавил бы только если git'у бы хватало bandwidth/CPU на host'е. Это проверяется бенчмарком, которого у нас не было.
+
+**Если в будущем понадобится:**
+- Параллелить нужно `git fetch` (download bound) — отдельная фаза перед стримом логов.
+- Recompute оставить sequential (или агрегировать в финальную одну tx на весь сбор — но тогда теряем per-repo атомарность отказа).
+
+В коде это пометили честно (см. `GitGatewayAdapter` javadoc, README принцип 5).
+
+### Расхождение 2 — это не «rich hexagonal с DDD»
+
+В первоначальных доках упоминалось «hexagonal architecture» в контексте, который намекал на rich domain model. **Реальность:**
+
+- `domain.model.*` — это **value objects** (Email, Period, RepoName, CommitHash, TaskNumber) с инвариантами в конструкторе. Это правильно и работает.
+- `domain.model.stats.*` — DTO-records без поведения (`DailyAuthorStats`, `AuthorSummary`, `WeeklyStats`, `PeriodSummary`, `Dashboard`).
+- `domain.service.*` — pure-функции (`StatsSummarizer`, `ActivityScorer`, `CommitMessageParser`, `TestFileDetector`). Не "rich" — это **transaction scripts** в чистом виде.
+- Реальная бизнес-логика **распределена**: часть в SQL (`RECOMPUTE_SQL` агрегирует и фильтрует), часть в domain (`ActivityScorer`), часть в use case (`GetUserProfileService.filterByRelevance`), часть в record-helpers (`AuthorSummary.nonMergeCommits()`).
+
+**Это нормально для аналитического сервиса.** Аналитика — это transformation pipeline, не bounded context с инвариантами агрегата. Rich domain model был бы здесь over-engineering.
+
+**Что мы реально получили:**
+- **Ports & adapters** изоляцию (заменяемые адаптеры, тесты без I/O) — да, это работает.
+- **Direction enforcement** через ArchUnit — да, держит границы.
+- **Не rich domain** — и слава богу, не нужен здесь.
+
+«Hexagonal» в README — это про ports & adapters, не про DDD. Поправлено.
+
+### Расхождение 3 — `domain.common.Page` / `PageRequest` — это не domain primitives
+
+`Page<T>` и `PageRequest` живут в `domain.common.*`, но это не доменные понятия — это **query-level** примитивы (так же как `Period` для запросов, или `PageRequest` Spring Data). Они в domain потому что use case-ы возвращают `Page<AuthorSummary>` через port, а port не должен зависеть от Spring.
+
+Это не баг и не leakage в строгом смысле — это **прагматичное решение**: альтернатива (тащить Spring Data `Page` в application через `application/port/...`) хуже. Но называть их "domain entities" нечестно — это **shared kernel** для query-уровня.
+
+### Что нужно было бы сделать иначе, если бы делал заново
+
+- Не маркетинговать "rich domain" и "DDD" — оба термина создают неверные ожидания.
+- Не обещать `StructuredTaskScope` пока не доказан profile-driven выигрыш.
+- 8 Maven-модулей для приложения (не библиотеки) — overkill. Хватило бы 4: `domain` + `application` объединить в `core`, `adapter-rest` + `adapter-persistence` + `adapter-external` (git + kaiten) объединить, плюс `bootstrap`. ArchUnit держит границы — Maven boundaries дублируют это с лишним build-overhead. Менять сейчас уже дорого — оставлено как есть.
+
+
+---
+
+## Architecture review — выполненные фиксы
+
+После Фичи 4 провели жёсткое principal-level architecture review (см. ADR-9 выше — context).
+Ниже — все 20 идентифицированных проблем и что с ними сделали.
+
+### CRITICAL (security / data loss / системные риски)
+
+| # | Проблема | Что было | Что стало | Файлы |
+|---|---|---|---|---|
+| 1 | Git token leak | Токен в URL, в `Arrays.toString(command)`, в `.git/config` | `GIT_ASKPASS` через POSIX-скрипт + env var, маскирование `://user:pass@` в exception | `GitCliClient`, `GitCommandFailedException`, `GitProperties` |
+| 2 | OOM на больших репо | `git log` копил весь stdout в `ArrayList<String>` | Push-stream через `GitLogParser.Streaming`, virtual thread reader, ring-buffer tail (50 строк) | `GitCliClient`, `GitLogParser`, `GitGatewayAdapter` |
+| 3 | Нет таймаутов на `Process.waitFor()` | Зависший git подвешивал сборку навсегда | `commandTimeout` (default 30m), `destroyForcibly` + grace; virtual thread обходит блокировку `readLine` | `GitCliClient`, `GitProperties` |
+| 4 | `StructuredTaskScope` обещан, в коде sequential | Доки маркетинговали fan-out которого не было | Доки честно говорят что sequential per-repo — обоснование в ADR-9 | `README.md`, `REFACTORING.md` |
+| 5 | Транзакционные границы — partial failure landmine | `saveAll` + `cleanup` + `recompute` — каждое своя tx | Новый port `TransactionRunner`, финальная per-repo tx { cleanup + recompute } через `inTransaction()` | `TransactionRunner` (port), `SpringTransactionRunner`, `CollectDailyStatsService` |
+| 6 | Параллельный сбор → race в git cache + двойной DELETE/INSERT | Никакого lock'а | `pg_try_advisory_lock` + `CollectionLock` port + `CollectionAlreadyRunningException` → 409 | `CollectionLock` (port), `PgAdvisoryCollectionLock`, `CollectDailyStatsService`, `ApiExceptionHandler` |
+
+### HIGH (architectural quality / consistency)
+
+| # | Проблема | Что было | Что стало | Файлы |
+|---|---|---|---|---|
+| 7 | "Rich hexagonal с DDD" — маркетинг | Доки преувеличивали | ADR-9 "Честная переоценка": ports & adapters над transaction scripts, не DDD | `REFACTORING.md`, `README.md` |
+| 8 | `AuthorSummary` 2 конструктора + дубль-геттеры | 9-arg + 8-arg + `name()/avatar()/activityOptional()` | Один constructor, удалены 4 dead-метода | `AuthorSummary` + 7 callsite'ов |
+| 9 | `KaitenGatewayAdapter` ручное пересоздание `KaitenCard` + hardcoded URL | 14 строк ручного `new KaitenCard(...)` + `"https://kaiten.x5.ru/"` в коде | `KaitenCardMapper.toDomain(dto, webBaseUrl)` через MapStruct expression + `KaitenProperties.webBaseUrl` | `KaitenCardMapper`, `KaitenGatewayAdapter`, `KaitenProperties`, `application.yml` |
+| 10 | Двойной `prepare()` git fetch на репо | Use case + адаптер оба звали `cli.prepare(url)` | Удалён `prepare()` из порта `GitGateway`, `streamCommits` сам инкапсулирует подготовку | `GitGateway` (port), `CollectDailyStatsService`, `GitGatewayAdapter` |
+| 11 | `MAX(cd.user_id)` — недетерминированный FK | Case-sensitive дубли + случайный user_id из MAX | Liquibase 020 (dedup + LOWER normalize + UNIQUE INDEX), `RECOMPUTE_SQL` subquery от source of truth | migration 020, `DailyStatsRepositoryAdapter`, `UnifiedUserRepositoryAdapter` |
+| 12 | `Email.toLowerCase()` в адаптере | 4 избыточных `.toLowerCase()` (я сам добавил их в #11) | Подтверждение: `Email` нормализует **в конструкторе** уже. Убрали redundant, добавили инвариант в JavaDoc | `Email`, `UnifiedUserRepositoryAdapter`, `DailyStatsRepositoryAdapter` |
+| 13 | `/profile` live Kaiten без кэша + без HTTP-таймаутов | Каждый запрос — paginated round-trip к Kaiten | Caffeine cache TTL 5m + connect/read timeouts (5s/30s) | `KaitenGatewayAdapter` `@Cacheable`, `KaitenProperties`, `KaitenAdapterConfig`, `application.yml` |
+
+### MEDIUM (cleanup / hardening)
+
+| # | Проблема | Что было | Что стало | Файлы |
+|---|---|---|---|---|
+| 14 | ArchUnit покрывает 20% полезного | 3 правила (layered + bans × 2) | 14 правил: ports interfaces, domain immutable, framework annotations в правильных пакетах, legacy API bans (Date/Calendar, System.out) | `HexagonalArchitectureTest` |
+| 15 | `CollectDailyStatsService` — god service с 8 deps | Lock + lifecycle + git + kaiten + link — 5 ответственностей | Orchestrator (4 deps) + `CollectGitStatsService` worker (5 deps) + расширенный `SyncKaitenUsersService` (3 deps) | `CollectGitStatsUseCase` (port), `CollectGitStatsService`, `CollectDailyStatsService`, `SyncKaitenUsersService` |
+| 16 | 8 Maven-модулей — overkill для приложения | (как было) | **Не меняем** — ArchUnit держит границы. См. ADR-9 | (none) |
+| 17 | Dead schema `kaiten_card` + 6 классов адаптера | Карточки live, но persistent storage остался лежать | Удалены 8 файлов + Liquibase 021 (DROP TABLE) | удалены 8 файлов, migration 021 |
+| 18 | `weekStart()` использует `LocalDate.now()` | Pure-функция с скрытой зависимостью от "сегодня" | `LocalDate.of(year, 1, 4).with(ISO.dayOfWeek, 1).plusWeeks(week - 1)` — детерминированно | `StatsSummarizer`, regression test |
+| 19 | `KaitenRateLimiter.pauseUntil` race | `volatile long` + прямая запись (две паузы — теряется большая) | `AtomicLong` + `updateAndGet(Math::max)`, reserve-slot pattern без `synchronized` | `KaitenRateLimiter` |
+| 20 | `handleAny` — 500 для всех ошибок | Upstream Kaiten = тот же 500 что наш баг | 502 для upstream errors, 504 для timeouts, 500 только для **наших** ошибок | `ApiExceptionHandler`, новые 7 тестов |
+
+### Бонусные мелкие фиксы по пути
+
+- **`urn:markable:*` → `urn:devpulse:*`** в `ApiExceptionHandler` — пропущенный rename из переименования проекта.
+- **`GetUserProfileUseCase.Profile` nested record → `UserProfile` в `domain.model.stats`** — следствие нового ArchUnit-правила #14 "ports — только interfaces". Логичный дом рядом с `Dashboard`/`WeeklyStats`/`PeriodSummary`.
+- **`KaitenHttpClient` package-private → public** — чтобы кэш-IT в bootstrap мог его мокать через `@MockitoBean`. Скромная утечка ради тестируемости.
+
+### Что НЕ делали и почему
+
+1. **8 Maven-модулей → 4** (#16): инвазивный рефакторинг сборки, не даёт ничего что не дают ArchUnit-правила. ROI отрицательный сейчас.
+2. **Sealed `AuthorSummary` (`Plain`/`Scored`)** (#8): types-as-states корректнее, но overkill для одного nullable поля. Минимизация surface вместо иерархии.
+3. **Распределённый Redis-кэш для Kaiten** (#13): in-memory Caffeine достаточен для текущей нагрузки (1-2 инстанса). Под multi-pod — добавим Redis отдельным шагом.
+4. **`commit_details.kaiten_card_title` колонка** (рядом с #17): теоретически мёртвая, но удаление = миграция с сохранением данных. Не в скоупе review.
+
+### Post-mortem: четыре итерации `RECOMPUTE_SQL` для маппинга user_id
+
+История попыток получить user_id из unified_user внутри INSERT...SELECT с GROUP BY:
+
+**Попытка 1:** correlated subquery с прямой ссылкой на outer.
+```sql
+(SELECT u.id FROM unified_user u WHERE LOWER(u.email) = LOWER(cd.email) LIMIT 1)
+```
+Postgres ругается: *"subquery uses ungrouped column cd.email from outer query"* — не
+распознаёт что выражение в subquery текстуально совпадает с тем что в GROUP BY. ❌
+
+**Попытка 2:** correlated subquery с outer alias `email`.
+```sql
+SELECT LOWER(cd.email) AS email, ...
+  (SELECT u.id FROM unified_user u WHERE LOWER(u.email) = email LIMIT 1) AS user_id
+```
+SQL компилируется. Эту форму я (reviewer) ошибочно одобрил как корректную, поверив
+в alias resolution к outer scope. **Не так**: внутри subquery `email` сначала ищется
+в local FROM. `unified_user u` имеет колонку `email` → shadowing. Условие становится
+`LOWER(u.email) = u.email`, после миграции 020 (emails lowercase) истинно для всех →
+LIMIT 1 = первый user_id по plan order. Все строки получили **один и тот же** случайный
+user_id. Сбор не падал → симптом visible только в дашборде/профиле. Поймал
+регрессионный тест `DailyStatsRepositoryAdapterIT.recomputeAssignsCorrectUserId`. ❌
+
+**Попытка 3:** alias `email_lower` (имя НЕ существует в `unified_user`).
+```sql
+SELECT LOWER(cd.email) AS email_lower, ...
+  (SELECT u.id FROM unified_user u WHERE LOWER(u.email) = email_lower LIMIT 1) AS user_id
+```
+Я предположил что Postgres резолвит outer SELECT alias через extension к standard SQL.
+**Не так**: PostgreSQL **не** разрешает aliases из outer SELECT в subquery. Падает с
+*"column 'email_lower' does not exist"*. Subquery scope в Postgres строго standard. ❌
+
+**Попытка 4 (текущая):** `LEFT JOIN unified_user u ON LOWER(u.email) = LOWER(cd.email)`,
+`MAX(u.id)` в SELECT.
+```sql
+SELECT
+    LOWER(cd.email) AS email,
+    ..., MAX(u.id) AS user_id
+FROM commit_details cd
+LEFT JOIN unified_user u ON LOWER(u.email) = LOWER(cd.email)
+WHERE ...
+GROUP BY LOWER(cd.email), CAST(cd.commit_date AS DATE), cd.repository_name
+```
+Standard SQL. JOIN добавляет `u.id` к каждой строке cd. `UNIQUE INDEX uq_unified_user_email_lower`
+(миграция 020) гарантирует ровно один матч на `LOWER(cd.email)` → `MAX(u.id)` = тот
+самый id, детерминированно. `LEFT JOIN` сохраняет cd rows без матчинг'а (user_id = NULL —
+nullable FK). ✓
+
+**Уроки:**
+1. PostgreSQL aliases из outer SELECT **не доступны** в subquery WHERE — это standard SQL.
+2. В correlated subquery shadow'ятся outer references локальными колонками — нужно
+   ВНИМАТЕЛЬНО проверять что имя alias не пересекается ни с одной колонкой в FROM любого
+   subquery.
+3. При сомнениях — `LEFT JOIN` + `MAX/MIN` (с UNIQUE constraint для детерминированности)
+   проще correlated subquery и работает в standard SQL без edge cases.
+4. **Регрессионный test обязательно нужен** для семантических SQL-фиксов. Compile-валидный
+   запрос ≠ корректный запрос.
+
+### Метрики
+
+- Новых файлов: ~20 (порты, services, мигрions, тесты, **`UserProfile`**, `ADR-9`).
+- Обновлённых: ~30.
+- Liquibase миграций добавлено: 2 (019 functional indexes уже была, 020 unified_user cleanup, 021 drop kaiten_card).
+- ArchUnit правил: 3 → 14.
+- Зависимостей у самого большого service'а: 8 → 4 (orchestrator).
+- Новых тестов: ~40 (включая 7 для ApiExceptionHandler, 5 для GitGatewayAdapter, 5 для CollectGitStatsService, 6 для CollectDailyStatsService, 4 для KaitenCardsCacheIT, 4 для GitCommandFailedException).
+
+

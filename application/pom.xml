@@ -5,13 +5,13 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>ru.x5.markable.dev.analytics</groupId>
-        <artifactId>markable-dev-analytics-parent</artifactId>
+        <groupId>ru.x5.devpulse</groupId>
+        <artifactId>devpulse-parent</artifactId>
         <version>2.0.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>application</artifactId>
-    <name>Markable Dev Analytics — application</name>
+    <name>DevPulse — application</name>
     <description>
         Use cases and ports. Knows about domain only. Defines port interfaces
         that out-adapters implement. No Spring, no JPA, no HTTP.
@@ -19,7 +19,7 @@
 
     <dependencies>
         <dependency>
-            <groupId>ru.x5.markable.dev.analytics</groupId>
+            <groupId>ru.x5.devpulse</groupId>
             <artifactId>domain</artifactId>
         </dependency>
 

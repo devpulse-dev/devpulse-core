@@ -1,6 +1,6 @@
 spring:
   application:
-    name: markable-dev-analytics
+    name: devpulse
 
   # Java 25 virtual threads везде, где Spring их поддерживает (MVC, Async, Scheduling)
   threads:
@@ -27,6 +27,17 @@ spring:
         order_inserts: true
         order_updates: true
 
+  cache:
+    type: caffeine
+    cache-names:
+      - kaiten-cards-by-member
+    # TTL для Kaiten cards. Кэш защищает /profile от: refresh страницы, повторных
+    # открытий тем же пользователем, нагрузки от 50+ одновременных сессий.
+    # 5 минут — компромисс: достаточно свежо для рабочего workflow, экономит большую
+    # долю Kaiten round-trip'ов.
+    caffeine:
+      spec: ${KAITEN_CACHE_SPEC:expireAfterWrite=5m,maximumSize=1000}
+
   liquibase:
     enabled: true
     change-log: classpath:/liquibase/changelog.master.yml
@@ -43,11 +54,18 @@ git:
   repositories: ${GIT_REPOSITORIES:}
   token: ${GIT_TOKEN:}
   cache-directory: ${GIT_CACHE_DIR:${user.home}/Documents/git-cache/}
+  # Timeout на одну git-команду (clone/fetch/log). Защита от зависших процессов:
+  # без неё DNS lookup / hung HTTP proxy / broken pipe могли бы подвесить сборщик навсегда.
+  command-timeout: ${GIT_COMMAND_TIMEOUT:30m}
 
 # === Kaiten integration ===
 kaiten:
   api:
+    # API endpoint — для HTTP-клиента (см. KaitenHttpClient @HttpExchange).
     url: ${KAITEN_URL:}
+    # Web-UI host — для построения ссылки на карточку в /profile.cards[].url.
+    # Если не задан, KaitenCard.url = null (фронт просто не покажет ссылку).
+    web-base-url: ${KAITEN_WEB_BASE_URL:}
     token: ${KAITEN_TOKEN:}
     request-delay-ms: 250         # ≈4 RPS, safe for sliding-window limit
     max-retries: 10

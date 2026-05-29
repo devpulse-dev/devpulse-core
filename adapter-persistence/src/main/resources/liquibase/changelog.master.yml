@@ -35,3 +35,9 @@ databaseChangeLog:
       file: liquibase/migration/017-rebuild-daily-author-stats.yaml
   - include:
       file: liquibase/migration/018-rebuild-daily-stats-fix-commits-semantics.yaml
+  - include:
+      file: liquibase/migration/019-add-functional-indexes-for-recompute.yaml
+  - include:
+      file: liquibase/migration/020-dedup-unified-user-and-lower-unique.yaml
+  - include:
+      file: liquibase/migration/021-drop-dead-kaiten-card-tables.yaml
