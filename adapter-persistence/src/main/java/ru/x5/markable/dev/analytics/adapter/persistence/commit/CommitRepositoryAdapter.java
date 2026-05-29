@@ -16,6 +16,7 @@ import ru.x5.markable.dev.analytics.application.port.out.UnifiedUserRepository;
 import ru.x5.markable.dev.analytics.domain.common.Period;
 import ru.x5.markable.dev.analytics.domain.model.git.Commit;
 import ru.x5.markable.dev.analytics.domain.model.git.CommitHash;
+import ru.x5.markable.dev.analytics.domain.model.git.RepoName;
 import ru.x5.markable.dev.analytics.domain.model.user.Email;
 
 @Component
@@ -67,5 +68,25 @@ class CommitRepositoryAdapter implements CommitRepository {
                 .stream()
                 .map(mapper::toDomain)
                 .toList();
+    }
+
+    @Override
+    public Set<CommitHash> findHashesByRepoAndPeriod(RepoName repo, Period period) {
+        List<String> raw = jpa.findHashesByRepoAndPeriod(
+                repo.value(),
+                period.fromAtStartOfDay(),
+                period.toAtEndOfDay());
+        Set<CommitHash> result = new HashSet<>(raw.size());
+        for (String h : raw) result.add(new CommitHash(h));
+        return result;
+    }
+
+    @Override
+    @Transactional
+    public void deleteByHashes(Collection<CommitHash> hashes) {
+        if (hashes == null || hashes.isEmpty()) return;
+        List<String> values = hashes.stream().map(CommitHash::value).toList();
+        int deleted = jpa.deleteByCommitHashes(values);
+        log.info("Удалили {} rebase-зомби из commit_details", deleted);
     }
 }

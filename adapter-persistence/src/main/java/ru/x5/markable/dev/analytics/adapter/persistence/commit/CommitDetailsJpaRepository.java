@@ -25,4 +25,21 @@ interface CommitDetailsJpaRepository extends JpaRepository<CommitDetailsEntity, 
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to,
             Pageable pageable);
+
+    /** Все хеши коммитов репозитория за период — для rebase-cleanup. */
+    @Query("""
+            select c.commitHash
+              from CommitDetailsEntity c
+             where c.repositoryName = :repo
+               and c.commitDate between :from and :to
+            """)
+    List<String> findHashesByRepoAndPeriod(
+            @Param("repo") String repo,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
+    /** Bulk delete по списку хешей. */
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("delete from CommitDetailsEntity c where c.commitHash in :hashes")
+    int deleteByCommitHashes(@Param("hashes") Collection<String> hashes);
 }

@@ -96,6 +96,71 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
         log.debug("Upserted {} daily stats rows", counts.length);
     }
 
+    /**
+     * Native SQL: пересборка агрегатов из commit_details для указанных email и периода.
+     *
+     * <p>Сначала удаляем затронутые строки, потом вставляем заново из commit_details
+     * через {@code GROUP BY (email_lower, date, repo)}. Email в commit_details может быть в
+     * исходном регистре — нормализуем через {@code LOWER()} чтобы ключ совпадал с upsert.</p>
+     */
+    private static final String DELETE_SQL = """
+            DELETE FROM daily_author_stats
+            WHERE LOWER(email) = ANY (?)
+              AND date BETWEEN ? AND ?
+            """;
+
+    // ВАЖНО про семантику колонок:
+    //   commits       — ОБЩЕЕ число коммитов (включая мерджи); код в AuthorSummary вычитает мерджи
+    //                   через nonMergeCommits() = max(0, commits − mergeCommits).
+    //   merge_commits — подмножество (счётчик мерджей).
+    // Если поменять commits на FILTER (is_merge=false), получится "20 commits, 36 merges" — что
+    // даёт nonMergeCommits = 0 в Java-логике и сломанный дашборд (см. фикс этого бага).
+    private static final String RECOMPUTE_SQL = """
+            INSERT INTO daily_author_stats
+                (email, date, repository_name, commits, merge_commits,
+                 added_lines, deleted_lines, test_added_lines, last_updated, user_id)
+            SELECT
+                LOWER(cd.email)                                            AS email,
+                CAST(cd.commit_date AS DATE)                               AS date,
+                cd.repository_name                                         AS repo,
+                COUNT(*)                                                   AS commits,
+                COUNT(*) FILTER (WHERE cd.is_merge = true)                 AS merge_commits,
+                COALESCE(SUM(cd.added_lines),     0)                       AS added_lines,
+                COALESCE(SUM(cd.deleted_lines),   0)                       AS deleted_lines,
+                COALESCE(SUM(cd.test_added_lines), 0)                      AS test_added_lines,
+                NOW()                                                      AS last_updated,
+                MAX(cd.user_id)                                            AS user_id
+            FROM commit_details cd
+            WHERE LOWER(cd.email) = ANY (?)
+              AND CAST(cd.commit_date AS DATE) BETWEEN ? AND ?
+            GROUP BY LOWER(cd.email), CAST(cd.commit_date AS DATE), cd.repository_name
+            """;
+
+    @Override
+    @Transactional
+    public void recomputeFromCommits(Collection<Email> emails, Period period) {
+        if (emails == null || emails.isEmpty()) return;
+        String[] normalized = emails.stream()
+                .filter(e -> e != null && e.value() != null)
+                .map(e -> e.value().toLowerCase())
+                .distinct()
+                .toArray(String[]::new);
+        if (normalized.length == 0) return;
+
+        int deleted = jdbcTemplate.update(DELETE_SQL, ps -> {
+            ps.setArray(1, ps.getConnection().createArrayOf("text", normalized));
+            ps.setObject(2, period.from());
+            ps.setObject(3, period.to());
+        });
+        int inserted = jdbcTemplate.update(RECOMPUTE_SQL, ps -> {
+            ps.setArray(1, ps.getConnection().createArrayOf("text", normalized));
+            ps.setObject(2, period.from());
+            ps.setObject(3, period.to());
+        });
+        log.info("Пересобрали daily_stats для {} авторов в [{}..{}]: -{} +{}",
+                normalized.length, period.from(), period.to(), deleted, inserted);
+    }
+
     @Override
     public List<DailyAuthorStats> findByPeriod(Period period) {
         return jpa.findByPeriod(period.from(), period.to()).stream()

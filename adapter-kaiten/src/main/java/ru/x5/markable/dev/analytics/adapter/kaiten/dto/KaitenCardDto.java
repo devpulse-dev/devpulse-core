@@ -17,8 +17,10 @@ public record KaitenCardDto(
         long id,
         String title,
         String description,
-        String state,
-        @JsonProperty("column") KaitenNamedRefDto column,
+        /** Тип карточки: 70 = разработка, 8 = дефект, и т.д. См. KaitenCardType. */
+        @JsonProperty("type_id") Integer typeId,
+        /** Колонка, в которой карточка сейчас находится — отсюда статус. */
+        @JsonProperty("column") KaitenColumnDto column,
         @JsonProperty("board") KaitenNamedRefDto board,
         @JsonProperty("space") KaitenNamedRefDto space,
         @JsonProperty("owner") KaitenUserDto owner,
@@ -29,7 +31,14 @@ public record KaitenCardDto(
         List<KaitenMemberDto> members
 ) {
 
-    /** Вложенная ссылка на board/space/column — только id и name. */
+    /** Вложенная ссылка на board/space — только id и name. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record KaitenNamedRefDto(long id, String name) {}
+
+    /**
+     * Колонка на доске: {@code title} — что показать (например «В уточнении»),
+     * {@code type} — программная категория статуса (1=NEW, 2=IN_PROGRESS, 3=DONE).
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record KaitenColumnDto(long id, String title, Integer type) {}
 }

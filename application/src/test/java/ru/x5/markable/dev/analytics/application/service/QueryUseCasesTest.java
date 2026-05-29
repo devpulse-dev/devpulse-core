@@ -189,6 +189,38 @@ class QueryUseCasesTest {
         }
 
         @Test
+        @DisplayName("Фильтр карточек: закрытая БЕЗ коммитов автора отсеивается, остальные остаются")
+        void filtersClosedCardsWithoutCommits() {
+            UnifiedUser user = userWithKaiten(7L);
+            when(unifiedUserRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+            when(dailyStatsRepository.findByAuthorAndPeriod(EMAIL, PERIOD)).thenReturn(List.of());
+
+            // Коммит автора по карточке #200 (taskNumber → kaitenCardId)
+            when(commitRepository.findByAuthor(eq(EMAIL), eq(PERIOD), any())).thenReturn(List.of(
+                    commitForCard("200")
+            ));
+
+            // 4 карточки Kaiten:
+            //  100 — OPEN (in progress), без коммитов автора → ПОКАЗЫВАЕМ (висит у пользователя)
+            //  200 — DONE, но с коммитом автора                → ПОКАЗЫВАЕМ (работал по ней)
+            //  300 — DONE, без коммитов автора                 → ОТСЕИВАЕМ
+            //  400 — NEW, без коммитов                         → ПОКАЗЫВАЕМ
+            when(kaitenGateway.fetchCardsForMember(eq(new KaitenUserId(7L)), any())).thenReturn(List.of(
+                    card(100L, /*colType*/ 2 /*IN_PROGRESS*/),
+                    card(200L, /*colType*/ 3 /*DONE*/),
+                    card(300L, /*colType*/ 3 /*DONE*/),
+                    card(400L, /*colType*/ 1 /*NEW*/)
+            ));
+
+            var p = service().findProfile(EMAIL, PERIOD).orElseThrow();
+
+            assertThat(p.cards())
+                    .as("закрытая без коммитов (300) отсеяна; остальные показываются")
+                    .extracting(c -> c.id().value())
+                    .containsExactlyInAnyOrder(100L, 200L, 400L);
+        }
+
+        @Test
         @DisplayName("Нет kaiten_id → cards пустые, KaitenGateway НЕ зовём")
         void profileWithoutKaiten() {
             UnifiedUser user = userWithoutKaiten();
@@ -296,5 +328,29 @@ class QueryUseCasesTest {
         LocalDateTime now = LocalDateTime.now();
         return new UnifiedUser(1L, email, email.value().split("@")[0], name, avatarUrl,
                 null, null, now, now, now);
+    }
+
+    private static ru.x5.markable.dev.analytics.domain.model.git.Commit commitForCard(String cardIdString) {
+        return new ru.x5.markable.dev.analytics.domain.model.git.Commit(
+                new ru.x5.markable.dev.analytics.domain.model.git.CommitHash("a".repeat(40)),
+                EMAIL,
+                LocalDateTime.of(2026, 5, 15, 12, 0),
+                /*merge*/ false,
+                10, 5, 0,
+                "fix",
+                new ru.x5.markable.dev.analytics.domain.common.TaskNumber(cardIdString),
+                REPO);
+    }
+
+    private static ru.x5.markable.dev.analytics.domain.model.kaiten.KaitenCard card(long id, int columnType) {
+        LocalDateTime now = LocalDateTime.now();
+        return new ru.x5.markable.dev.analytics.domain.model.kaiten.KaitenCard(
+                new ru.x5.markable.dev.analytics.domain.model.kaiten.KaitenCardId(id),
+                "card " + id, null,
+                /*typeId*/ 70, /*columnType*/ columnType, /*columnTitle*/ "col-" + columnType,
+                "Board", "Space",
+                null, null, now, now, null, false,
+                "https://kaiten.x5.ru/" + id,
+                List.of());
     }
 }

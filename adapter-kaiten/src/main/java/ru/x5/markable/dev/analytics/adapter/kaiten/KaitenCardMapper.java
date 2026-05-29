@@ -24,8 +24,9 @@ import ru.x5.markable.dev.analytics.domain.model.user.KaitenUserId;
 interface KaitenCardMapper {
 
     @Mapping(target = "id", expression = "java(new KaitenCardId(dto.id()))")
-    @Mapping(target = "status", source = "state")
-    @Mapping(target = "columnName", source = "column.name")
+    @Mapping(target = "typeId", source = "typeId")
+    @Mapping(target = "columnType", source = "column.type")
+    @Mapping(target = "columnTitle", source = "column.title")
     @Mapping(target = "boardName", source = "board.name")
     @Mapping(target = "spaceName", source = "space.name")
     @Mapping(target = "ownerId", source = "owner", qualifiedByName = "ownerToKaitenUserId")

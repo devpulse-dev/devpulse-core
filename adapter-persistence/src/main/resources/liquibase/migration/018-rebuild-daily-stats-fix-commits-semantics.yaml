@@ -1,0 +1,41 @@
+# Повторный rebuild daily_author_stats с исправленной семантикой колонки `commits`.
+#
+# В миграции 017 ошибочно посчитали commits как COUNT(*) FILTER (is_merge=false) —
+# то есть НЕ-мерджи. Java-код в AuthorSummary.nonMergeCommits() ожидает что
+# commits — это ОБЩЕЕ число (включая мерджи), и вычитает merge_commits сам.
+# Из-за рассинхрона у тимлидов получалось summary.commits=20 при mergeCommits=36
+# и nonMergeCommits=max(0, -16)=0.
+#
+# Эта миграция прогоняет TRUNCATE + INSERT с правильной формулой `commits = COUNT(*)`.
+databaseChangeLog:
+  - changeSet:
+      id: 018-rebuild-daily-stats-fix-commits-semantics
+      author: markable-dev
+      changes:
+        - sql:
+            comment: "TRUNCATE daily_author_stats + INSERT с commits=COUNT(*) (общее число)"
+            splitStatements: true
+            stripComments: false
+            sql: |
+              TRUNCATE TABLE daily_author_stats RESTART IDENTITY;
+
+              INSERT INTO daily_author_stats
+                  (email, date, repository_name, commits, merge_commits,
+                   added_lines, deleted_lines, test_added_lines, last_updated, user_id)
+              SELECT
+                  LOWER(cd.email)                                            AS email,
+                  CAST(cd.commit_date AS DATE)                               AS date,
+                  cd.repository_name                                         AS repo,
+                  COUNT(*)                                                   AS commits,
+                  COUNT(*) FILTER (WHERE cd.is_merge = true)                 AS merge_commits,
+                  COALESCE(SUM(cd.added_lines),      0)                      AS added_lines,
+                  COALESCE(SUM(cd.deleted_lines),    0)                      AS deleted_lines,
+                  COALESCE(SUM(cd.test_added_lines), 0)                      AS test_added_lines,
+                  NOW()                                                      AS last_updated,
+                  MAX(cd.user_id)                                            AS user_id
+              FROM commit_details cd
+              WHERE cd.repository_name IS NOT NULL
+              GROUP BY LOWER(cd.email), CAST(cd.commit_date AS DATE), cd.repository_name;
+      rollback:
+        - sql:
+            sql: SELECT 1;

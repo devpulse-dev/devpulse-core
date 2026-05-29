@@ -77,8 +77,9 @@ class KaitenGatewayAdapter implements KaitenGateway {
                     KaitenCard card = mapper.toDomain(dto);
                     // url задаётся адаптером: Kaiten API его не возвращает.
                     mapped.add(new KaitenCard(
-                            card.id(), card.title(), card.description(), card.status(),
-                            card.columnName(), card.boardName(), card.spaceName(),
+                            card.id(), card.title(), card.description(),
+                            card.typeId(), card.columnType(), card.columnTitle(),
+                            card.boardName(), card.spaceName(),
                             card.ownerId(), card.ownerName(),
                             card.createdAt(), card.updatedAt(), card.closedAt(),
                             card.archived(),
