@@ -1,6 +1,7 @@
 package ru.x5.devpulse.adapter.git;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
@@ -13,18 +14,24 @@ import ru.x5.devpulse.domain.model.git.RepoName;
 /**
  * Реализация {@link GitGateway} поверх локального git CLI.
  *
- * <p>I/O-операции (fork/exec git, чтение stdout) — естественные кандидаты для virtual threads,
- * но fan-out по репозиториям делает не сам адаптер — это работа application-слоя
- * (use case CollectDailyStats). Адаптер просто выдаёт коммиты по одному репозиторию за раз.</p>
+ * <p><b>Streaming-семантика:</b> {@link #streamCommits} читает {@code git log} построчно,
+ * парсит инкрементально через {@link GitLogParser.Streaming} и отдаёт батчи по
+ * {@link #BATCH_SIZE} коммитов в {@code batchHandler}. Память O(batch + 1 коммит-в-парсинге)
+ * — не зависит от размера репозитория. На репо в миллион коммитов мы НЕ упрёмся в heap.</p>
  *
- * <p>Текущая реализация передаёт ВСЕ коммиты репозитория одной партией через {@code batchHandler}.
- * Если репозитории будут расти и память станет проблемой — здесь легко переключиться на
- * чтение stdout построчно и flush'ить пакеты по N коммитов.</p>
+ * <p>Финальный остаток (&lt; BATCH_SIZE) flush'ится последним вызовом {@code batchHandler}.</p>
  */
 @Component
 @Log4j2
 @RequiredArgsConstructor
 class GitGatewayAdapter implements GitGateway {
+
+    /**
+     * Размер батча для flush в {@code batchHandler}. Подобран эмпирически: достаточно большой
+     * чтобы амортизировать накладные расходы JDBC batch insert, но не настолько большой,
+     * чтобы держать в памяти много объектов.
+     */
+    static final int BATCH_SIZE = 500;
 
     private final GitProperties properties;
     private final GitCliClient cli;
@@ -58,16 +65,30 @@ class GitGatewayAdapter implements GitGateway {
         String url = findUrl(repo);
         try {
             GitCliClient.PreparedRepo prepared = cli.prepare(url);
-            List<String> rawLines = cli.log(prepared.path(), since, until);
-            List<Commit> commits = GitLogParser.parse(rawLines, prepared.name());
 
-            if (commits.isEmpty()) {
-                log.debug("В репозитории {} нет коммитов за период {} – {}", repo, since, until);
-                return;
+            // Аккумулятор батча. Парсер пушит сюда коммиты, мы flush'им по достижении BATCH_SIZE.
+            final List<Commit> buffer = new ArrayList<>(BATCH_SIZE);
+            final long[] totalRef = new long[]{0};
+
+            GitLogParser.Streaming parser = new GitLogParser.Streaming(prepared.name(), commit -> {
+                buffer.add(commit);
+                if (buffer.size() >= BATCH_SIZE) {
+                    batchHandler.accept(new ArrayList<>(buffer));
+                    totalRef[0] += buffer.size();
+                    buffer.clear();
+                }
+            });
+
+            cli.streamLog(prepared.path(), since, until, parser::onLine);
+            parser.finish();
+
+            if (!buffer.isEmpty()) {
+                batchHandler.accept(new ArrayList<>(buffer));
+                totalRef[0] += buffer.size();
             }
-            // Текущий API отдаёт всё одним батчем. Это сохраняет совместимость с тем как
-            // application-слой ожидает: при необходимости — разбить на чанки тут.
-            batchHandler.accept(commits);
+
+            log.info("Стримили {} коммитов из {} за период [{}..{}]",
+                    totalRef[0], prepared.name().value(), since, until);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new GitOperationInterruptedException(repo, e);

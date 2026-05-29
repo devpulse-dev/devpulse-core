@@ -6,6 +6,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import lombok.extern.log4j.Log4j2;
 import ru.x5.devpulse.domain.common.TaskNumber;
 import ru.x5.devpulse.domain.model.git.Commit;
@@ -28,33 +29,69 @@ import ru.x5.devpulse.domain.service.TestFileDetector;
  *
  * <p>Numstat-строки {@code -}/{@code -} (бинарные файлы) пропускаются. Если поле
  * parents содержит пробел, коммит — merge.</p>
+ *
+ * <p><b>Два режима:</b>
+ * <ul>
+ *   <li>{@link #parse(List, RepoName)} — eager, удобен для тестов и небольших выводов;</li>
+ *   <li>{@link Streaming} — push-stream state machine, кормится по одной строке через
+ *       {@link Streaming#onLine(String)}, отдаёт готовые коммиты в {@link Consumer}.
+ *       Память: один незавершённый коммит. Используется в {@link GitGatewayAdapter} для
+ *       обхода OOM на больших репо.</li>
+ * </ul></p>
  */
 @Log4j2
 final class GitLogParser {
 
     private GitLogParser() {}
 
+    /** Eager-режим: парсит весь output разом. Tests / маленькие репо. */
     static List<Commit> parse(List<String> lines, RepoName repo) {
         if (lines == null || lines.isEmpty()) return List.of();
-
         List<Commit> commits = new ArrayList<>();
-        Header current = null;
-        long added = 0;
-        long deleted = 0;
-        long testAdded = 0;
+        Streaming s = new Streaming(repo, commits::add);
+        for (String line : lines) {
+            if (line != null) s.onLine(line);
+        }
+        s.finish();
+        log.info("Распарсено {} коммитов для репозитория {}", commits.size(), repo.value());
+        return commits;
+    }
 
-        for (String raw : lines) {
-            if (raw == null) continue;
-            String line = raw.trim();
-            if (line.isEmpty()) continue;
+    /**
+     * Streaming state machine: кормить через {@link #onLine}, в конце дёрнуть {@link #finish()}.
+     *
+     * <p>Каждый завершённый коммит сразу уходит в {@code sink}. Внутри держится максимум
+     * <i>один</i> незавершённый коммит — O(1) по памяти независимо от размера output.</p>
+     *
+     * <p><b>Невалидная дата:</b> коммит молча отбрасывается (warn в лог). Это сохраняет
+     * совместимость с прежним поведением — несколько повреждённых записей не должны валить
+     * сбор.</p>
+     */
+    static final class Streaming {
+
+        private final RepoName repo;
+        private final Consumer<Commit> sink;
+
+        // Состояние текущего коммита. null = "ждём header".
+        private Header header;
+        private long added;
+        private long deleted;
+        private long testAdded;
+
+        Streaming(RepoName repo, Consumer<Commit> sink) {
+            this.repo = repo;
+            this.sink = sink;
+        }
+
+        void onLine(String raw) {
+            String line = raw == null ? "" : raw.trim();
+            if (line.isEmpty()) return; // разделитель между коммитами или начало вывода
 
             if (isHeader(line)) {
-                if (current != null) {
-                    commits.add(buildCommit(current, repo, added, deleted, testAdded));
-                }
-                current = parseHeader(line);
+                flushCurrent();
+                header = parseHeader(line);
                 added = deleted = testAdded = 0;
-            } else if (current != null && isNumstat(line)) {
+            } else if (header != null && isNumstat(line)) {
                 long[] delta = parseNumstat(line);
                 if (delta != null) {
                     added += delta[0];
@@ -64,12 +101,19 @@ final class GitLogParser {
                     }
                 }
             }
+            // header == null и не-header строка → "мусор" в начале output, игнорируем
         }
-        if (current != null) {
-            commits.add(buildCommit(current, repo, added, deleted, testAdded));
+
+        void finish() {
+            flushCurrent();
         }
-        log.info("Распарсено {} коммитов для репозитория {}", commits.size(), repo.value());
-        return commits;
+
+        private void flushCurrent() {
+            if (header != null) {
+                sink.accept(buildCommit(header, repo, added, deleted, testAdded));
+                header = null;
+            }
+        }
     }
 
     /** Заголовок — единственная строка без табуляции, содержащая @. */

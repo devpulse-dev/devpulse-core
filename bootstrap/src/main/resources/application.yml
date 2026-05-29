@@ -43,6 +43,9 @@ git:
   repositories: ${GIT_REPOSITORIES:}
   token: ${GIT_TOKEN:}
   cache-directory: ${GIT_CACHE_DIR:${user.home}/Documents/git-cache/}
+  # Timeout на одну git-команду (clone/fetch/log). Защита от зависших процессов:
+  # без неё DNS lookup / hung HTTP proxy / broken pipe могли бы подвесить сборщик навсегда.
+  command-timeout: ${GIT_COMMAND_TIMEOUT:30m}
 
 # === Kaiten integration ===
 kaiten:
