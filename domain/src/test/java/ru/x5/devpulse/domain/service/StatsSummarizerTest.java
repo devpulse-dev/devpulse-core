@@ -136,6 +136,36 @@ class StatsSummarizerTest {
         assertThat(StatsSummarizer.weekly(input)).isEmpty();
     }
 
+    /**
+     * Регрессионный тест для #18. weekStart обязан быть детерминированным — не зависеть от
+     * сегодняшней даты. Проверяем на нескольких годах включая високосный (2024) и не-високосный
+     * (2025/2026). Используем фиксированную дату стат-записи и проверяем что weekStart всегда
+     * понедельник И принадлежит правильному ISO-году.
+     */
+    @ParameterizedTest(name = "[{index}] год {0}: {1} → понедельник {2}")
+    @org.junit.jupiter.params.provider.CsvSource({
+            // дата → ожидаемый weekStart (ISO Monday той же недели)
+            "2024, 2024-02-29, 2024-02-26", // 29 фев в високосном — week 9
+            "2025, 2025-01-01, 2024-12-30", // 1 янв 2025 = ISO week 1 of 2025, понедельник 30.12.2024
+            "2025, 2025-12-31, 2025-12-29", // 31 дек 2025 = ISO week 1 of 2026, но weekBasedYear=2026
+            "2026, 2026-05-15, 2026-05-11"  // обычный случай
+    })
+    @DisplayName("weekly: weekStart детерминирован для любого года (включая високосный)")
+    void weekStartIsDeterministic(int label, LocalDate input, LocalDate expected) {
+        List<DailyAuthorStats> stats = List.of(
+                day(input, "a@x5.ru", 1, 0, 1, 0, 0));
+
+        List<WeeklyStats> result = StatsSummarizer.weekly(stats);
+
+        assertAll("единственная неделя, weekStart = понедельник",
+                () -> assertThat(result).hasSize(1),
+                () -> assertThat(result.getFirst().weekStart())
+                        .as("weekStart должен соответствовать ISO-понедельнику")
+                        .isEqualTo(expected),
+                () -> assertThat(result.getFirst().weekStart().getDayOfWeek().getValue())
+                        .as("weekStart — понедельник").isEqualTo(1));
+    }
+
     static Stream<org.junit.jupiter.params.provider.Arguments> emptyInputs() {
         return Stream.of(
                 org.junit.jupiter.params.provider.Arguments.of("пустой список", List.of())

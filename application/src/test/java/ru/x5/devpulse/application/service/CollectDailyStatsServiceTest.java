@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -28,6 +29,7 @@ import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
 import ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException;
 import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
+import ru.x5.devpulse.application.port.out.KaitenCardsCache;
 import ru.x5.devpulse.domain.model.collection.CollectionRun;
 import ru.x5.devpulse.domain.model.collection.CollectionStatus;
 import ru.x5.devpulse.domain.model.user.Email;
@@ -48,6 +50,7 @@ class CollectDailyStatsServiceTest {
     @Mock private CollectionRunRepository collectionRunRepository;
     @Mock private CollectionLock collectionLock;
     @Mock private CollectionLock.Handle lockHandle;
+    @Mock private KaitenCardsCache kaitenCardsCache;
 
     @InjectMocks private CollectDailyStatsService service;
 
@@ -135,5 +138,38 @@ class CollectDailyStatsServiceTest {
         service.run(SINCE);
 
         verify(lockHandle, times(1)).close();
+    }
+
+    @Test
+    @DisplayName("После SUCCESS — кэш Kaiten cards инвалидируется (фронт сразу видит свежие)")
+    void cacheInvalidatedAfterSuccess() {
+        when(collectGitStats.collect(any(), any())).thenReturn(Set.of());
+
+        service.run(SINCE);
+
+        verify(kaitenCardsCache, times(1)).invalidateAll();
+    }
+
+    @Test
+    @DisplayName("При FAILED git — кэш НЕ инвалидируется (зачем тратить если данные не свежее)")
+    void cacheNotInvalidatedAfterGitFailure() {
+        when(collectGitStats.collect(any(), any())).thenThrow(new RuntimeException("git boom"));
+
+        service.run(SINCE);
+
+        verify(kaitenCardsCache, never()).invalidateAll();
+    }
+
+    @Test
+    @DisplayName("Падение invalidateAll НЕ ломает уже-успешный сбор")
+    void cacheInvalidationFailureDoesNotBreakSuccess() {
+        when(collectGitStats.collect(any(), any())).thenReturn(Set.of());
+        doThrow(new RuntimeException("cache impl boom"))
+                .when(kaitenCardsCache).invalidateAll();
+
+        CollectionRun result = service.run(SINCE);
+
+        // сбор успешен, ошибка кэша только в логе
+        assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS);
     }
 }

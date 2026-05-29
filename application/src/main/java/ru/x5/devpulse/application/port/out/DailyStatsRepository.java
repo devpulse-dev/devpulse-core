@@ -3,20 +3,18 @@ package ru.x5.devpulse.application.port.out;
 import java.util.Collection;
 import java.util.List;
 import ru.x5.devpulse.domain.common.Period;
-import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.user.Email;
 
 /**
  * Port out: персистентность daily-агрегатов.
  *
- * <p>Сохранение — bulk upsert по уникальному ключу {@code (email, date, repo)}.
- * Чтение — по периоду, опционально с фильтром по автору.</p>
+ * <p>В v2 источник правды для агрегатов — {@code commit_details}. Запись только через
+ * {@link #recomputeFromCommits(Collection, Period)} — атомарный пересчёт per-repo (см.
+ * {@code CollectGitStatsService}). Прямой {@code upsertAll} был в v1 (инкрементальные UPSERT'ы);
+ * после фикса #4-5 он не нужен и удалён в N2-cleanup.</p>
  */
 public interface DailyStatsRepository {
-
-    /** Bulk upsert (один INSERT ... ON CONFLICT DO UPDATE). */
-    void upsertAll(Collection<DailyAuthorStats> stats);
 
     /**
      * Атомарно пересобирает daily-агрегаты для указанных авторов в указанном периоде из
@@ -32,6 +30,4 @@ public interface DailyStatsRepository {
     List<DailyAuthorStats> findByPeriod(Period period);
 
     List<DailyAuthorStats> findByAuthorAndPeriod(Email email, Period period);
-
-    List<DailyAuthorStats> findByRepoAndPeriod(RepoName repo, Period period);
 }

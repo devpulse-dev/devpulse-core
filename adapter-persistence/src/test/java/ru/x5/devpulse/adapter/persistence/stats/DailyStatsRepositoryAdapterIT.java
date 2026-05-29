@@ -4,85 +4,102 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import ru.x5.devpulse.adapter.persistence.shared.PostgresContainerSupport;
+import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
+import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.Period;
+import ru.x5.devpulse.domain.common.TaskNumber;
+import ru.x5.devpulse.domain.model.git.Commit;
+import ru.x5.devpulse.domain.model.git.CommitHash;
 import ru.x5.devpulse.domain.model.git.RepoName;
-import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.user.Email;
 
 @SpringBootTest
-@DisplayName("DailyStatsRepositoryAdapter (native UPSERT + TestContainers)")
+@DisplayName("DailyStatsRepositoryAdapter (recompute + TestContainers)")
 class DailyStatsRepositoryAdapterIT extends PostgresContainerSupport {
 
-    private static final Email BORIS = new Email("boris-s@x5.ru");
-    private static final Email AUTHOR_A = new Email("a-s@x5.ru");
-    private static final Email AUTHOR_B = new Email("b-s@x5.ru");
-    private static final RepoName CORE = new RepoName("xrg-core");
-    private static final LocalDate MAR_10 = LocalDate.of(2026, 3, 10);
-    private static final LocalDate APR_1 = LocalDate.of(2026, 4, 1);
+    @Autowired DailyStatsRepository repo;
+    @Autowired UnifiedUserRepository unifiedUserRepository;
+    @Autowired CommitRepository commitRepository;
+    @Autowired JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    DailyStatsRepository repo;
-
+    /**
+     * Регрессионный тест на семантику {@code RECOMPUTE_SQL} — правильность маппинга user_id
+     * для каждого email'а.
+     *
+     * <p>Цель: поймать любую регрессию вроде "subquery возвращает один и тот же user_id для
+     * всех строк". См. post-mortem в REFACTORING.md про тонкость с alias в correlated subquery.</p>
+     *
+     * <p>Сценарий: два разных автора в unified_user + commit_details + recompute → у каждой
+     * строки daily_author_stats user_id должен соответствовать своему email'у.</p>
+     */
     @Test
-    @DisplayName("upsertAll: на повторе по тому же ключу (email,date,repo) обновляет, а не вставляет")
-    void upsertInsertsThenUpdatesByCompositeKey() {
-        DailyAuthorStats v1 = stats(BORIS, MAR_10, CORE, 3, 1, 100, 20, 0);
-        DailyAuthorStats v2 = stats(BORIS, MAR_10, CORE, 5, 1, 200, 40, 10);
+    @DisplayName("recomputeFromCommits: user_id корректно мапится на unified_user по email")
+    void recomputeAssignsCorrectUserId() {
+        Email alice = new Email("alice-recompute@x5.ru");
+        Email bob = new Email("bob-recompute@x5.ru");
+        LocalDate d1 = LocalDate.of(2026, 7, 10);
+        LocalDate d2 = LocalDate.of(2026, 7, 11);
+        RepoName repoX = new RepoName("recompute-test");
+        Period period = new Period(d1, d2);
 
-        repo.upsertAll(List.of(v1));
-        repo.upsertAll(List.of(v2));
+        // 1. Создаём двух разных пользователей в unified_user.
+        Map<Email, Long> userIds = unifiedUserRepository.findOrCreateAll(List.of(alice, bob));
+        Long aliceId = userIds.get(alice);
+        Long bobId = userIds.get(bob);
+        assertThat(aliceId).as("alice должна быть создана").isNotNull();
+        assertThat(bobId).as("bob должен быть создан").isNotNull();
+        assertThat(aliceId).as("разные user_id у разных авторов").isNotEqualTo(bobId);
 
-        List<DailyAuthorStats> result = repo.findByPeriod(new Period(MAR_10, MAR_10));
-        List<DailyAuthorStats> mine = result.stream()
-                .filter(s -> s.authorEmail().equals(BORIS) && s.repo().equals(CORE))
-                .toList();
+        // 2. Кладём по коммиту в commit_details на каждого.
+        commitRepository.saveAll(List.of(
+                commit("ab".repeat(20), alice, d1, repoX),
+                commit("cd".repeat(20), bob, d2, repoX)));
 
-        assertAll("ON CONFLICT DO UPDATE по уникальному ключу",
-                () -> assertThat(mine)
-                        .as("после двух upsert'ов того же ключа должна остаться 1 запись")
-                        .hasSize(1),
-                () -> assertThat(mine.getFirst().commits())
-                        .as("commits обновлены до 5 (вторая версия)")
-                        .isEqualTo(5),
-                () -> assertThat(mine.getFirst().addedLines())
-                        .as("addedLines обновлены до 200")
-                        .isEqualTo(200),
-                () -> assertThat(mine.getFirst().testAddedLines())
-                        .as("testAddedLines обновлены до 10")
-                        .isEqualTo(10));
+        // 3. Recompute для обоих.
+        repo.recomputeFromCommits(List.of(alice, bob), period);
+
+        // 4. Читаем daily_author_stats напрямую — JpaRepository не вернёт user_id легко,
+        //    а нам важен именно он.
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT email, user_id FROM daily_author_stats "
+                        + "WHERE date BETWEEN ? AND ? AND repository_name = ? "
+                        + "ORDER BY email",
+                d1, d2, repoX.value());
+
+        assertAll("user_id мапится 1:1 с email",
+                () -> assertThat(rows).hasSize(2),
+                () -> assertThat(rows)
+                        .filteredOn(r -> alice.value().equals(r.get("email")))
+                        .singleElement()
+                        .extracting(r -> r.get("user_id"))
+                        .as("alice -> aliceId")
+                        .isEqualTo(aliceId),
+                () -> assertThat(rows)
+                        .filteredOn(r -> bob.value().equals(r.get("email")))
+                        .singleElement()
+                        .extracting(r -> r.get("user_id"))
+                        .as("bob -> bobId")
+                        .isEqualTo(bobId));
     }
 
-    @Test
-    @DisplayName("upsertAll: батч с разными ключами вставляет их все")
-    void upsertHandlesBatchAcrossMultipleKeys() {
-        repo.upsertAll(List.of(
-                stats(AUTHOR_A, APR_1, CORE, 1, 0, 10, 0, 0),
-                stats(AUTHOR_B, APR_1, CORE, 2, 0, 20, 0, 0)
-        ));
-
-        List<DailyAuthorStats> all = repo.findByPeriod(new Period(APR_1, APR_1));
-
-        assertThat(all)
-                .as("оба автора должны быть в результате выборки за %s/%s", APR_1, CORE)
-                .filteredOn(s -> s.date().equals(APR_1) && s.repo().equals(CORE))
-                .extracting(DailyAuthorStats::authorEmail)
-                .contains(AUTHOR_A, AUTHOR_B);
-    }
-
-    private static DailyAuthorStats stats(Email email, LocalDate date, RepoName repo,
-                                          long commits, long mergeCommits,
-                                          long added, long deleted, long testAdded) {
-        return new DailyAuthorStats(
-                null, email, date, repo,
-                commits, mergeCommits, added, deleted, testAdded,
-                LocalDateTime.now(), null);
+    private static Commit commit(String hash, Email author, LocalDate date, RepoName repo) {
+        return new Commit(
+                new CommitHash(hash),
+                author,
+                date.atTime(12, 0),
+                false,
+                /*added*/ 10, /*deleted*/ 2, /*testAdded*/ 0,
+                "TASK-1 fix",
+                new TaskNumber("1"),
+                repo);
     }
 }

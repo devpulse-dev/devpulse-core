@@ -24,13 +24,4 @@ interface DailyAuthorStatsJpaRepository extends JpaRepository<DailyAuthorStatsEn
             @Param("email") String email,
             @Param("from") LocalDate from,
             @Param("to") LocalDate to);
-
-    @Query("""
-            select s from DailyAuthorStatsEntity s
-             where s.repositoryName = :repo and s.date between :from and :to
-            """)
-    List<DailyAuthorStatsEntity> findByRepoAndPeriod(
-            @Param("repo") String repo,
-            @Param("from") LocalDate from,
-            @Param("to") LocalDate to);
 }

@@ -1,6 +1,7 @@
 package ru.x5.devpulse.adapter.kaiten;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -16,16 +17,18 @@ import org.springframework.web.client.ResourceAccessException;
  * <p>Логика:
  * <ul>
  *   <li><b>Throttle</b>: выдерживает минимум {@code requestDelayMs} между запросами
- *       (даёт стабильный RPS).</li>
- *   <li><b>Global pause</b>: при получении 429/5xx взводит {@code pauseUntil},
- *       и все потоки ждут истечения паузы перед следующим запросом.</li>
+ *       (стабильный RPS) через atomic reserve-slot pattern.</li>
+ *   <li><b>Global pause</b>: при 429/5xx взводит {@link #pauseUntil} через
+ *       {@code updateAndGet(Math::max)} — два потока с разными {@code Retry-After}
+ *       не перетрут друг другу более длинную паузу более короткой.</li>
  *   <li><b>Retry с exponential backoff</b>: до {@code maxRetries} попыток с удвоением
  *       backoff'а, до {@code retryMaxBackoffMs}. Учитывает заголовок {@code Retry-After}.</li>
  * </ul>
  *
- * <p>Stateful — один общий бин на приложение. Synchronization через {@code synchronized}
- * блок в {@link #throttle()} — для virtual threads это безопасно (они паркуются на блокировках,
- * не блокируя platform thread).</p>
+ * <p>Stateful — один общий бин на приложение. Lock-free: все обновления состояния — через
+ * {@link AtomicLong#updateAndGet}. Sleep'ы происходят БЕЗ держания каких-либо локов, поэтому
+ * параллельные потоки не сериализуются на одном мониторе (важно для virtual threads, которые
+ * под нагрузкой иначе создавали бы очередь на single monitor).</p>
  */
 @Component
 @Log4j2
@@ -34,8 +37,18 @@ class KaitenRateLimiter {
 
     private final KaitenProperties properties;
 
-    private volatile long lastRequestAt = 0L;
-    private volatile long pauseUntil = 0L;
+    /**
+     * Время следующего разрешённого запроса (epoch millis). Reserve-slot pattern:
+     * каждый поток через {@code updateAndGet} двигает его на свой слот в будущем
+     * и спит до этого слота. Без conflicts: два параллельных потока получают разные слоты.
+     */
+    private final AtomicLong nextSlotAt = new AtomicLong(0L);
+
+    /**
+     * Глобальная пауза после 429/5xx. Обновляется через {@code updateAndGet(Math::max)} —
+     * более длинная пауза доминирует над более короткой при гонке.
+     */
+    private final AtomicLong pauseUntil = new AtomicLong(0L);
 
     /**
      * Выполняет HTTP-операцию через rate-limiter.
@@ -59,15 +72,15 @@ class KaitenRateLimiter {
                 }
                 long wait = retryAfterMillis(e.getResponseHeaders())
                         .orElse(Math.min(backoff, properties.retryMaxBackoffMs()));
-                pauseUntil = System.currentTimeMillis() + wait;
+                setGlobalPause(wait);
                 log.warn("Kaiten 429, пауза {} мс (попытка {}/{}) для {}",
                         wait, attempt + 1, properties.maxRetries(), description);
                 sleepQuietly(wait);
                 backoff = Math.min(backoff * 2, properties.retryMaxBackoffMs());
                 attempt++;
             } catch (HttpServerErrorException | ResourceAccessException e) {
-                // SSL handshake fail / unknown certificate — это перманентная ошибка конфигурации,
-                // ретраить бессмысленно (просто проедим 5–10 минут на exp backoff). Сразу пробрасываем.
+                // SSL handshake fail / unknown certificate — перманентная ошибка конфигурации,
+                // ретраить бессмысленно. Сразу пробрасываем.
                 if (e instanceof ResourceAccessException && isSslFailure(e)) {
                     log.error("Kaiten SSL ошибка для {}: {}. Ретрай отключён — это проблема "
                             + "конфигурации truststore.", description, e.getMessage());
@@ -79,7 +92,7 @@ class KaitenRateLimiter {
                     throw e;
                 }
                 long wait = Math.min(backoff, properties.retryMaxBackoffMs());
-                pauseUntil = System.currentTimeMillis() + wait;
+                setGlobalPause(wait);
                 log.warn("Kaiten {} ({}), пауза {} мс (попытка {}/{}) для {}",
                         e.getClass().getSimpleName(), e.getMessage(),
                         wait, attempt + 1, properties.maxRetries(), description);
@@ -91,23 +104,43 @@ class KaitenRateLimiter {
     }
 
     /**
-     * Глобальный throttle: ждёт окончания global pause + выдерживает requestDelayMs.
+     * Глобальный throttle: сначала ждёт окончания paused, потом резервирует слот в будущем
+     * с {@code requestDelayMs} от предыдущего занятого слота.
+     *
+     * <p><b>Reserve-slot pattern (lock-free):</b> {@code updateAndGet} атомарно вычисляет
+     * новый слот = max(now, prevSlot + delay). Sleep происходит ПОСЛЕ резервирования и
+     * ВНЕ любых locks — параллельные потоки могут резервировать свои слоты дальше по времени
+     * пока этот спит.</p>
      */
-    synchronized void throttle() {
-        long now = System.currentTimeMillis();
-        long pauseWait = pauseUntil - now;
-        if (pauseWait > 0) {
-            sleepQuietly(pauseWait);
-            now = System.currentTimeMillis();
+    void throttle() {
+        // 1. Если стоит глобальная пауза — сначала её дождаться (вне любых локов).
+        long pauseLeft = pauseUntil.get() - System.currentTimeMillis();
+        if (pauseLeft > 0) {
+            sleepQuietly(pauseLeft);
         }
-        long delay = properties.requestDelayMs();
-        if (delay > 0) {
-            long wait = lastRequestAt + delay - now;
-            if (wait > 0) {
-                sleepQuietly(wait);
-            }
+
+        // 2. Зарезервировать слот.
+        long delay = Math.max(0, properties.requestDelayMs());
+        long mySlot = nextSlotAt.updateAndGet(prev -> {
+            long now = System.currentTimeMillis();
+            return Math.max(now, prev + delay);
+        });
+
+        // 3. Дождаться своего слота (если он в будущем).
+        long sleepFor = mySlot - System.currentTimeMillis();
+        if (sleepFor > 0) {
+            sleepQuietly(sleepFor);
         }
-        lastRequestAt = System.currentTimeMillis();
+    }
+
+    /**
+     * Устанавливает глобальную паузу {@code now + waitMs}, но не уменьшает её если уже стоит
+     * более длинная. Защита от ситуации: thread A получил Retry-After=60s, thread B одновременно
+     * получил Retry-After=5s — оставляем 60s.
+     */
+    private void setGlobalPause(long waitMs) {
+        long target = System.currentTimeMillis() + waitMs;
+        pauseUntil.updateAndGet(prev -> Math.max(prev, target));
     }
 
     /**

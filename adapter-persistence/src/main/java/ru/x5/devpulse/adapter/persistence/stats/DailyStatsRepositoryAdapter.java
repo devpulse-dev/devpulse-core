@@ -1,33 +1,23 @@
 package ru.x5.devpulse.adapter.persistence.stats;
 
-import java.sql.PreparedStatement;
-import java.sql.Timestamp;
-import java.sql.Types;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
-import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.Period;
-import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.user.Email;
 
 /**
- * Адаптер репозитория daily-агрегатов с native PostgreSQL UPSERT.
+ * Адаптер репозитория daily-агрегатов через native PostgreSQL SQL.
  *
- * <p>Bulk upsert через {@code INSERT ... ON CONFLICT (email, date, repository_name) DO UPDATE}
- * — одной операцией заменяет связку "SELECT существующих + JPA merge" из старого кода.</p>
+ * <p>Запись — только через {@link #recomputeFromCommits} (атомарный пересчёт из
+ * {@code commit_details} per-repo). Чтение — через JPA queries для индексированных
+ * выборок по периоду/автору.</p>
  */
 @Component
 @Log4j2
@@ -36,65 +26,7 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
 
     private final DailyAuthorStatsJpaRepository jpa;
     private final DailyStatsEntityMapper mapper;
-    private final UnifiedUserRepository unifiedUsers;
     private final JdbcTemplate jdbcTemplate;
-
-    private static final String UPSERT_SQL = """
-            INSERT INTO daily_author_stats
-                (email, date, repository_name, commits, merge_commits,
-                 added_lines, deleted_lines, test_added_lines, last_updated, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (email, date, repository_name) DO UPDATE SET
-                commits          = EXCLUDED.commits,
-                merge_commits    = EXCLUDED.merge_commits,
-                added_lines      = EXCLUDED.added_lines,
-                deleted_lines    = EXCLUDED.deleted_lines,
-                test_added_lines = EXCLUDED.test_added_lines,
-                last_updated     = EXCLUDED.last_updated,
-                user_id          = COALESCE(EXCLUDED.user_id, daily_author_stats.user_id)
-            """;
-
-    @Override
-    @Transactional
-    public void upsertAll(Collection<DailyAuthorStats> stats) {
-        if (stats == null || stats.isEmpty()) return;
-
-        // 1 batch find-or-create — все user_id одной операцией
-        Set<Email> emails = new HashSet<>();
-        stats.forEach(s -> emails.add(s.authorEmail()));
-        Map<Email, Long> userByEmail = unifiedUsers.findOrCreateAll(emails);
-
-        LocalDateTime now = LocalDateTime.now();
-        List<DailyAuthorStats> list = new ArrayList<>(stats);
-
-        int[] counts = jdbcTemplate.batchUpdate(UPSERT_SQL, new BatchPreparedStatementSetter() {
-            @Override
-            public void setValues(PreparedStatement ps, int i) throws java.sql.SQLException {
-                DailyAuthorStats s = list.get(i);
-                Long userId = userByEmail.get(s.authorEmail());
-                ps.setString(1, s.authorEmail().value());
-                ps.setObject(2, s.date());
-                ps.setString(3, s.repo().value());
-                ps.setLong(4, s.commits());
-                ps.setLong(5, s.mergeCommits());
-                ps.setLong(6, s.addedLines());
-                ps.setLong(7, s.deletedLines());
-                ps.setLong(8, s.testAddedLines());
-                ps.setTimestamp(9, Timestamp.valueOf(s.lastUpdated() != null ? s.lastUpdated() : now));
-                if (userId == null) {
-                    ps.setNull(10, Types.BIGINT);
-                } else {
-                    ps.setLong(10, userId);
-                }
-            }
-
-            @Override
-            public int getBatchSize() {
-                return list.size();
-            }
-        });
-        log.debug("Upserted {} daily stats rows", counts.length);
-    }
 
     /**
      * Native SQL: пересборка агрегатов из commit_details для указанных email и периода.
@@ -124,11 +56,25 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
     // даёт nonMergeCommits = 0 в Java-логике и сломанный дашборд (см. фикс этого бага).
     //
     // ВАЖНО про user_id:
-    //   Берём из unified_user через subquery с LOWER(email) — это единственный source of truth.
-    //   Старая версия использовала `MAX(cd.user_id)` из commit_details, что было недетерминированно
-    //   при наличии дублей-юзеров с разным регистром (см. ревью пункт #11). Миграция 020 удалила
-    //   дубли и добавила UNIQUE INDEX по LOWER(email), но subquery страхует от регрессии:
-    //   user_id всегда из текущего snapshot'а unified_user, не из старых строк commit_details.
+    //   Берём из unified_user через LEFT JOIN + MAX(u.id). Миграция 020 добавила
+    //   UNIQUE INDEX по LOWER(email) → для каждого LOWER(cd.email) ровно один matching u,
+    //   значит MAX(u.id) == u.id (детерминированно). LEFT JOIN сохраняет cd rows без
+    //   matching user'а (user_id = NULL) — это не падает на FK потому что nullable.
+    //
+    //   Альтернативы которые НЕ работают (история проб):
+    //   1. `MAX(cd.user_id)` — недетерминированно при дубль-юзерах разного регистра
+    //      (это была старая версия, ревью пункт #11).
+    //   2. Correlated subquery `(SELECT u.id ... WHERE LOWER(u.email) = LOWER(cd.email) LIMIT 1)`
+    //      — Postgres ругается "subquery uses ungrouped column": не распознаёт что выражение
+    //      совпадает с group key.
+    //   3. То же с alias `email` через outer SELECT — alias **shadows** колонку
+    //      `unified_user.email`, subquery возвращает первый row по plan (все user_id одинаковые).
+    //   4. То же с alias `email_lower` — Postgres standard SQL: aliases из outer SELECT
+    //      **не видны** в subquery WHERE. Падает с "column does not exist".
+    //
+    //   Только JOIN + GROUP BY/MAX даёт корректный standard SQL.
+    //
+    //   Регрессионный тест: DailyStatsRepositoryAdapterIT.recomputeAssignsCorrectUserId.
     private static final String RECOMPUTE_SQL = """
             INSERT INTO daily_author_stats
                 (email, date, repository_name, commits, merge_commits,
@@ -143,10 +89,9 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
                 COALESCE(SUM(cd.deleted_lines),   0)                       AS deleted_lines,
                 COALESCE(SUM(cd.test_added_lines), 0)                      AS test_added_lines,
                 NOW()                                                      AS last_updated,
-                (SELECT u.id FROM unified_user u
-                  WHERE LOWER(u.email) = email
-                  LIMIT 1)                                                 AS user_id
+                MAX(u.id)                                                  AS user_id
             FROM commit_details cd
+            LEFT JOIN unified_user u ON LOWER(u.email) = LOWER(cd.email)
             WHERE LOWER(cd.email) = ANY (?)
               AND CAST(cd.commit_date AS DATE) BETWEEN ? AND ?
             GROUP BY LOWER(cd.email), CAST(cd.commit_date AS DATE), cd.repository_name
@@ -190,13 +135,6 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
     @Override
     public List<DailyAuthorStats> findByAuthorAndPeriod(Email email, Period period) {
         return jpa.findByAuthorAndPeriod(email.value(), period.from(), period.to()).stream()
-                .map(mapper::toDomain)
-                .toList();
-    }
-
-    @Override
-    public List<DailyAuthorStats> findByRepoAndPeriod(RepoName repo, Period period) {
-        return jpa.findByRepoAndPeriod(repo.value(), period.from(), period.to()).stream()
                 .map(mapper::toDomain)
                 .toList();
     }

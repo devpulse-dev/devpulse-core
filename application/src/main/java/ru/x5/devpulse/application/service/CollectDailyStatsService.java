@@ -10,6 +10,7 @@ import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
 import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
+import ru.x5.devpulse.application.port.out.KaitenCardsCache;
 import ru.x5.devpulse.domain.model.collection.CollectionRun;
 import ru.x5.devpulse.domain.model.user.Email;
 
@@ -45,6 +46,7 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
     private final SyncKaitenUsersUseCase syncKaitenUsers;
     private final CollectionRunRepository collectionRunRepository;
     private final CollectionLock collectionLock;
+    private final KaitenCardsCache kaitenCardsCache;
 
     @Override
     public CollectionRun run(LocalDateTime since) {
@@ -84,6 +86,15 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
         } catch (Exception e) {
             log.error("Sync пользователей Kaiten упал (git-статистика уже сохранена): {}",
                     e.getMessage(), e);
+        }
+
+        // Сбор успешен → инвалидируем кэш карточек Kaiten, чтобы фронт сразу видел свежие
+        // данные на /profile, не ждал истечения TTL (5 минут — слишком долго после явного сбора).
+        try {
+            kaitenCardsCache.invalidateAll();
+        } catch (Exception e) {
+            // Падение invalidate не должно валить уже-успешный сбор — кэш сам истечёт по TTL.
+            log.warn("Не удалось очистить кэш Kaiten cards: {}", e.getMessage());
         }
 
         CollectionRun ok = run.succeeded();

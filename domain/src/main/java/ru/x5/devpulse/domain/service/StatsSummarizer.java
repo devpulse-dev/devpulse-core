@@ -110,12 +110,21 @@ public final class StatsSummarizer {
 
     private record WeekKey(int year, int week) {}
 
+    /**
+     * Понедельник ISO-недели {@code week} года {@code year}.
+     *
+     * <p>Детерминированно (без {@code LocalDate.now()}): 4 января — <b>всегда</b> в ISO week 1
+     * любого года (по определению ISO 8601). От него идём к понедельнику этой недели
+     * (день 1 в ISO), потом сдвигаемся на {@code week - 1} неделю.</p>
+     *
+     * <p>Старая реализация {@code LocalDate.now().withYear(year)...} могла отъехать на день,
+     * если "сегодня" — 29 февраля високосного года, а целевой {@code year} — не-leap
+     * ({@code withYear} в такой ситуации откатывает до 28 февраля).</p>
+     */
     private static LocalDate weekStart(int year, int week) {
-        return LocalDate.now()
-                .withYear(year)
-                .with(WeekFields.ISO.weekBasedYear(), year)
-                .with(WeekFields.ISO.weekOfWeekBasedYear(), week)
+        LocalDate firstWeekMonday = LocalDate.of(year, 1, 4)
                 .with(WeekFields.ISO.dayOfWeek(), 1);
+        return firstWeekMonday.plusWeeks(week - 1L);
     }
 
     private static final class AuthorAcc {
