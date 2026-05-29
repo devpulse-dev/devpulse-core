@@ -64,7 +64,8 @@ class KaitenCardRepositoryAdapterIT extends PostgresContainerSupport {
                                    LocalDateTime updatedAt) {
         return new KaitenCard(
                 CARD_ID, title, null,
-                "in_progress", "Doing", "Board", "Space",
+                /*typeId*/ 70, /*columnType*/ 2, /*columnTitle*/ "Doing",
+                "Board", "Space",
                 null, null,
                 updatedAt.minusDays(1), updatedAt, null, false,
                 "https://kaiten.x5.ru/" + CARD_ID.value(),

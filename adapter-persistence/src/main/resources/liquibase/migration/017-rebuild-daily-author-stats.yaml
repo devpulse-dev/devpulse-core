@@ -1,0 +1,45 @@
+# Одноразовый rebuild daily_author_stats из commit_details.
+#
+# Зачем: старая логика сбора инкрементально UPSERT'ила daily-агрегаты (ON CONFLICT DO UPDATE SET
+# commits = EXCLUDED.commits), что ПЕРЕЗАПИСЫВАЛО значения если за один день приходили коммиты
+# в разных сборах. Из-за этого daily_author_stats отставал от commit_details.
+#
+# Новая версия сервиса recompute-ит daily_stats из commit_details после каждого сбора, но
+# уже накопленные «битые» значения нужно один раз перебить. Эта миграция делает full rebuild.
+#
+# Rebase-zombie коммиты в commit_details миграция НЕ трогает — их вычистит сервис при
+# следующем сборе через сравнение с git source-of-truth.
+databaseChangeLog:
+  - changeSet:
+      id: 017-rebuild-daily-author-stats
+      author: markable-dev
+      changes:
+        - sql:
+            comment: "TRUNCATE + INSERT FROM commit_details GROUP BY"
+            splitStatements: true
+            stripComments: false
+            sql: |
+              TRUNCATE TABLE daily_author_stats RESTART IDENTITY;
+
+              INSERT INTO daily_author_stats
+                  (email, date, repository_name, commits, merge_commits,
+                   added_lines, deleted_lines, test_added_lines, last_updated, user_id)
+              SELECT
+                  LOWER(cd.email)                                            AS email,
+                  CAST(cd.commit_date AS DATE)                               AS date,
+                  cd.repository_name                                         AS repo,
+                  COUNT(*) FILTER (WHERE cd.is_merge = false)                AS commits,
+                  COUNT(*) FILTER (WHERE cd.is_merge = true)                 AS merge_commits,
+                  COALESCE(SUM(cd.added_lines),      0)                      AS added_lines,
+                  COALESCE(SUM(cd.deleted_lines),    0)                      AS deleted_lines,
+                  COALESCE(SUM(cd.test_added_lines), 0)                      AS test_added_lines,
+                  NOW()                                                      AS last_updated,
+                  MAX(cd.user_id)                                            AS user_id
+              FROM commit_details cd
+              WHERE cd.repository_name IS NOT NULL
+              GROUP BY LOWER(cd.email), CAST(cd.commit_date AS DATE), cd.repository_name;
+      rollback:
+        # Откат бессмысленен: «старые битые значения» не восстановить.
+        # Если потребуется — следующий сбор всё равно пересчитает daily_stats из commit_details.
+        - sql:
+            sql: SELECT 1;

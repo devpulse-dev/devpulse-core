@@ -31,3 +31,7 @@ databaseChangeLog:
       file: liquibase/migration/015-create-collection-run.yaml
   - include:
       file: liquibase/migration/016-fix-task-number-from-space-card.yaml
+  - include:
+      file: liquibase/migration/017-rebuild-daily-author-stats.yaml
+  - include:
+      file: liquibase/migration/018-rebuild-daily-stats-fix-commits-semantics.yaml

@@ -4,7 +4,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,35 +15,36 @@ import ru.x5.markable.dev.analytics.application.port.out.GitGateway;
 import ru.x5.markable.dev.analytics.application.port.out.KaitenGateway;
 import ru.x5.markable.dev.analytics.application.port.out.KaitenUserRepository;
 import ru.x5.markable.dev.analytics.application.port.out.UnifiedUserRepository;
+import ru.x5.markable.dev.analytics.domain.common.Period;
 import ru.x5.markable.dev.analytics.domain.model.collection.CollectionRun;
 import ru.x5.markable.dev.analytics.domain.model.git.Commit;
 import ru.x5.markable.dev.analytics.domain.model.git.CommitHash;
 import ru.x5.markable.dev.analytics.domain.model.git.RepoName;
 import ru.x5.markable.dev.analytics.domain.model.kaiten.KaitenUser;
-import ru.x5.markable.dev.analytics.domain.model.stats.DailyAuthorStats;
 import ru.x5.markable.dev.analytics.domain.model.user.Email;
-import ru.x5.markable.dev.analytics.domain.service.AuthorAggregator;
 
 /**
  * Реализация {@link CollectDailyStatsUseCase}.
  *
- * <p>Оркестрация полного цикла сбора:
+ * <p><b>Пайплайн сбора (новая версия — устойчива к rebase/force-push):</b></p>
  * <ol>
- *   <li>Git → CommitRepository + DailyStatsRepository (новые коммиты и daily-агрегаты)</li>
- *   <li>(изолированно) Kaiten users sync — обновляем {@code kaiten_user} и проставляем
- *       {@code kaiten_id}/{@code avatar_url} в {@code unified_user} по совпадению email.</li>
+ *   <li><b>Per-repo:</b> стримим git-коммиты за период. Каждый батч сохраняем в
+ *       {@code commit_details} (дедуп по hash). Параллельно копим {@code Set} всех увиденных
+ *       хешей этого репо.</li>
+ *   <li><b>Cleanup zombies:</b> после окончания стрима — берём из БД ВСЕ хеши репо за
+ *       тот же период и удаляем те, которых в этом сборе не было (rebase / force-push
+ *       выкинул их из ветки).</li>
+ *   <li><b>Recompute daily_stats:</b> один раз в конце git-фазы для всех затронутых
+ *       (email, period) пересчитываем daily-агрегаты из текущего {@code commit_details} —
+ *       это убирает рассинхрон, который раньше копился из-за инкрементальных UPSERT'ов,
+ *       перезаписывающих значения вместо суммирования.</li>
+ *   <li><b>Kaiten users sync</b> (изолированно): {@code kaitenGateway.fetchAllUsers()} →
+ *       upsert в {@code kaiten_user} + проставить {@code kaiten_id}/{@code avatar_url}
+ *       в {@code unified_user} по совпадению email.</li>
  * </ol>
  *
- * <p><b>Что НЕ делает:</b> карточки Kaiten в этом сценарии не выкачиваются — это намеренно.
- * Карточки нужны только в разрезе профиля одного пользователя и тянутся live при запросе
- * {@code GET /api/v2/users/{email}/profile}. Так мы не тратим бюджет Kaiten-API на
- * массовый pre-fetch, который часто никто не смотрит.</p>
- *
- * <p><b>Контракт двух фаз:</b> ошибка Kaiten sync НЕ откатывает уже сохранённые git-статы.
- * Это намеренно: rate-limit Kaiten не должен терять часы git-сбора.</p>
- *
- * <p><b>Транзакции:</b> use case намеренно НЕ транзакционен. Каждый bulk-upsert (commits,
- * daily stats, kaiten users) — отдельный батч с собственной транзакцией внутри адаптера.</p>
+ * <p><b>Изоляция фаз:</b> ошибка Kaiten НЕ откатывает git-статы. Транзакции — на уровне
+ * репозиториев (батч + recompute), не на use case.</p>
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -77,44 +77,88 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
         collectionRunRepository.save(run);
         log.info("Старт сбора {} ({} → {})", run.id(), effectiveSince, until);
 
+        Set<Email> affectedAuthors = new HashSet<>();
         try {
-            collectGitStats(effectiveSince, until);
+            affectedAuthors = collectGitStats(effectiveSince, until);
         } catch (Exception e) {
-            log.error("Сбор git-статистики упал — фиксируем FAILED, Kaiten users пропускаем", e);
+            log.error("Сбор git-статистики упал — фиксируем FAILED, Kaiten пропускаем", e);
             CollectionRun failed = run.failed(e.getMessage());
             collectionRunRepository.save(failed);
             return failed;
         }
 
-        // Kaiten users sync — изолированный шаг: его падение не откатывает уже сохранённые git stats.
+        // Kaiten users sync — изолированно.
         try {
             syncKaitenUsers();
         } catch (Exception e) {
-            log.error("Sync пользователей Kaiten упал (git-статистика уже сохранена): {}", e.getMessage(), e);
+            log.error("Sync пользователей Kaiten упал (git-статистика уже сохранена): {}",
+                    e.getMessage(), e);
         }
 
         CollectionRun ok = run.succeeded();
         collectionRunRepository.save(ok);
-        log.info("Сбор {} успешно завершён", ok.id());
+        log.info("Сбор {} успешно завершён (затронуто авторов: {})", ok.id(), affectedAuthors.size());
         return ok;
     }
 
     /* ------------ git phase ------------ */
 
-    private void collectGitStats(LocalDateTime since, LocalDateTime until) {
+    /**
+     * Сбор по всем репозиториям + cleanup zombies + recompute daily_stats.
+     *
+     * @return множество email-ов всех авторов, чьи коммиты затронуты в этом сборе
+     *         (включая авторов удалённых zombie-коммитов)
+     */
+    private Set<Email> collectGitStats(LocalDateTime since, LocalDateTime until) {
         List<RepoName> repos = gitGateway.configuredRepos();
         log.info("Сбор по {} репозиториям", repos.size());
+
+        Period period = new Period(since.toLocalDate(), until.toLocalDate());
+        Set<Email> allAffected = new HashSet<>();
 
         for (RepoName repo : repos) {
             RepoName prepared = gitGateway.prepare(repo);
             log.info("Стримим коммиты из {}", prepared.value());
-            gitGateway.streamCommits(prepared, since, until, this::persistCommitBatch);
+
+            // Накапливаем хеши, реально пришедшие из git в этом сборе.
+            Set<CommitHash> seenInGit = new HashSet<>();
+            Set<Email> repoAffected = new HashSet<>();
+
+            gitGateway.streamCommits(prepared, since, until, batch -> {
+                for (Commit c : batch) {
+                    seenInGit.add(c.hash());
+                    if (c.authorEmail() != null) repoAffected.add(c.authorEmail());
+                }
+                persistCommitBatch(batch);
+            });
+
+            // Cleanup zombies: что в БД есть, а в git'е нет — то ушло после rebase / force-push.
+            Set<CommitHash> inDb = commitRepository.findHashesByRepoAndPeriod(prepared, period);
+            Set<CommitHash> zombies = new HashSet<>(inDb);
+            zombies.removeAll(seenInGit);
+            if (!zombies.isEmpty()) {
+                log.info("Repo {}: {} zombie-коммитов (rebase/force-push) — удаляем",
+                        prepared.value(), zombies.size());
+                commitRepository.deleteByHashes(zombies);
+            }
+
+            allAffected.addAll(repoAffected);
         }
+
+        // Recompute daily_stats для всех затронутых email-ов за период сбора — один SQL
+        // на всю партию вместо инкрементальных UPSERT'ов с перезаписью.
+        if (!allAffected.isEmpty()) {
+            dailyStatsRepository.recomputeFromCommits(allAffected, period);
+        }
+
+        return allAffected;
     }
 
     /**
-     * Один батч коммитов: дедуп по hash → batch find-or-create users → save commits →
-     * агрегация в daily stats → upsert daily stats.
+     * Один батч коммитов: дедуп по hash → batch find-or-create users → save commits.
+     *
+     * <p>В отличие от прежней версии — daily_stats тут НЕ обновляем. Пересчёт делается
+     * один раз в конце git-фазы из текущего {@code commit_details}.</p>
      */
     private void persistCommitBatch(List<Commit> batch) {
         if (batch == null || batch.isEmpty()) return;
@@ -134,33 +178,20 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
             return;
         }
 
-        // batch find-or-create users — одной операцией, без N+1
+        // batch find-or-create — обеспечивает наличие записи в unified_user
+        // (нужно для FK при сохранении commit_details).
         Set<Email> emails = new HashSet<>(fresh.size());
         for (Commit c : fresh) {
             if (c.authorEmail() != null) emails.add(c.authorEmail());
         }
-        Map<Email, Long> userIdByEmail = unifiedUserRepository.findOrCreateAll(emails);
+        unifiedUserRepository.findOrCreateAll(emails);
 
         commitRepository.saveAll(fresh);
-
-        // Чистая агрегация в domain → проставляем userId → upsert
-        List<DailyAuthorStats> aggregated = AuthorAggregator.aggregateByDay(fresh);
-        List<DailyAuthorStats> withUsers = new ArrayList<>(aggregated.size());
-        for (DailyAuthorStats s : aggregated) {
-            withUsers.add(s.withUserId(userIdByEmail.get(s.authorEmail())));
-        }
-        dailyStatsRepository.upsertAll(withUsers);
-
-        log.info("Батч сохранён: {} новых коммитов (из {} в батче), {} дневных агрегатов",
-                fresh.size(), batch.size(), withUsers.size());
+        log.info("Батч сохранён: {} новых коммитов (из {} в батче)", fresh.size(), batch.size());
     }
 
     /* ------------ kaiten users sync phase ------------ */
 
-    /**
-     * Обновляет зеркало пользователей Kaiten в локальной БД и подтягивает
-     * {@code kaiten_id} + {@code avatar_url} в {@code unified_user} по совпадению email.
-     */
     private void syncKaitenUsers() {
         List<KaitenUser> users = kaitenGateway.fetchAllUsers();
         if (users.isEmpty()) {

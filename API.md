@@ -251,6 +251,27 @@ Baseline настраивается через `scoring.expected-commits-per-30-
 
 > **Карточки Kaiten тянутся напрямую из Kaiten API при каждом запросе** — не из локальной БД. Фильтр: карточки, обновлённые после `from`. Используется в основном кейсе «открыть профиль с дашборда», поэтому `from`/`to` тоже **опциональны** — без них берётся последние 30 дней.
 
+**Семантика полей карточки:**
+
+| Поле | Что значит | Откуда |
+|---|---|---|
+| `typeId` | сырой id типа карточки в Kaiten | `type_id` API |
+| `cardType` | наша классификация: `DEVELOPMENT` (70) / `DEFECT` (8) / `OTHER` (всё остальное) | derived из `typeId` |
+| `columnType` | сырой код колонки: 1 / 2 / 3 | `column.type` API |
+| `columnStatus` | статус задачи: `NEW` (1) / `IN_PROGRESS` (2) / `DONE` (3) / `UNKNOWN` | derived из `columnType` |
+| `columnTitle` | человекочитаемое название колонки (например «В уточнении», «Готово к ревью») | `column.title` API |
+| `archived` | карточка скрыта на доске — **НЕ значит** что задача завершена | `archived` API |
+| `closed` | производное: `columnStatus == DONE` ИЛИ `closedAt != null` | derived |
+
+> **Важно:** для определения «закрыта/нет» используйте `closed` или `columnStatus == "DONE"`, **не `archived`**. Архив — это просто видимость на доске.
+
+**Фильтр карточек в ответе:** бэк отсеивает шум — Kaiten при запросе по `updated_after` отдаёт ВСЕ карточки, в которых пользователь когда-то был участником и которые недавно обновлялись (например, кто-то заархивировал старый таск). Чтобы не показывать чужую работу, бэк оставляет в `cards[]` только:
+
+- карточки, по которым **есть коммит автора за период** (kaitenCardId из `taskNumber` коммита совпал с id карточки), **ИЛИ**
+- карточки, которые **не закрыты** (`columnStatus != DONE` и `closedAt == null`) — они «висят в работе» у пользователя.
+
+Закрытые карточки без коммитов автора — отсеиваются.
+
 **Ответ 200:**
 ```json
 {
@@ -283,8 +304,11 @@ Baseline настраивается через `scoring.expected-commits-per-30-
       "id": 12345,
       "title": "Fix the bug",
       "description": "…",
-      "status": "in_progress",
-      "columnName": "In Progress",
+      "typeId": 70,
+      "cardType": "DEVELOPMENT",
+      "columnType": 2,
+      "columnStatus": "IN_PROGRESS",
+      "columnTitle": "В уточнении",
       "boardName": "Core",
       "spaceName": "Engineering",
       "ownerId": 7,
@@ -293,6 +317,7 @@ Baseline настраивается через `scoring.expected-commits-per-30-
       "updatedAt": "2026-05-10T12:00:00",
       "closedAt": null,
       "archived": false,
+      "closed": false,
       "url": "https://kaiten.x5.ru/12345",
       "memberIds": [7]
     }

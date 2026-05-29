@@ -296,3 +296,58 @@ markable-dev-analytics/
 Общий helper [`AuthorSummaryEnricher`](application/src/main/java/ru/x5/markable/dev/analytics/application/service/AuthorSummaryEnricher.java) — два метода: `enrich(list)` для плоского случая и `batchEnricher(groups)` для weekly (общий fetch + раздача по группам).
 
 `/stats/daily` — намеренно **без** enrichment: записей тысячи, цена не оправдана. Если фронту нужны аватары на дневном уровне — агрегирует по email на своей стороне и тянет профили через `/dashboard` или `/users/{email}/profile`.
+
+### Фича 3 — Activity score (composite scoring) ✅
+
+`AuthorSummary.activity` теперь содержит композитную метрику для оценки активности — закрывает кейс «много мелких коммитов = молодец» из v1. См. подробности в [API.md](./API.md#activity-score).
+
+Domain:
+- `ActivityCategory` enum: `INACTIVE / BELOW_AVERAGE / ACTIVE / STAR`.
+- `ActivityScore(score, category, volumeFactor, qualityFactor, avgLinesPerCommit)`.
+- `ActivityScorer.score(author, expectedCommits)` — pure-функция, piecewise-linear `qualityFactor` штрафует микро-коммиты (avg < 10 строк) и бомбы (avg > 200 строк).
+
+Конфигурация: `scoring.expected-commits-per-30-days` в yml (default 50), масштабируется под длину запрошенного периода.
+
+`GetDashboardService` теперь сортирует по `activity.score desc` (вместо `nonMergeCommits desc`). На остальных эндпоинтах `AuthorSummary.activity = null` (не считаем там, чтобы не путать семантику).
+
+### Фича 4 — Consistency через recompute + rebase cleanup ✅
+
+**Проблема в v1 (фиксы #6, #8) — рассинхрон между `commit_details` и `daily_author_stats`:**
+
+1. **Инкрементальные UPSERT'ы перезаписывали значения.** Старая `persistCommitBatch` считала агрегат по `fresh` (новые коммиты этого батча) и делала `ON CONFLICT DO UPDATE SET commits = EXCLUDED.commits`. Если за один день за два сбора приходили коммиты A и B — после второго сбора в строке оставался **только B**, потому что UPSERT заменял, а не суммировал.
+
+2. **Rebase + force-push порождал «zombie»-коммиты в `commit_details`.** Старый hash остаётся в БД после force-push, новый hash тоже сохраняется → один и тот же объём работы посчитан дважды.
+
+В результате на `/users/{email}/profile` `summary.commits=15` при `commits[].length > 50`.
+
+**Новый pipeline `CollectDailyStatsService.collectGitStats`:**
+
+```
+для каждого репо:
+  seenHashes = {}
+  streamCommits(repo, since, until, batch -> {
+    persistCommitBatch(batch)          // только save в commit_details
+    seenHashes ∪= batch.hashes
+  })
+  inDb = commitRepo.findHashesByRepoAndPeriod(repo, period)
+  zombies = inDb − seenHashes           // rebase / force-push выкинул
+  commitRepo.deleteByHashes(zombies)
+
+// один SQL на всю партию — никаких инкрементальных UPSERT'ов
+dailyStatsRepo.recomputeFromCommits(affectedAuthors, period)
+```
+
+**Новые out-port методы:**
+
+- `CommitRepository.findHashesByRepoAndPeriod(repo, period)` — для cleanup zombies.
+- `CommitRepository.deleteByHashes(hashes)` — bulk delete.
+- `DailyStatsRepository.recomputeFromCommits(emails, period)` — native SQL: `DELETE WHERE email IN(...) AND date BETWEEN ?` + `INSERT FROM commit_details GROUP BY (LOWER(email), DATE(commit_date), repo)`.
+
+**Принципы новой логики:**
+1. **`daily_author_stats` — теперь чистое derived state из `commit_details`.** Источник правды один — таблица коммитов. Агрегат всегда консистентен с источником.
+2. **`commit_details` — зеркало git'а** (для собранного периода). При сборе сравниваем хеши в БД с хешами в git → удаляем то, чего больше нет в git.
+3. **Recompute — один SQL на сбор**, не per-batch. Дёшево, потому что delete + insert by index `(LOWER(email), date)` — sub-second даже для тысяч строк.
+
+**Одноразовая миграция данных:** Liquibase `017-rebuild-daily-author-stats.yaml` — TRUNCATE daily_author_stats + INSERT FROM commit_details. Накатывается автоматически при старте после деплоя. Rebase-zombie в `commit_details` миграция не трогает — их вычистит сервис при следующем `POST /api/v2/collection/runs`.
+
+**Тесты обновлены:** `CollectDailyStatsServiceTest` — happy path с проверкой recompute, отдельные сценарии cleanup zombies (есть/нет), git failure → нет recompute, kaiten failure изолирован, нет коммитов → нет recompute.
