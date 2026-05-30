@@ -17,6 +17,6 @@ import ru.x5.devpulse.adapter.rest.api.model.AuthorSummary;
         unmappedSourcePolicy = ReportingPolicy.IGNORE)
 public interface AuthorSummaryMapper {
 
-    @Mapping(target = "nonMergeCommits", expression = "java((int) s.nonMergeCommits())")
+    @Mapping(target = "nonMergeCommits", expression = "java(s.nonMergeCommits())")
     AuthorSummary toDto(ru.x5.devpulse.domain.model.stats.AuthorSummary s);
 }

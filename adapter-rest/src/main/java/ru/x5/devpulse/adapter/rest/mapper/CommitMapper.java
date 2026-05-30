@@ -8,7 +8,8 @@ import ru.x5.devpulse.adapter.rest.api.model.Commit;
  * {@code domain.git.Commit} → {@link Commit}.
  *
  * <p>Value-объекты ({@code CommitHash}, {@code Email}, {@code RepoName}, {@code TaskNumber})
- * разворачиваются конвертерами. {@code long → Integer} — тоже через конвертер.</p>
+ * разворачиваются конвертерами. Counters (addedLines, deletedLines, testAddedLines)
+ * — long → long с контракта 1.1.0, без narrowing.</p>
  */
 @Mapper(componentModel = "spring",
         implementationName = "RestCommitMapperImpl",

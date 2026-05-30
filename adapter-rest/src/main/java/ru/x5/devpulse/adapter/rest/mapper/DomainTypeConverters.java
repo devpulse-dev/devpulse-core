@@ -38,15 +38,10 @@ public interface DomainTypeConverters {
 
     default URI stringToUri(String s) { return s == null ? null : URI.create(s); }
 
-    // ───── Integer ↔ Long widening (для gitlabId, typeId) ────────────────
+    // ───── Integer → Long widening (для gitlabId, typeId — поля API int32, domain long) ─
 
     default Long integerToLong(Integer i) { return i == null ? null : i.longValue(); }
 
-    // ───── long → Integer narrowing для int32-полей контракта ────────────
-
-    /**
-     * Контракт описывает line/commit-счётчики как {@code int32}, домен хранит {@code long}
-     * для арифметики. На реальных объёмах overflow не достижим — мы намеренно сужаем.
-     */
-    default Integer longToInteger(long l) { return (int) l; }
+    // Note: longToInteger удалён — контракт 1.1.0 перешёл на int64 для counters,
+    // MapStruct теперь мапит long → long без narrowing. См. OAS-2 в REFACTORING.md.
 }
