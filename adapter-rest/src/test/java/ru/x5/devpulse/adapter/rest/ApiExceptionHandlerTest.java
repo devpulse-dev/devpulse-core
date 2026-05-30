@@ -39,7 +39,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("IllegalArgumentException → 400 + urn:devpulse:problem:bad-request")
     void illegalArgumentBecomes400() throws Exception {
-        mvc.perform(get("/_boom").param("kind", "illegal"))
+        mvc.perform(get("/api/v2/_boom").param("kind", "illegal"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.type").value("urn:devpulse:problem:bad-request"))
                 .andExpect(jsonPath("$.title").value("Bad request"));
@@ -48,7 +48,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("CollectionAlreadyRunningException → 409 + urn:devpulse:problem:conflict")
     void collectionRunningBecomes409() throws Exception {
-        mvc.perform(get("/_boom").param("kind", "running"))
+        mvc.perform(get("/api/v2/_boom").param("kind", "running"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("urn:devpulse:problem:conflict"));
     }
@@ -56,7 +56,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("HttpServerErrorException (Kaiten 500) → 502 Bad Gateway")
     void upstream5xxBecomes502() throws Exception {
-        mvc.perform(get("/_boom").param("kind", "upstream5xx"))
+        mvc.perform(get("/api/v2/_boom").param("kind", "upstream5xx"))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.type").value("urn:devpulse:problem:upstream-error"))
                 .andExpect(jsonPath("$.title").value("Upstream service error"));
@@ -65,14 +65,14 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("HttpClientErrorException (Kaiten 401/403/...) → 502 Bad Gateway (мы не пробрасываем 4xx наружу)")
     void upstream4xxBecomes502() throws Exception {
-        mvc.perform(get("/_boom").param("kind", "upstream4xx"))
+        mvc.perform(get("/api/v2/_boom").param("kind", "upstream4xx"))
                 .andExpect(status().isBadGateway());
     }
 
     @Test
     @DisplayName("ResourceAccessException с SocketTimeoutException в cause → 504 Gateway Timeout")
     void timeoutBecomes504() throws Exception {
-        mvc.perform(get("/_boom").param("kind", "timeout"))
+        mvc.perform(get("/api/v2/_boom").param("kind", "timeout"))
                 .andExpect(status().isGatewayTimeout())
                 .andExpect(jsonPath("$.type").value("urn:devpulse:problem:upstream-timeout"))
                 .andExpect(jsonPath("$.title").value("Upstream timeout"));
@@ -81,7 +81,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("ResourceAccessException БЕЗ timeout (connection refused) → 502 Bad Gateway")
     void connectionRefusedBecomes502() throws Exception {
-        mvc.perform(get("/_boom").param("kind", "refused"))
+        mvc.perform(get("/api/v2/_boom").param("kind", "refused"))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.title").value("Upstream service unavailable"));
     }
@@ -89,7 +89,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("Прочий unchecked → 500 Internal Server Error")
     void anyOtherBecomes500() throws Exception {
-        mvc.perform(get("/_boom").param("kind", "other"))
+        mvc.perform(get("/api/v2/_boom").param("kind", "other"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.type").value("urn:devpulse:problem:internal"));
     }

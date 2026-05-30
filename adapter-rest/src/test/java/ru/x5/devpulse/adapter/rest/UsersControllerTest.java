@@ -15,6 +15,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import ru.x5.devpulse.application.port.in.GetUserCommitsUseCase;
@@ -26,6 +27,7 @@ import ru.x5.devpulse.domain.model.user.KaitenUserId;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
 
 @WebMvcTest(UsersController.class)
+@Import(RestMappersTestConfig.class)
 @DisplayName("UsersController (/api/v2/users)")
 class UsersControllerTest {
 
