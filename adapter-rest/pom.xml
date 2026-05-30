@@ -12,7 +12,13 @@
 
     <artifactId>adapter-rest</artifactId>
     <name>DevPulse — REST in-adapter</name>
-    <description>HTTP entry point. Controllers + request/response DTOs + MapStruct mappers to domain.</description>
+    <description>HTTP entry point. Controllers implement OpenAPI-generated *Api interfaces; DTOs are generated from devpulse-oas contract.</description>
+
+    <properties>
+        <!-- OpenAPI contract JARs. Source of truth for REST shape. -->
+        <devpulse-oas.version>1.0.0</devpulse-oas.version>
+        <openapi-generator.version>7.10.0</openapi-generator.version>
+    </properties>
 
     <dependencies>
         <dependency>
@@ -39,6 +45,56 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Required by openapi-generator output: io.swagger.v3.oas.annotations.* -->
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations</artifactId>
+            <version>2.2.25</version>
+        </dependency>
+
+        <!--
+            DevPulse OpenAPI contracts. Consumed only at generate-sources phase:
+            maven-dependency-plugin unpacks the YAML resources into target/openapi-spec/
+            and openapi-generator-maven-plugin reads them. Scope `provided` is enough —
+            the JARs themselves don't need to be on the runtime classpath.
+        -->
+        <dependency>
+            <groupId>com.devpulse</groupId>
+            <artifactId>shared-contract</artifactId>
+            <version>${devpulse-oas.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.devpulse</groupId>
+            <artifactId>collection-contract</artifactId>
+            <version>${devpulse-oas.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.devpulse</groupId>
+            <artifactId>dashboard-contract</artifactId>
+            <version>${devpulse-oas.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.devpulse</groupId>
+            <artifactId>stats-contract</artifactId>
+            <version>${devpulse-oas.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.devpulse</groupId>
+            <artifactId>users-contract</artifactId>
+            <version>${devpulse-oas.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.devpulse</groupId>
+            <artifactId>kaiten-contract</artifactId>
+            <version>${devpulse-oas.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -56,6 +112,157 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+
+            <!--
+                Step 1: unpack all 6 OAS YAML files into a single directory so that
+                cross-file $refs ($ref: 'shared.yaml#/...') resolve correctly.
+                Each contract JAR packages its yaml at root (shared.yaml, collection-api.yaml, ...).
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>unpack-openapi-specs</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>unpack-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeGroupIds>com.devpulse</includeGroupIds>
+                            <includeArtifactIds>shared-contract,collection-contract,dashboard-contract,stats-contract,users-contract,kaiten-contract</includeArtifactIds>
+                            <includes>*.yaml</includes>
+                            <outputDirectory>${project.build.directory}/openapi-spec</outputDirectory>
+                            <overWriteSnapshots>true</overWriteSnapshots>
+                            <overWriteReleases>true</overWriteReleases>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                Step 2: generate Spring API interfaces + Jackson models from the 5 domain
+                specs, plus a model-only pass from shared.yaml.
+
+                Layout:
+                  ru.x5.devpulse.adapter.rest.api          — generated *Api interfaces (one per spec tag)
+                  ru.x5.devpulse.adapter.rest.api.model    — generated DTO records/classes
+
+                Shared models are generated ONCE by the `generate-shared-models` execution.
+                Each domain execution declares them via <importMappings> so the generator
+                reuses the same FQNs instead of regenerating duplicates.
+            -->
+            <plugin>
+                <groupId>org.openapitools</groupId>
+                <artifactId>openapi-generator-maven-plugin</artifactId>
+                <version>${openapi-generator.version}</version>
+
+                <executions>
+                    <execution>
+                        <id>generate-shared-models</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${project.build.directory}/openapi-spec/shared.yaml</inputSpec>
+                            <generateApis>false</generateApis>
+                            <generateApiTests>false</generateApiTests>
+                            <generateApiDocumentation>false</generateApiDocumentation>
+                            <generateModelTests>false</generateModelTests>
+                            <generateModelDocumentation>false</generateModelDocumentation>
+                            <generateSupportingFiles>false</generateSupportingFiles>
+                        </configuration>
+                    </execution>
+
+                    <execution>
+                        <id>generate-collection-api</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${project.build.directory}/openapi-spec/collection-api.yaml</inputSpec>
+                        </configuration>
+                    </execution>
+
+                    <execution>
+                        <id>generate-dashboard-api</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${project.build.directory}/openapi-spec/dashboard-api.yaml</inputSpec>
+                        </configuration>
+                    </execution>
+
+                    <execution>
+                        <id>generate-stats-api</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${project.build.directory}/openapi-spec/stats-api.yaml</inputSpec>
+                        </configuration>
+                    </execution>
+
+                    <execution>
+                        <id>generate-users-api</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${project.build.directory}/openapi-spec/users-api.yaml</inputSpec>
+                        </configuration>
+                    </execution>
+
+                    <execution>
+                        <id>generate-kaiten-api</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${project.build.directory}/openapi-spec/kaiten-api.yaml</inputSpec>
+                        </configuration>
+                    </execution>
+                </executions>
+
+                <!-- Common config — applies to all executions unless overridden -->
+                <configuration>
+                    <generatorName>spring</generatorName>
+                    <library>spring-boot</library>
+                    <apiPackage>ru.x5.devpulse.adapter.rest.api</apiPackage>
+                    <modelPackage>ru.x5.devpulse.adapter.rest.api.model</modelPackage>
+                    <invokerPackage>ru.x5.devpulse.adapter.rest.api</invokerPackage>
+                    <generateApiTests>false</generateApiTests>
+                    <generateApiDocumentation>false</generateApiDocumentation>
+                    <generateModelTests>false</generateModelTests>
+                    <generateModelDocumentation>false</generateModelDocumentation>
+                    <generateSupportingFiles>false</generateSupportingFiles>
+                    <configOptions>
+                        <interfaceOnly>true</interfaceOnly>
+                        <useSpringBoot3>true</useSpringBoot3>
+                        <useJakartaEe>true</useJakartaEe>
+                        <useTags>true</useTags>
+                        <useResponseEntity>true</useResponseEntity>
+                        <!--
+                            java8-localdatetime: формат date-time → LocalDateTime
+                            (вместо OffsetDateTime). Backend domain работает с LocalDateTime,
+                            API.md явно использует «2026-05-23T14:00:00» без TZ — это
+                            осознанное решение (Kaiten и git emit naive timestamps).
+                        -->
+                        <dateLibrary>java8-localdatetime</dateLibrary>
+                        <openApiNullable>false</openApiNullable>
+                        <serializationLibrary>jackson</serializationLibrary>
+                        <skipDefaultInterface>true</skipDefaultInterface>
+                        <useBeanValidation>true</useBeanValidation>
+                    </configOptions>
+                </configuration>
             </plugin>
         </plugins>
     </build>

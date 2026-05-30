@@ -14,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -24,6 +25,7 @@ import ru.x5.devpulse.domain.model.collection.CollectionRun;
 import ru.x5.devpulse.domain.model.collection.CollectionStatus;
 
 @WebMvcTest(CollectionController.class)
+@Import(RestMappersTestConfig.class)
 @DisplayName("CollectionController (/api/v2/collection/runs)")
 class CollectionControllerTest {
 

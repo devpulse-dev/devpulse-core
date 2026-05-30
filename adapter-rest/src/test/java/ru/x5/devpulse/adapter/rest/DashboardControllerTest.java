@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import ru.x5.devpulse.application.port.in.GetDashboardUseCase;
@@ -25,6 +26,7 @@ import ru.x5.devpulse.domain.model.stats.Dashboard;
 import ru.x5.devpulse.domain.model.user.Email;
 
 @WebMvcTest(DashboardController.class)
+@Import(RestMappersTestConfig.class)
 @DisplayName("DashboardController (/api/v2/dashboard)")
 class DashboardControllerTest {
 
