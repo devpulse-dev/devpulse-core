@@ -5,8 +5,12 @@
 Сервис аналитики активности разработчиков: собирает коммиты из Git-репозиториев и карточки задач из Kaiten, агрегирует ежедневную статистику по авторам и отдаёт её через REST API для фронта.
 
 > **Документы:**
-> - [`API.md`](./API.md) — REST-эндпоинты v2 с примерами запросов/ответов.
-> - [`REFACTORING.md`](./REFACTORING.md) — план рефакторинга v1 → v2, ADR-решения, roadmap.
+> - **REST API** — описан в OpenAPI-контрактах в отдельном репо
+>   [devpulse-dev/devpulse-oas](https://github.com/devpulse-dev/devpulse-oas).
+>   Контроллеры на бэке implement'ят generated `*Api` interfaces (см. раздел
+>   [«REST API»](#rest-api-contract-first-через-openapi) ниже).
+> - [`REFACTORING.md`](./REFACTORING.md) — план рефакторинга v1 → v2, ADR-решения,
+>   review-фиксы, post-mortems.
 
 ---
 
@@ -54,7 +58,7 @@ DevPulse/
 │                                 # port/out/ — интерфейсы для адаптеров (GitGateway, *Repository…)
 │                                 # service/  — реализации use cases (POJO + Lombok, без Spring)
 │
-├── adapter-rest/                 # IN-адаптер: REST controllers + DTO (api/v2)
+├── adapter-rest/                 # IN-адаптер: REST controllers (implement OpenAPI *Api) + MapStruct mappers
 ├── adapter-persistence/          # OUT: JPA entities + Spring Data + Liquibase
 ├── adapter-git/                  # OUT: git CLI client (реализация GitGateway)
 ├── adapter-kaiten/               # OUT: Kaiten HTTP client (реализация KaitenGateway)
@@ -172,6 +176,97 @@ done
 -Djavax.net.ssl.trustStore=<абс-путь>/local-truststore.jks
 -Djavax.net.ssl.trustStorePassword=changeit
 ```
+
+---
+
+## REST API: contract-first через OpenAPI
+
+Бэк **реализует** контракт, не определяет его. Single source of truth — отдельный репо
+[devpulse-dev/devpulse-oas](https://github.com/devpulse-dev/devpulse-oas) с OpenAPI 3.0
+спецификациями. Туда же ходит фронт за typescript-типами.
+
+### Структура контрактов
+
+| Contract | Что описывает |
+|---|---|
+| `shared-contract` | Общие schemas (Email, Period, Page, AuthorSummary, Commit, KaitenCard, ProblemDetails…) |
+| `collection-contract` | `POST /api/v2/collection/runs`, `GET /api/v2/collection/runs/{id}` |
+| `dashboard-contract` | `GET /api/v2/dashboard` (paginated, sorted by activity score) |
+| `stats-contract` | `GET /api/v2/stats/{daily,weekly,summary}` |
+| `users-contract` | `GET /api/v2/users/{email}/{profile,commits}` |
+| `kaiten-contract` | `POST /api/v2/kaiten/sync-users` |
+
+Каждый contract — Maven-артефакт в GitHub Packages (`com.devpulse:<name>:<version>`).
+**Lockstep-версионирование:** все 6 contract'ов публикуются одной версией (единый
+`<revision>` в корневом pom OAS-репо). Текущая — `1.2.0`. На нашей стороне это одна
+property `devpulse-oas.version` в `adapter-rest/pom.xml`.
+
+### Как это работает на бэке
+
+1. `adapter-rest/pom.xml` указывает зависимости на нужные contract JARs.
+2. **`maven-dependency-plugin`** в `generate-sources` phase распаковывает все YAML
+   из contract JARs в `target/openapi-spec/`.
+3. **`openapi-generator-maven-plugin`** генерирует из YAML:
+   - `ru.x5.devpulse.adapter.rest.api.*Api` — Spring-интерфейсы с `@RequestMapping`.
+   - `ru.x5.devpulse.adapter.rest.api.model.*` — DTO records.
+4. Контроллеры **implement** generated interfaces:
+   ```java
+   @RestController
+   class CollectionController implements CollectionApi {
+       @Override
+       public ResponseEntity<CollectionRun> startCollectionRun(CollectionRunRequest body) { ... }
+   }
+   ```
+   Если кто-то в spec'е переименует поле — компиляция упадёт. Контракт enforced
+   на этапе сборки.
+5. **MapStruct mappers** в `adapter-rest/.../mapper/` конвертируют `domain.* ↔ api.model.*`.
+   Centralized type conversions (Email → String, KaitenUserId → Long и т.д.) в
+   `DomainTypeConverters`.
+
+### Префикс `/api/v2`
+
+OpenAPI спеки описывают пути без префикса (`/collection/runs`, `/dashboard` …).
+`WebMvcConfig.addPathPrefix("/api/v2", ...)` добавляет префикс централизованно к
+любому `@RestController` в пакете `adapter.rest`. Actuator/management-эндпоинты
+остаются на корне.
+
+### Как настроить локальный доступ к GitHub Packages
+
+В `~/.m2/settings.xml` (или global Maven `settings.xml`):
+
+```xml
+<servers>
+    <server>
+        <id>github</id>
+        <username>YOUR_GITHUB_LOGIN</username>
+        <password>YOUR_PAT_WITH_read:packages</password>
+    </server>
+</servers>
+```
+
+Если используется x5-nexus как mirror — обязательно добавить exclude:
+
+```xml
+<mirrors>
+    <mirror>
+        <id>x5-repo</id>
+        <mirrorOf>*,!github</mirrorOf>   <!-- иначе github переадресуется в nexus -->
+        <url>https://nexus-gk.x5.ru/repository/public/</url>
+    </mirror>
+</mirrors>
+```
+
+### Как изменить контракт
+
+1. Открой PR в [devpulse-oas](https://github.com/devpulse-dev/devpulse-oas).
+2. Поменяй нужный `*.yaml` и bump'ни **единый** `<revision>` в корневом `pom.xml`
+   OAS-репо (lockstep — едут все 6 Maven-артефактов + npm `@devpulse-dev/api-types`):
+   - patch — доки/метадата.
+   - minor — добавлено поле, новый endpoint, backward-compatible.
+   - major — breaking (удалено/переименовано поле, поменялся enum).
+3. После merge — workflow `Deploy Contracts` публикует в GitHub Packages (Maven + npm).
+4. В этом репо бампни **одну** property `devpulse-oas.version` в `adapter-rest/pom.xml`
+   + `./mvnw -U` чтобы подтянуть новую версию (Maven кэширует negative lookups).
 
 ---
 
