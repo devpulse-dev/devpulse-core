@@ -187,17 +187,19 @@ done
 
 ### Структура контрактов
 
-| Contract | Что описывает | Текущая версия |
-|---|---|---|
-| `shared-contract` | Общие schemas (Email, Period, Page, AuthorSummary, Commit, KaitenCard, ProblemDetails…) | `1.1.0` |
-| `collection-contract` | `POST /api/v2/collection/runs`, `GET /api/v2/collection/runs/{id}` | `1.0.1` |
-| `dashboard-contract` | `GET /api/v2/dashboard` (paginated, sorted by activity score) | `1.0.1` |
-| `stats-contract` | `GET /api/v2/stats/{daily,weekly,summary}` | `1.0.1` |
-| `users-contract` | `GET /api/v2/users/{email}/{profile,commits}` | `1.0.1` |
-| `kaiten-contract` | `POST /api/v2/kaiten/sync-users` | `1.0.1` |
+| Contract | Что описывает |
+|---|---|
+| `shared-contract` | Общие schemas (Email, Period, Page, AuthorSummary, Commit, KaitenCard, ProblemDetails…) |
+| `collection-contract` | `POST /api/v2/collection/runs`, `GET /api/v2/collection/runs/{id}` |
+| `dashboard-contract` | `GET /api/v2/dashboard` (paginated, sorted by activity score) |
+| `stats-contract` | `GET /api/v2/stats/{daily,weekly,summary}` |
+| `users-contract` | `GET /api/v2/users/{email}/{profile,commits}` |
+| `kaiten-contract` | `POST /api/v2/kaiten/sync-users` |
 
-Каждый contract — Maven-артефакт в GitHub Packages
-(`com.devpulse:<name>:<version>`). Independent versioning: bump'ается только то что меняется.
+Каждый contract — Maven-артефакт в GitHub Packages (`com.devpulse:<name>:<version>`).
+**Lockstep-версионирование:** все 6 contract'ов публикуются одной версией (единый
+`<revision>` в корневом pom OAS-репо). Текущая — `1.2.0`. На нашей стороне это одна
+property `devpulse-oas.version` в `adapter-rest/pom.xml`.
 
 ### Как это работает на бэке
 
@@ -257,12 +259,14 @@ OpenAPI спеки описывают пути без префикса (`/collec
 ### Как изменить контракт
 
 1. Открой PR в [devpulse-oas](https://github.com/devpulse-dev/devpulse-oas).
-2. Поменяй нужный `*.yaml`, bump'ни version в `<module>/pom.xml`:
-   - patch (`1.0.1`) — изменилась только метадата / transitive dep.
-   - minor (`1.1.0`) — добавлено поле, новый endpoint, backward-compatible.
-   - major (`2.0.0`) — breaking (удалено поле, переименовано, поменялся enum).
-3. После merge — workflow `Deploy Contracts` публикует в GitHub Packages.
-4. В этом репо бампни `devpulse-oas.<contract>.version` в `adapter-rest/pom.xml`.
+2. Поменяй нужный `*.yaml` и bump'ни **единый** `<revision>` в корневом `pom.xml`
+   OAS-репо (lockstep — едут все 6 Maven-артефактов + npm `@devpulse-dev/api-types`):
+   - patch — доки/метадата.
+   - minor — добавлено поле, новый endpoint, backward-compatible.
+   - major — breaking (удалено/переименовано поле, поменялся enum).
+3. После merge — workflow `Deploy Contracts` публикует в GitHub Packages (Maven + npm).
+4. В этом репо бампни **одну** property `devpulse-oas.version` в `adapter-rest/pom.xml`
+   + `./mvnw -U` чтобы подтянуть новую версию (Maven кэширует negative lookups).
 
 ---
 

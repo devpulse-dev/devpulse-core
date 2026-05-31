@@ -15,12 +15,7 @@
     <description>HTTP entry point. Controllers implement OpenAPI-generated *Api interfaces; DTOs are generated from devpulse-oas contract.</description>
 
     <properties>
-        <devpulse-oas.shared.version>1.1.0</devpulse-oas.shared.version>
-        <devpulse-oas.collection.version>1.0.1</devpulse-oas.collection.version>
-        <devpulse-oas.dashboard.version>1.0.1</devpulse-oas.dashboard.version>
-        <devpulse-oas.stats.version>1.0.1</devpulse-oas.stats.version>
-        <devpulse-oas.users.version>1.0.1</devpulse-oas.users.version>
-        <devpulse-oas.kaiten.version>1.0.1</devpulse-oas.kaiten.version>
+        <devpulse-oas.version>1.2.0</devpulse-oas.version>
 
         <openapi-generator.version>7.10.0</openapi-generator.version>
     </properties>
@@ -71,50 +66,40 @@
             <version>2.2.25</version>
         </dependency>
 
-        <!--
-            DevPulse OpenAPI contracts. Consumed only at generate-sources phase:
-            maven-dependency-plugin unpacks the YAML resources into target/openapi-spec/
-            and openapi-generator-maven-plugin reads them. Scope `provided` is enough —
-            the JARs themselves don't need to be on the runtime classpath.
-
-            Каждый contract на своей версии — обновляются независимо. shared declared
-            явно для документации (он же тащится транзитивно из всех 5 domain contracts,
-            и их metadata указывает на ту же версию).
-        -->
         <dependency>
             <groupId>com.devpulse</groupId>
             <artifactId>shared-contract</artifactId>
-            <version>${devpulse-oas.shared.version}</version>
+            <version>${devpulse-oas.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.devpulse</groupId>
             <artifactId>collection-contract</artifactId>
-            <version>${devpulse-oas.collection.version}</version>
+            <version>${devpulse-oas.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.devpulse</groupId>
             <artifactId>dashboard-contract</artifactId>
-            <version>${devpulse-oas.dashboard.version}</version>
+            <version>${devpulse-oas.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.devpulse</groupId>
             <artifactId>stats-contract</artifactId>
-            <version>${devpulse-oas.stats.version}</version>
+            <version>${devpulse-oas.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.devpulse</groupId>
             <artifactId>users-contract</artifactId>
-            <version>${devpulse-oas.users.version}</version>
+            <version>${devpulse-oas.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.devpulse</groupId>
             <artifactId>kaiten-contract</artifactId>
-            <version>${devpulse-oas.kaiten.version}</version>
+            <version>${devpulse-oas.version}</version>
             <scope>provided</scope>
         </dependency>
 
