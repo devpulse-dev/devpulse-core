@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
 import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetDashboardUseCase;
+import ru.x5.devpulse.application.port.in.GetHourlyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetUserCommitsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserProfileUseCase;
@@ -18,6 +19,7 @@ import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.application.service.GetCollectionRunService;
 import ru.x5.devpulse.application.service.GetDailyStatsService;
 import ru.x5.devpulse.application.service.GetDashboardService;
+import ru.x5.devpulse.application.service.GetHourlyStatsService;
 import ru.x5.devpulse.application.service.GetPeriodSummaryService;
 import ru.x5.devpulse.application.service.GetUserCommitsService;
 import ru.x5.devpulse.application.service.GetUserProfileService;
@@ -59,6 +61,11 @@ class QueryUseCaseConfig {
     @Bean
     GetUserCommitsUseCase getUserCommitsUseCase(CommitRepository commitRepository) {
         return new GetUserCommitsService(commitRepository);
+    }
+
+    @Bean
+    GetHourlyStatsUseCase getHourlyStatsUseCase(CommitRepository commitRepository) {
+        return new GetHourlyStatsService(commitRepository);
     }
 
     @Bean

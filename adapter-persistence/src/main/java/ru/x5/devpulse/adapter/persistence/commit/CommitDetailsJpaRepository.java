@@ -42,4 +42,37 @@ interface CommitDetailsJpaRepository extends JpaRepository<CommitDetailsEntity, 
     @org.springframework.data.jpa.repository.Modifying
     @Query("delete from CommitDetailsEntity c where c.commitHash in :hashes")
     int deleteByCommitHashes(@Param("hashes") Collection<String> hashes);
+
+    /**
+     * Почасовая агрегация не-мердж коммитов: GROUP BY (день недели, час) из {@code commit_date}.
+     *
+     * <p>Нативный запрос — JPQL не умеет {@code EXTRACT(ISODOW …)}. {@code ISODOW} даёт
+     * 1=Пн … 7=Вс, минус 1 → наш контракт 0=Пн … 6=Вс. Час — {@code EXTRACT(HOUR …)}
+     * из {@code commit_date} (не полагаемся на колонку {@code hour}: она nullable у старых строк).</p>
+     *
+     * <p><b>GROUP BY по выражениям, не по алиасам:</b> у {@code commit_details} есть реальная
+     * колонка {@code hour}, и {@code group by hour} срезолвился бы в неё, а не в SELECT-алиас —
+     * тогда {@code extract(...)} из SELECT оказались бы не сгруппированы. Поэтому группируем по
+     * тем же выражениям, что в SELECT.</p>
+     *
+     * <p>{@code :email} — опциональный фильтр (null → вся команда; {@code cast(:email as text)}
+     * нужен Postgres, иначе bind-параметр null имеет неопределённый тип). Возвращает строки
+     * {@code [weekday:int, hour:int, commits:long, addedLines:long]}.</p>
+     */
+    @Query(value = """
+            select extract(isodow from commit_date)::int - 1 as weekday,
+                   extract(hour   from commit_date)::int     as hour,
+                   count(*)                                   as commits,
+                   coalesce(sum(added_lines), 0)             as added_lines
+              from commit_details
+             where commit_date between :from and :to
+               and is_merge = false
+               and (cast(:email as text) is null or email = :email)
+             group by extract(isodow from commit_date)::int - 1,
+                      extract(hour from commit_date)::int
+            """, nativeQuery = true)
+    List<Object[]> aggregateHourly(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("email") String email);
 }

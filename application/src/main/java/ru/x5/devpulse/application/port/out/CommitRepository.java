@@ -2,12 +2,14 @@ package ru.x5.devpulse.application.port.out;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import ru.x5.devpulse.domain.common.PageRequest;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.CommitHash;
 import ru.x5.devpulse.domain.model.git.RepoName;
+import ru.x5.devpulse.domain.model.stats.HourlyBucket;
 import ru.x5.devpulse.domain.model.user.Email;
 
 /**
@@ -35,4 +37,15 @@ public interface CommitRepository {
 
     /** Bulk-удаление коммитов по хешам. Используется для rebase-cleanup. */
     void deleteByHashes(Collection<CommitHash> hashes);
+
+    /**
+     * Почасовая агрегация не-мердж коммитов за период по ключу (день недели × час).
+     *
+     * <p>Считается в БД (GROUP BY по дню недели и часу из {@code commit_date}), без
+     * подъёма коммитов в память. {@code weekday}: 0=Пн … 6=Вс (ISO).</p>
+     *
+     * @param author пусто — агрегат по всей команде; задан — только этот автор
+     * @return непустые ячейки (commits &gt; 0); порядок не гарантируется
+     */
+    List<HourlyBucket> aggregateHourly(Period period, Optional<Email> author);
 }

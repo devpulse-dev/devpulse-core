@@ -20,12 +20,15 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
+import ru.x5.devpulse.application.port.in.GetHourlyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
+import ru.x5.devpulse.domain.model.stats.HourlyBucket;
+import ru.x5.devpulse.domain.model.stats.HourlyStats;
 import ru.x5.devpulse.domain.model.stats.PeriodSummary;
 import ru.x5.devpulse.domain.model.user.Email;
 
@@ -39,6 +42,7 @@ class StatsControllerTest {
     @MockitoBean GetDailyStatsUseCase getDailyStats;
     @MockitoBean GetWeeklyStatsUseCase getWeeklyStats;
     @MockitoBean GetPeriodSummaryUseCase getPeriodSummary;
+    @MockitoBean GetHourlyStatsUseCase getHourlyStats;
 
     @Test
     @DisplayName("GET /daily?from=&to= возвращает 200 и список агрегатов с email/repo")
@@ -77,5 +81,23 @@ class StatsControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.title").value(containsString("Malformed")));
+    }
+
+    @Test
+    @DisplayName("GET /hourly → 200, from/to + ячейки weekday×hour")
+    void hourlyReturnsMatrix() throws Exception {
+        when(getHourlyStats.get(any(), any())).thenReturn(new HourlyStats(
+                new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)),
+                List.of(new HourlyBucket(2, 14, 7, 320))));
+
+        mvc.perform(get("/api/v2/stats/hourly")
+                        .param("from", "2026-05-01").param("to", "2026-05-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.from").value("2026-05-01"))
+                .andExpect(jsonPath("$.to").value("2026-05-31"))
+                .andExpect(jsonPath("$.cells[0].weekday").value(2))
+                .andExpect(jsonPath("$.cells[0].hour").value(14))
+                .andExpect(jsonPath("$.cells[0].commits").value(7))
+                .andExpect(jsonPath("$.cells[0].addedLines").value(320));
     }
 }
