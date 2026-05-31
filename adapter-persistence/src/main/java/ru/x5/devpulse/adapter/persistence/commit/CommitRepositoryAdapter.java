@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -17,6 +18,7 @@ import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.CommitHash;
 import ru.x5.devpulse.domain.model.git.RepoName;
+import ru.x5.devpulse.domain.model.stats.HourlyBucket;
 import ru.x5.devpulse.domain.model.user.Email;
 
 @Component
@@ -88,5 +90,23 @@ class CommitRepositoryAdapter implements CommitRepository {
         List<String> values = hashes.stream().map(CommitHash::value).toList();
         int deleted = jpa.deleteByCommitHashes(values);
         log.info("Удалили {} rebase-зомби из commit_details", deleted);
+    }
+
+    @Override
+    public List<HourlyBucket> aggregateHourly(Period period, Optional<Email> author) {
+        String email = author.map(Email::value).orElse(null);
+        List<Object[]> rows = jpa.aggregateHourly(
+                period.fromAtStartOfDay(), period.toAtEndOfDay(), email);
+
+        List<HourlyBucket> buckets = new ArrayList<>(rows.size());
+        for (Object[] r : rows) {
+            // ((Number) …) — устойчиво к JDBC-типу (Integer/Long/BigInteger/BigDecimal).
+            buckets.add(new HourlyBucket(
+                    ((Number) r[0]).intValue(),
+                    ((Number) r[1]).intValue(),
+                    ((Number) r[2]).longValue(),
+                    ((Number) r[3]).longValue()));
+        }
+        return buckets;
     }
 }
