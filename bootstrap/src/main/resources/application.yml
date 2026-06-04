@@ -76,6 +76,37 @@ kaiten:
     # Default: false. В local профиле можно включить через KAITEN_INSECURE_SSL=true.
     insecure-ssl: ${KAITEN_INSECURE_SSL:false}
 
+# === GitLab integration (ревью-метрики: MR / approvals / notes) ===
+gitlab:
+  api:
+    # Базовый URL GitLab API v4. Дефолт — тот же scm, что и git-репозитории.
+    base-url: ${GITLAB_API_URL:https://scm.x5.ru/api/v4}
+    # PAT с правами read_api/read_user. По умолчанию — тот же токен, что git.token
+    # (ссылка на property git.token, не на env GIT_TOKEN — чтобы подхватывался и из
+    # application-local.yml, где токен задаётся как git.token: ...). Переопределить —
+    # env GITLAB_TOKEN или явным gitlab.api.token.
+    token: ${GITLAB_TOKEN:${git.token:}}
+    # Проекты для сбора. Если пусто — деривятся из git.repositories (clone-URL → namespace/repo).
+    projects: ${GITLAB_PROJECTS:}
+    # Домен для резолва username→email.
+    email-domain: ${GITLAB_EMAIL_DOMAIN:x5.ru}
+    # Тянуть ли GET /users ради public_email. По умолчанию false: пагинация по ВСЕМ юзерам
+    # GitLab дорогая (минуты на прогон), а username@домен для scm.x5.ru совпадает с email.
+    # Включай только если у части людей username ≠ local-part email.
+    fetch-public-emails: ${GITLAB_FETCH_PUBLIC_EMAILS:false}
+    # Глубина бэкфилла назад от now (дней). 0 = без ограничения (вся история от since прогона).
+    # Поставь > 0, только если нужно искусственно ограничить первый прогон.
+    max-backfill-days: ${GITLAB_MAX_BACKFILL_DAYS:0}
+    # Сколько MR обрабатывать параллельно (approvals+notes на virtual threads). Главный рычаг
+    # скорости: per-MR вызовы — узкое место. Подними, если scm.x5.ru держит больше RPS.
+    concurrency: ${GITLAB_CONCURRENCY:8}
+    request-delay-ms: 200
+    max-retries: 5
+    retry-backoff-ms: 2000
+    page-size: 100
+    # scm.x5.ru за внутренним X5 CA — как и Kaiten, в dev можно отключить проверку SSL.
+    insecure-ssl: ${GITLAB_INSECURE_SSL:false}
+
 # === Scoring (дашборд: активность разработчиков) ===
 scoring:
   # Baseline: ожидаемое количество не-мердж коммитов за 30 дней — норма команды (score = 1.0).

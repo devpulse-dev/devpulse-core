@@ -32,3 +32,12 @@ kaiten:
     # Для машин без корпоративного X5 CA в JVM truststore.
     # См. README раздел «SSL: подключение к корпоративному Kaiten».
     insecure-ssl: true
+
+gitlab:
+  api:
+    # base-url по умолчанию https://scm.x5.ru/api/v4 — можно не указывать.
+    # token: можно не указывать — берётся git.token (тот же PAT с read_api).
+    # projects: можно не указывать — деривятся из git.repositories выше.
+    email-domain: x5.ru
+    # scm.x5.ru за внутренним X5 CA — как и Kaiten.
+    insecure-ssl: true

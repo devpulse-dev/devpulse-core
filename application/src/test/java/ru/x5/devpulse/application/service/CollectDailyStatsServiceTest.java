@@ -25,6 +25,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
+import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
 import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
 import ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException;
 import ru.x5.devpulse.application.port.out.CollectionLock;
@@ -47,6 +48,7 @@ class CollectDailyStatsServiceTest {
 
     @Mock private CollectGitStatsUseCase collectGitStats;
     @Mock private SyncKaitenUsersUseCase syncKaitenUsers;
+    @Mock private CollectReviewsUseCase collectReviews;
     @Mock private CollectionRunRepository collectionRunRepository;
     @Mock private CollectionLock collectionLock;
     @Mock private CollectionLock.Handle lockHandle;
@@ -98,6 +100,19 @@ class CollectDailyStatsServiceTest {
         CollectionRun result = service.run(SINCE);
 
         assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS);
+    }
+
+    @Test
+    @DisplayName("Happy path зовёт фазу reviews; её падение изолировано ⇒ SUCCESS")
+    void reviewsPhaseRunsAndIsIsolated() {
+        when(collectGitStats.collect(any(), any())).thenReturn(Set.of());
+        doThrow(new RuntimeException("gitlab unreachable")).when(collectReviews).collect(any());
+
+        CollectionRun result = service.run(SINCE);
+
+        assertAll("reviews-фаза",
+                () -> assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS),
+                () -> verify(collectReviews).collect(any()));
     }
 
     @Test

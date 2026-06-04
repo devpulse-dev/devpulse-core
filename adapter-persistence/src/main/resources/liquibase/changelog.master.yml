@@ -41,3 +41,5 @@ databaseChangeLog:
       file: liquibase/migration/020-dedup-unified-user-and-lower-unique.yaml
   - include:
       file: liquibase/migration/021-drop-dead-kaiten-card-tables.yaml
+  - include:
+      file: liquibase/migration/022-create-merge-request-and-review.yaml

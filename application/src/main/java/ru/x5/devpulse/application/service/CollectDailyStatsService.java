@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
+import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
 import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
 import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
@@ -44,6 +45,7 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
 
     private final CollectGitStatsUseCase collectGitStats;
     private final SyncKaitenUsersUseCase syncKaitenUsers;
+    private final CollectReviewsUseCase collectReviews;
     private final CollectionRunRepository collectionRunRepository;
     private final CollectionLock collectionLock;
     private final KaitenCardsCache kaitenCardsCache;
@@ -85,6 +87,14 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
             syncKaitenUsers.syncAll();
         } catch (Exception e) {
             log.error("Sync пользователей Kaiten упал (git-статистика уже сохранена): {}",
+                    e.getMessage(), e);
+        }
+
+        // Ревью-метрики из GitLab — изолированно. Падение/недоступность GitLab не валит прогон.
+        try {
+            collectReviews.collect(effectiveSince);
+        } catch (Exception e) {
+            log.error("Сбор ревью-метрик из GitLab упал (остальные фазы уже сохранены): {}",
                     e.getMessage(), e);
         }
 

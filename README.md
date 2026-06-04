@@ -62,6 +62,7 @@ DevPulse/
 ├── adapter-persistence/          # OUT: JPA entities + Spring Data + Liquibase
 ├── adapter-git/                  # OUT: git CLI client (реализация GitGateway)
 ├── adapter-kaiten/               # OUT: Kaiten HTTP client (реализация KaitenGateway)
+├── adapter-reviews/               # OUT: ревью-метрики через GitLab API (реализация ReviewGateway)
 │
 └── bootstrap/                    # @SpringBootApplication, application.yml, wiring (@Configuration)
                                   # + ArchUnit-тесты гексагона
