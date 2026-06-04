@@ -12,8 +12,8 @@ interface MrReviewJpaRepository extends JpaRepository<MrReviewEntity, Long> {
     /** Все ревью для набора MR — для группировки по merge_request_id в адаптере. */
     List<MrReviewEntity> findByMergeRequestIdIn(Collection<Long> mergeRequestIds);
 
-    /** Bulk-удаление ревью одного MR — для replace при повторном сборе. */
+    /** Bulk-удаление ревью набора MR — для replace при повторном сборе (один запрос на чанк). */
     @Modifying
-    @Query("delete from MrReviewEntity r where r.mergeRequestId = :mrId")
-    void deleteByMergeRequestId(@Param("mrId") Long mergeRequestId);
+    @Query("delete from MrReviewEntity r where r.mergeRequestId in :mrIds")
+    void deleteByMergeRequestIdIn(@Param("mrIds") Collection<Long> mergeRequestIds);
 }

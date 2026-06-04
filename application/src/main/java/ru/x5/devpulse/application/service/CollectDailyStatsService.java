@@ -83,12 +83,12 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
         }
 
         // Kaiten — изолированно. Падение не откатывает git stats.
-//        try {
-//            syncKaitenUsers.syncAll();
-//        } catch (Exception e) {
-//            log.error("Sync пользователей Kaiten упал (git-статистика уже сохранена): {}",
-//                    e.getMessage(), e);
-//        }
+        try {
+            syncKaitenUsers.syncAll();
+        } catch (Exception e) {
+            log.error("Sync пользователей Kaiten упал (git-статистика уже сохранена): {}",
+                    e.getMessage(), e);
+        }
 
         // Ревью-метрики из GitLab — изолированно. Падение/недоступность GitLab не валит прогон.
         try {
