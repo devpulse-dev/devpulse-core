@@ -8,6 +8,7 @@ import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetDashboardUseCase;
 import ru.x5.devpulse.application.port.in.GetHourlyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
+import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserCommitsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserProfileUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
@@ -15,12 +16,14 @@ import ru.x5.devpulse.application.port.out.CollectionRunRepository;
 import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
+import ru.x5.devpulse.application.port.out.ReviewStatsRepository;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.application.service.GetCollectionRunService;
 import ru.x5.devpulse.application.service.GetDailyStatsService;
 import ru.x5.devpulse.application.service.GetDashboardService;
 import ru.x5.devpulse.application.service.GetHourlyStatsService;
 import ru.x5.devpulse.application.service.GetPeriodSummaryService;
+import ru.x5.devpulse.application.service.GetReviewStatsService;
 import ru.x5.devpulse.application.service.GetUserCommitsService;
 import ru.x5.devpulse.application.service.GetUserProfileService;
 import ru.x5.devpulse.application.service.GetWeeklyStatsService;
@@ -66,6 +69,13 @@ class QueryUseCaseConfig {
     @Bean
     GetHourlyStatsUseCase getHourlyStatsUseCase(CommitRepository commitRepository) {
         return new GetHourlyStatsService(commitRepository);
+    }
+
+    @Bean
+    GetReviewStatsUseCase getReviewStatsUseCase(
+            ReviewStatsRepository reviewStatsRepository,
+            UnifiedUserRepository unifiedUserRepository) {
+        return new GetReviewStatsService(reviewStatsRepository, unifiedUserRepository);
     }
 
     @Bean

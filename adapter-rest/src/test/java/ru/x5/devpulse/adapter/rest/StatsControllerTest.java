@@ -22,9 +22,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetHourlyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
+import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.RepoName;
+import ru.x5.devpulse.domain.model.review.ReviewAuthorStats;
+import ru.x5.devpulse.domain.model.review.ReviewStats;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.stats.HourlyBucket;
@@ -43,6 +46,7 @@ class StatsControllerTest {
     @MockitoBean GetWeeklyStatsUseCase getWeeklyStats;
     @MockitoBean GetPeriodSummaryUseCase getPeriodSummary;
     @MockitoBean GetHourlyStatsUseCase getHourlyStats;
+    @MockitoBean GetReviewStatsUseCase getReviewStats;
 
     @Test
     @DisplayName("GET /daily?from=&to= возвращает 200 и список агрегатов с email/repo")
@@ -99,5 +103,26 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.cells[0].hour").value(14))
                 .andExpect(jsonPath("$.cells[0].commits").value(7))
                 .andExpect(jsonPath("$.cells[0].addedLines").value(320));
+    }
+
+    @Test
+    @DisplayName("GET /reviews → 200, авторы с reviewsGiven/commentsGiven + округлённым avgTimeToMerge")
+    void reviewsReturnsAuthors() throws Exception {
+        when(getReviewStats.get(any())).thenReturn(new ReviewStats(
+                new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)),
+                List.of(new ReviewAuthorStats(
+                        new Email("boris@x5.ru"), "Boris", "https://kaiten.x5.ru/avatars/42.png",
+                        23, 47, 14, 18.456, 11))));
+
+        mvc.perform(get("/api/v2/stats/reviews")
+                        .param("from", "2026-05-01").param("to", "2026-05-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.from").value("2026-05-01"))
+                .andExpect(jsonPath("$.authors[0].email").value("boris@x5.ru"))
+                .andExpect(jsonPath("$.authors[0].reviewsGiven").value(23))
+                .andExpect(jsonPath("$.authors[0].commentsGiven").value(47))
+                .andExpect(jsonPath("$.authors[0].reviewsReceived").value(14))
+                .andExpect(jsonPath("$.authors[0].avgTimeToMergeHours").value(18.5))
+                .andExpect(jsonPath("$.authors[0].mergedMrCount").value(11));
     }
 }

@@ -1,0 +1,131 @@
+databaseChangeLog:
+  - changeSet:
+      id: 022-create-merge-request-and-review
+      author: boris.osechinskiy
+      comment: B2 ревью-метрики — MR из GitLab и участие ревьюеров (approve + комментарии)
+      changes:
+        - createTable:
+            tableName: merge_request
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: gitlab_project_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: gitlab_mr_iid
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: author_email
+                  type: VARCHAR(320)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: title
+                  type: VARCHAR(1000)
+              - column:
+                  name: web_url
+                  type: VARCHAR(1000)
+              - column:
+                  name: state
+                  type: VARCHAR(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: merged_at
+                  type: TIMESTAMP
+              - column:
+                  name: collected_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+
+        - addUniqueConstraint:
+            tableName: merge_request
+            constraintName: uk_merge_request_project_iid
+            columnNames: gitlab_project_id, gitlab_mr_iid
+
+        # Чтение review-stats фильтрует MR по периоду (created_at) и группирует по автору.
+        - createIndex:
+            indexName: idx_merge_request_created_at
+            tableName: merge_request
+            columns:
+              - column:
+                  name: created_at
+        - createIndex:
+            indexName: idx_merge_request_author_email
+            tableName: merge_request
+            columns:
+              - column:
+                  name: author_email
+
+        - createTable:
+            tableName: mr_review
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: merge_request_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_mr_review_merge_request
+                    references: merge_request(id)
+                    deleteCascade: true
+              - column:
+                  name: reviewer_email
+                  type: VARCHAR(320)
+                  constraints:
+                    nullable: false
+              # approved — нажал Approve по этому MR; comment_count — число ревью-комментов
+              # этого ревьюера к этому MR (объём). Одна строка = (MR × ревьюер).
+              - column:
+                  name: approved
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: comment_count
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: submitted_at
+                  type: TIMESTAMP
+              - column:
+                  name: collected_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+
+        - addUniqueConstraint:
+            tableName: mr_review
+            constraintName: uk_mr_review_mr_reviewer
+            columnNames: merge_request_id, reviewer_email
+
+        # reviewsGiven/commentsGiven группируются по reviewer_email.
+        - createIndex:
+            indexName: idx_mr_review_reviewer_email
+            tableName: mr_review
+            columns:
+              - column:
+                  name: reviewer_email

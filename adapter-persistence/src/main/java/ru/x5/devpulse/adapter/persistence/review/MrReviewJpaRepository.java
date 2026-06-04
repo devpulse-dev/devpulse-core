@@ -1,0 +1,11 @@
+package ru.x5.devpulse.adapter.persistence.review;
+
+import java.util.Collection;
+import java.util.List;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+interface MrReviewJpaRepository extends JpaRepository<MrReviewEntity, Long> {
+
+    /** Все ревью для набора MR — для группировки по merge_request_id в адаптере. */
+    List<MrReviewEntity> findByMergeRequestIdIn(Collection<Long> mergeRequestIds);
+}
