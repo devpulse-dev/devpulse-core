@@ -38,6 +38,7 @@ class HexagonalArchitectureTest {
     private static final String ADAPTER_PERSISTENCE = ROOT + ".adapter.persistence..";
     private static final String ADAPTER_GIT = ROOT + ".adapter.git..";
     private static final String ADAPTER_KAITEN = ROOT + ".adapter.kaiten..";
+    private static final String ADAPTER_REVIEWS = ROOT + ".adapter.reviews..";
 
     /**
      * Composition root: {@code @SpringBootApplication} в корневом пакете + {@code .config..}
@@ -85,6 +86,7 @@ class HexagonalArchitectureTest {
                 .layer("adapter-persistence").definedBy(ADAPTER_PERSISTENCE)
                 .layer("adapter-git").definedBy(ADAPTER_GIT)
                 .layer("adapter-kaiten").definedBy(ADAPTER_KAITEN)
+                .layer("adapter-reviews").definedBy(ADAPTER_REVIEWS)
                 .layer("bootstrap").definedBy(BOOTSTRAP)
 
                 .whereLayer("bootstrap").mayNotBeAccessedByAnyLayer()
@@ -92,16 +94,17 @@ class HexagonalArchitectureTest {
                 .whereLayer("adapter-persistence").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-git").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-kaiten").mayOnlyBeAccessedByLayers("bootstrap")
+                .whereLayer("adapter-reviews").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("application")
                         .mayOnlyBeAccessedByLayers(
                                 "bootstrap",
                                 "adapter-rest", "adapter-persistence",
-                                "adapter-git", "adapter-kaiten")
+                                "adapter-git", "adapter-kaiten", "adapter-reviews")
                 .whereLayer("domain")
                         .mayOnlyBeAccessedByLayers(
                                 "bootstrap", "application",
                                 "adapter-rest", "adapter-persistence",
-                                "adapter-git", "adapter-kaiten");
+                                "adapter-git", "adapter-kaiten", "adapter-reviews");
 
         rule.check(CLASSES);
     }

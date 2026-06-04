@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.CommitHash;
 import ru.x5.devpulse.domain.model.git.RepoName;
+import ru.x5.devpulse.domain.model.stats.HourlyBucket;
 import ru.x5.devpulse.domain.model.user.Email;
 
 @SpringBootTest
@@ -72,10 +74,55 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                         .doesNotContain(unknown));
     }
 
+    @Test
+    @DisplayName("aggregateHourly: GROUP BY weekday×hour, мерджи исключены, weekday 0=Пн (ISODOW)")
+    void aggregateHourlyGroupsByWeekdayAndHour() {
+        // 2026-05-04 — понедельник (ISODOW=1 → weekday 0), 2026-05-05 — вторник (weekday 1).
+        LocalDateTime mon10a = LocalDateTime.of(2026, 5, 4, 10, 0);
+        LocalDateTime mon10b = LocalDateTime.of(2026, 5, 4, 10, 30);
+        LocalDateTime tue14 = LocalDateTime.of(2026, 5, 5, 14, 0);
+        LocalDateTime mon10merge = LocalDateTime.of(2026, 5, 4, 10, 45);
+
+        repo.saveAll(List.of(
+                newCommit("1".repeat(40), BORIS, mon10a),                  // (0,10) +10
+                newCommit("2".repeat(40), BORIS, mon10b),                  // (0,10) +10
+                newCommit("3".repeat(40), BORIS, tue14),                   // (1,14) +10
+                mergeCommit("4".repeat(40), BORIS, mon10merge)             // мердж — НЕ считаем
+        ));
+
+        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
+        List<HourlyBucket> cells = repo.aggregateHourly(may, Optional.empty());
+
+        HourlyBucket mon10 = cell(cells, 0, 10);
+        HourlyBucket tue = cell(cells, 1, 14);
+        assertAll("часовая агрегация",
+                () -> assertThat(mon10.commits()).as("2 не-мердж коммита Пн 10:00").isEqualTo(2),
+                () -> assertThat(mon10.addedLines()).as("10+10").isEqualTo(20),
+                () -> assertThat(tue.commits()).isEqualTo(1),
+                () -> assertThat(cells.stream().mapToLong(HourlyBucket::commits).sum())
+                        .as("всего 3 — мердж исключён").isEqualTo(3),
+                () -> assertThat(repo.aggregateHourly(may, Optional.of(new Email("nobody@x5.ru"))))
+                        .as("фильтр по чужому email → пусто").isEmpty());
+    }
+
+    private static HourlyBucket cell(List<HourlyBucket> cells, int weekday, int hour) {
+        return cells.stream()
+                .filter(c -> c.weekday() == weekday && c.hour() == hour)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("нет ячейки (" + weekday + "," + hour + ")"));
+    }
+
     private static Commit newCommit(String hash, Email author, LocalDateTime when) {
         return new Commit(
                 new CommitHash(hash), author, when,
                 false, 10, 5, 0,
                 "fix something", null, CORE);
+    }
+
+    private static Commit mergeCommit(String hash, Email author, LocalDateTime when) {
+        return new Commit(
+                new CommitHash(hash), author, when,
+                true, 10, 5, 0,
+                "merge branch", null, CORE);
     }
 }

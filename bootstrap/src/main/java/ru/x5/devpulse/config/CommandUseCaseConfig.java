@@ -4,6 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
+import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
 import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
 import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
@@ -13,10 +14,13 @@ import ru.x5.devpulse.application.port.out.GitGateway;
 import ru.x5.devpulse.application.port.out.KaitenCardsCache;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
 import ru.x5.devpulse.application.port.out.KaitenUserRepository;
+import ru.x5.devpulse.application.port.out.ReviewGateway;
+import ru.x5.devpulse.application.port.out.ReviewWriteRepository;
 import ru.x5.devpulse.application.port.out.TransactionRunner;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.application.service.CollectDailyStatsService;
 import ru.x5.devpulse.application.service.CollectGitStatsService;
+import ru.x5.devpulse.application.service.CollectReviewsService;
 import ru.x5.devpulse.application.service.SyncKaitenUsersService;
 
 /**
@@ -37,12 +41,21 @@ class CommandUseCaseConfig {
     CollectDailyStatsUseCase collectDailyStatsUseCase(
             CollectGitStatsUseCase collectGitStats,
             SyncKaitenUsersUseCase syncKaitenUsers,
+            CollectReviewsUseCase collectReviews,
             CollectionRunRepository collectionRunRepository,
             CollectionLock collectionLock,
             KaitenCardsCache kaitenCardsCache) {
         return new CollectDailyStatsService(
-                collectGitStats, syncKaitenUsers, collectionRunRepository, collectionLock,
-                kaitenCardsCache);
+                collectGitStats, syncKaitenUsers, collectReviews, collectionRunRepository,
+                collectionLock, kaitenCardsCache);
+    }
+
+    /** Worker — фаза сбора ревью-метрик из GitLab (MR/approvals/notes → merge_request/mr_review). */
+    @Bean
+    CollectReviewsUseCase collectReviewsUseCase(
+            ReviewGateway reviewGateway,
+            ReviewWriteRepository reviewWriteRepository) {
+        return new CollectReviewsService(reviewGateway, reviewWriteRepository);
     }
 
     /** Worker — только git-фаза. Не имеет понятия про CollectionRun/lock. */

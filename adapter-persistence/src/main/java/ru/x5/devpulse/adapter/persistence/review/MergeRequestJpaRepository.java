@@ -2,6 +2,7 @@ package ru.x5.devpulse.adapter.persistence.review;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,4 +18,7 @@ interface MergeRequestJpaRepository extends JpaRepository<MergeRequestEntity, Lo
     List<MergeRequestEntity> findByCreatedAtBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
+
+    /** Поиск по натуральному ключу GitLab — для upsert при сборе. */
+    Optional<MergeRequestEntity> findByGitlabProjectIdAndGitlabMrIid(Long gitlabProjectId, Long gitlabMrIid);
 }
