@@ -25,7 +25,6 @@ import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.GitGateway;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
-import ru.x5.devpulse.application.port.out.KaitenUserRepository;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 
 /**
@@ -80,7 +79,6 @@ class SmokeApplicationIT {
     @Autowired KaitenGateway kaitenGateway;
     @Autowired CommitRepository commitRepository;
     @Autowired DailyStatsRepository dailyStatsRepository;
-    @Autowired KaitenUserRepository kaitenUserRepository;
     @Autowired UnifiedUserRepository unifiedUserRepository;
     @Autowired CollectionRunRepository collectionRunRepository;
 
@@ -105,7 +103,6 @@ class SmokeApplicationIT {
                 () -> assertThat(kaitenGateway).as("KaitenGateway").isNotNull(),
                 () -> assertThat(commitRepository).as("CommitRepository").isNotNull(),
                 () -> assertThat(dailyStatsRepository).as("DailyStatsRepository").isNotNull(),
-                () -> assertThat(kaitenUserRepository).as("KaitenUserRepository").isNotNull(),
                 () -> assertThat(unifiedUserRepository).as("UnifiedUserRepository").isNotNull(),
                 () -> assertThat(collectionRunRepository).as("CollectionRunRepository").isNotNull());
     }

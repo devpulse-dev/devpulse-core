@@ -21,9 +21,29 @@ import ru.x5.devpulse.adapter.kaiten.dto.KaitenUserDto;
 @HttpExchange(accept = "application/json")
 public interface KaitenHttpClient {
 
-    /** {@code GET /users} — все пользователи Kaiten одним запросом. */
+    /**
+     * {@code GET /users?limit=&offset=} — пользователи Kaiten с пагинацией.
+     *
+     * <p>Начиная с середины июля 2026 года, API Kaiten возвращает максимум 100 пользователей
+     * на запрос. Используйте этот метод для загрузки всех пользователей постранично.</p>
+     */
     @GetExchange("/users")
-    List<KaitenUserDto> getUsers();
+    List<KaitenUserDto> getUsers(
+            @org.springframework.web.bind.annotation.RequestParam int limit,
+            @org.springframework.web.bind.annotation.RequestParam int offset
+    );
+
+    /**
+     * {@code GET /users?ids=&limit=} — точечная выборка пользователей по id.
+     *
+     * <p>{@code ids} — id через запятую (≤100 за запрос: чанкинг на стороне адаптера).
+     * Отсутствующие/деактивированные id просто не попадают в ответ.</p>
+     */
+    @GetExchange("/users")
+    List<KaitenUserDto> getUsersByIds(
+            @org.springframework.web.bind.annotation.RequestParam(name = "ids") String ids,
+            @org.springframework.web.bind.annotation.RequestParam int limit
+    );
 
     /**
      * {@code GET /cards?limit=&offset=&member_ids=&updated_after=}.

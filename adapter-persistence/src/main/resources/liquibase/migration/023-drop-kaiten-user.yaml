@@ -1,0 +1,21 @@
+# Удаление мёртвой таблицы kaiten_user.
+#
+# kaiten_user был write-only артефактом: его наполнял только sync (upsertAll всего
+# оргсправочника Kaiten), а читателей в продакшн-коде не было — findById/findByEmail
+# порта KaitenUserRepository никто не звал. Единственный реальный продукт синка —
+# поля unified_user.kaiten_id / name / avatar_url. После рефактора SyncKaitenUsers
+# (резолв непривязанных по email + рефреш привязанных по ids напрямую в unified_user)
+# таблица и её порт/адаптер удалены как рудимент.
+databaseChangeLog:
+  - changeSet:
+      id: 023-drop-kaiten-user
+      author: boris.osechinskiy
+      changes:
+        - sql:
+            comment: "DROP TABLE kaiten_user — мёртвая write-only схема"
+            splitStatements: true
+            sql: |
+              DROP TABLE IF EXISTS kaiten_user CASCADE;
+      rollback:
+        - sql:
+            sql: SELECT 1;  -- рудимент не воскрешаем

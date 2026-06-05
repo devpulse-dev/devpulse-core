@@ -28,7 +28,8 @@ class KaitenRateLimiterTest {
             /*pageSize*/       100,
             /*insecureSsl*/    false,
             /*connectTimeout*/ null,   // null → default 5s (см. compact ctor KaitenProperties)
-            /*readTimeout*/    null);
+            /*readTimeout*/    null,
+            /*userRefreshInterval*/ null); // null → default 3d
 
     private final KaitenRateLimiter limiter = new KaitenRateLimiter(FAST_PROPS);
 

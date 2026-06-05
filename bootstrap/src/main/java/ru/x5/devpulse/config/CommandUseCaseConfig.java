@@ -2,6 +2,7 @@ package ru.x5.devpulse.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import ru.x5.devpulse.adapter.kaiten.KaitenProperties;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
@@ -13,7 +14,6 @@ import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.GitGateway;
 import ru.x5.devpulse.application.port.out.KaitenCardsCache;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
-import ru.x5.devpulse.application.port.out.KaitenUserRepository;
 import ru.x5.devpulse.application.port.out.ReviewGateway;
 import ru.x5.devpulse.application.port.out.ReviewWriteRepository;
 import ru.x5.devpulse.application.port.out.TransactionRunner;
@@ -71,13 +71,13 @@ class CommandUseCaseConfig {
                 unifiedUserRepository, transactionRunner);
     }
 
-    /** Worker — kaiten users sync (upsert kaiten_user + link unified_user.kaiten_id). */
+    /** Worker — kaiten users sync (резолв непривязанных + рефреш привязанных в unified_user). */
     @Bean
     SyncKaitenUsersUseCase syncKaitenUsersUseCase(
             KaitenGateway kaitenGateway,
-            KaitenUserRepository kaitenUserRepository,
-            UnifiedUserRepository unifiedUserRepository) {
+            UnifiedUserRepository unifiedUserRepository,
+            KaitenProperties kaitenProperties) {
         return new SyncKaitenUsersService(
-                kaitenGateway, kaitenUserRepository, unifiedUserRepository);
+                kaitenGateway, unifiedUserRepository, kaitenProperties.userRefreshInterval());
     }
 }

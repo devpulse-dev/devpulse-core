@@ -43,3 +43,5 @@ databaseChangeLog:
       file: liquibase/migration/021-drop-dead-kaiten-card-tables.yaml
   - include:
       file: liquibase/migration/022-create-merge-request-and-review.yaml
+  - include:
+      file: liquibase/migration/023-drop-kaiten-user.yaml

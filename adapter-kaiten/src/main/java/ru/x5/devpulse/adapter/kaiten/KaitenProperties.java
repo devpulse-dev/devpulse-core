@@ -17,6 +17,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param insecureSsl    если {@code true} — клиент с trust-all SSL context (только для dev)
  * @param connectTimeout таймаут установки TCP-соединения. Дефолт 5с. Защита от hung DNS / unreachable host
  * @param readTimeout    таймаут чтения ответа. Дефолт 30с. Защита от подвисшего upstream
+ * @param userRefreshInterval как часто рефрешить name/avatar уже привязанных {@code unified_user}
+ *                       из Kaiten (порог по {@code lastSyncedAt}). Дефолт 3 дня — данные дрейфуют
+ *                       медленно, чаще дёргать API смысла нет. См. {@code SyncKaitenUsersService}
  */
 @ConfigurationProperties(prefix = "kaiten.api")
 public record KaitenProperties(
@@ -30,7 +33,8 @@ public record KaitenProperties(
         int pageSize,
         boolean insecureSsl,
         Duration connectTimeout,
-        Duration readTimeout
+        Duration readTimeout,
+        Duration userRefreshInterval
 ) {
     public KaitenProperties {
         if (requestDelayMs <= 0) requestDelayMs = 250;
@@ -40,5 +44,6 @@ public record KaitenProperties(
         if (pageSize <= 0) pageSize = 100;
         if (connectTimeout == null) connectTimeout = Duration.ofSeconds(5);
         if (readTimeout == null) readTimeout = Duration.ofSeconds(30);
+        if (userRefreshInterval == null) userRefreshInterval = Duration.ofDays(3);
     }
 }

@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -38,10 +39,60 @@ class KaitenGatewayAdapter implements KaitenGateway {
     private final KaitenCardMapper mapper;
     private final KaitenProperties properties;
 
+    /** Kaiten отдаёт максимум 100 пользователей на запрос — чанкуем список id под этот предел. */
+    private static final int IDS_CHUNK = 100;
+
     @Override
-    public List<KaitenUser> fetchAllUsers() {
-        List<KaitenUserDto> raw = rateLimiter.execute("GET /users", http::getUsers);
-        return raw.stream().map(mapper::toDomain).toList();
+    public List<KaitenUser> fetchUsersByIds(Collection<KaitenUserId> ids) {
+        if (ids == null || ids.isEmpty()) return List.of();
+
+        List<Long> distinct = ids.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(KaitenUserId::value)
+                .distinct()
+                .toList();
+        if (distinct.isEmpty()) return List.of();
+
+        List<KaitenUser> result = new ArrayList<>(distinct.size());
+        for (int from = 0; from < distinct.size(); from += IDS_CHUNK) {
+            List<Long> chunk = distinct.subList(from, Math.min(from + IDS_CHUNK, distinct.size()));
+            String idsCsv = chunk.stream().map(String::valueOf).collect(Collectors.joining(","));
+            List<KaitenUserDto> raw = rateLimiter.execute(
+                    "GET /users?ids=" + idsCsv,
+                    () -> http.getUsersByIds(idsCsv, chunk.size()));
+            for (KaitenUserDto dto : raw) {
+                result.add(mapper.toDomain(dto));
+            }
+        }
+        log.info("Загружено {} пользователей Kaiten по {} запрошенным id", result.size(), distinct.size());
+        return result;
+    }
+
+    @Override
+    public void streamUsers(Consumer<List<KaitenUser>> pageHandler) {
+        int limit = properties.pageSize();
+        int offset = 0;
+        int total = 0;
+
+        while (true) {
+            int currentOffset = offset;
+            List<KaitenUserDto> rawPage = rateLimiter.execute(
+                    "GET /users?limit=" + limit + "&offset=" + currentOffset,
+                    () -> http.getUsers(limit, currentOffset));
+
+            if (!rawPage.isEmpty()) {
+                List<KaitenUser> mapped = new ArrayList<>(rawPage.size());
+                for (KaitenUserDto dto : rawPage) {
+                    mapped.add(mapper.toDomain(dto));
+                }
+                pageHandler.accept(mapped);
+                total += mapped.size();
+            }
+
+            if (rawPage.size() < limit) break;
+            offset += limit;
+        }
+        log.info("Стримили {} пользователей Kaiten", total);
     }
 
     @Override
@@ -97,7 +148,7 @@ class KaitenGatewayAdapter implements KaitenGateway {
      * Kaiten API не дёргается.</p>
      *
      * <p><b>Что НЕ кэшируем:</b> {@code streamCards()} (используется при сборе — там нужна
-     * свежая выборка), {@code fetchAllUsers()} (тоже сбор-side).</p>
+     * свежая выборка), {@code streamUsers()}/{@code fetchUsersByIds()} (тоже сбор-side).</p>
      */
     @Override
     @Cacheable(value = "kaiten-cards-by-member",
