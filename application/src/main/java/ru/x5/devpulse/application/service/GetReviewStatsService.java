@@ -39,7 +39,7 @@ public final class GetReviewStatsService implements GetReviewStatsUseCase {
         List<ReviewAuthorStats> enriched = new ArrayList<>(authors.size());
         for (ReviewAuthorStats a : authors) {
             UnifiedUser u = profiles.get(a.email());
-            enriched.add(u == null ? a : a.withProfile(u.name(), u.avatarUrl()));
+            enriched.add(u == null ? a : a.withProfile(u.name(), u.avatarUrl(), u.team(), u.lead()));
         }
         return new ReviewStats(period, enriched);
     }

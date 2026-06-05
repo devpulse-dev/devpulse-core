@@ -68,7 +68,7 @@ final class AuthorSummaryEnricher {
         List<AuthorSummary> result = new ArrayList<>(authors.size());
         for (AuthorSummary a : authors) {
             UnifiedUser u = profiles.get(a.email());
-            result.add(u == null ? a : a.withProfile(u.name(), u.avatarUrl()));
+            result.add(u == null ? a : a.withProfile(u.name(), u.avatarUrl(), u.team(), u.lead()));
         }
         return result;
     }

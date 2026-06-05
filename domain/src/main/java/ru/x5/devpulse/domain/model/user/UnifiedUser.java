@@ -17,6 +17,8 @@ public record UnifiedUser(
         String avatarUrl,
         KaitenUserId kaitenId,
         Integer gitlabId,
+        String team,
+        boolean lead,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
         LocalDateTime lastSyncedAt
@@ -32,5 +34,10 @@ public record UnifiedUser(
 
     public Optional<KaitenUserId> kaiten() {
         return Optional.ofNullable(kaitenId);
+    }
+
+    /** Команда пользователя (назначается через фронт). {@code null}, если не задана. */
+    public Optional<String> teamName() {
+        return Optional.ofNullable(team);
     }
 }

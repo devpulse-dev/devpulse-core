@@ -25,6 +25,7 @@ public interface ReviewStatsMapper {
     @Mapping(target = "to", source = "period.to")
     ReviewStats toDto(ru.x5.devpulse.domain.model.review.ReviewStats s);
 
+    @Mapping(target = "isLead", source = "lead")
     ReviewAuthor toAuthor(ru.x5.devpulse.domain.model.review.ReviewAuthorStats a);
 
     @AfterMapping

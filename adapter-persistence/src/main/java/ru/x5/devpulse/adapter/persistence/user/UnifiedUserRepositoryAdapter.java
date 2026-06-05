@@ -121,6 +121,41 @@ class UnifiedUserRepositoryAdapter implements UnifiedUserRepository {
         });
     }
 
+    @Override
+    @Transactional
+    public void updateTeam(Email email, String team) {
+        // Email.value() — lowercase (инвариант VO). team == null → снять привязку.
+        jpa.findByEmail(email.value()).ifPresent(user -> {
+            user.setTeam(team);
+            user.setUpdatedAt(LocalDateTime.now());
+            jpa.save(user);
+        });
+    }
+
+    @Override
+    @Transactional
+    public void updateLead(Email email, boolean lead) {
+        jpa.findByEmail(email.value()).ifPresent(user -> {
+            user.setLead(lead);
+            user.setUpdatedAt(LocalDateTime.now());
+            jpa.save(user);
+        });
+    }
+
+    @Override
+    @Transactional
+    public void clearLeadForTeam(String team) {
+        if (team == null) return;
+        LocalDateTime now = LocalDateTime.now();
+        for (UnifiedUserEntity user : jpa.findByTeam(team)) {
+            if (user.isLead()) {
+                user.setLead(false);
+                user.setUpdatedAt(now);
+                jpa.save(user);
+            }
+        }
+    }
+
     private static boolean containsEmail(Map<Email, Long> m, String value) {
         for (Email e : m.keySet()) {
             if (e.value().equals(value)) return true;

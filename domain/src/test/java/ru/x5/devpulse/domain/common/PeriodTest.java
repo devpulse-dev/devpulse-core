@@ -60,6 +60,31 @@ class PeriodTest {
     }
 
     @Test
+    @DisplayName("previousAdjacent: предыдущий период равной длины встык перед from")
+    void previousAdjacentEqualLengthBackToBack() {
+        // [01.01..31.01] — 31 день → предыдущий [01.12.2025..31.12.2025], тоже 31 день.
+        Period prev = new Period(JAN_1, JAN_31).previousAdjacent();
+
+        assertAll("предыдущий период",
+                () -> assertThat(prev.to())
+                        .as("заканчивается за день до from")
+                        .isEqualTo(LocalDate.of(2025, 12, 31)),
+                () -> assertThat(prev.from())
+                        .as("той же длины (31 день)")
+                        .isEqualTo(LocalDate.of(2025, 12, 1)));
+    }
+
+    @Test
+    @DisplayName("previousAdjacent: период из одного дня → предыдущий день")
+    void previousAdjacentSingleDay() {
+        Period prev = new Period(JAN_1, JAN_1).previousAdjacent();
+
+        assertAll("один день назад",
+                () -> assertThat(prev.from()).isEqualTo(DEC_31_2025),
+                () -> assertThat(prev.to()).isEqualTo(DEC_31_2025));
+    }
+
+    @Test
     @DisplayName("fromAtStartOfDay / toAtEndOfDay дают корректные TIMESTAMP-границы")
     void exposesTimestampsForJpaQueries() {
         Period period = new Period(JAN_1, JAN_31);

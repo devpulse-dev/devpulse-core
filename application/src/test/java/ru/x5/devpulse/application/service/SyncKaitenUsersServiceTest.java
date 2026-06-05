@@ -134,7 +134,7 @@ class SyncKaitenUsersServiceTest {
     private static UnifiedUser user(String email, KaitenUserId kaitenId, LocalDateTime lastSyncedAt) {
         return new UnifiedUser(
                 1L, new Email(email), "user", "User", null,
-                kaitenId, null, LocalDateTime.now(), LocalDateTime.now(), lastSyncedAt);
+                kaitenId, null, null, false, LocalDateTime.now(), LocalDateTime.now(), lastSyncedAt);
     }
 
     private static KaitenUser kaitenUser(long id, String email) {

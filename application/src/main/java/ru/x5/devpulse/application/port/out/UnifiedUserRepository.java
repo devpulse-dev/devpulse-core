@@ -37,4 +37,17 @@ public interface UnifiedUserRepository {
     List<UnifiedUser> findAll();
 
     void updateKaitenId(Email email, KaitenUserId kaitenId, String name, String avatarUrl);
+
+    /**
+     * Назначить/снять команду пользователя (управление командами с фронта).
+     *
+     * @param team имя команды; {@code null} — снять привязку
+     */
+    void updateTeam(Email email, String team);
+
+    /** Проставить/снять признак лида у пользователя. */
+    void updateLead(Email email, boolean lead);
+
+    /** Снять признак лида у всех участников команды (для инварианта «один лид на команду»). */
+    void clearLeadForTeam(String team);
 }

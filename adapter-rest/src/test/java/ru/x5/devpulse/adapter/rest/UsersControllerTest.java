@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -16,10 +17,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import ru.x5.devpulse.application.port.in.GetUserCommitsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserProfileUseCase;
+import ru.x5.devpulse.application.port.in.ListUsersUseCase;
+import ru.x5.devpulse.application.port.in.SetUserTeamUseCase;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.UserProfile;
 import ru.x5.devpulse.domain.model.user.Email;
@@ -35,15 +39,23 @@ class UsersControllerTest {
 
     @MockitoBean GetUserProfileUseCase getUserProfile;
     @MockitoBean GetUserCommitsUseCase getUserCommits;
+    @MockitoBean ListUsersUseCase listUsers;
+    @MockitoBean SetUserTeamUseCase setUserTeam;
+
+    private static UnifiedUser userWithTeam(String team) {
+        var now = LocalDateTime.now();
+        return new UnifiedUser(1L, new Email("boris@x5.ru"), "boris", "Boris", null,
+                new KaitenUserId(7L), null, team, false, now, now, now);
+    }
 
     @Test
     @DisplayName("GET /{email}/profile найден → 200 с user/summary/commits/cards")
     void profileFound() throws Exception {
         var email = new Email("boris@x5.ru");
         var user = new UnifiedUser(1L, email, "boris", "Boris", null,
-                new KaitenUserId(7L), null,
+                new KaitenUserId(7L), null, null, false,
                 LocalDateTime.now(), LocalDateTime.now(), LocalDateTime.now());
-        var summary = new AuthorSummary(email, "Boris", null, 10, 1, 100, 50, 20, null);
+        var summary = new AuthorSummary(email, "Boris", null, 10, 1, 100, 50, 20, null, null, false);
 
         when(getUserProfile.findProfile(eq(email), any()))
                 .thenReturn(Optional.of(new UserProfile(
@@ -88,5 +100,41 @@ class UsersControllerTest {
         mvc.perform(get("/api/v2/users/boris@x5.ru/profile")
                         .param("from", "2026-05-31").param("to", "2026-05-01"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("GET /users?team= → 200 список с полем team")
+    void listUsersByTeam() throws Exception {
+        when(listUsers.list(any())).thenReturn(List.of(userWithTeam("Platform")));
+
+        mvc.perform(get("/api/v2/users").param("team", "Platform"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].email").value("boris@x5.ru"))
+                .andExpect(jsonPath("$[0].team").value("Platform"));
+    }
+
+    @Test
+    @DisplayName("PUT /{email}/team → 200 с обновлённой командой")
+    void setTeamOk() throws Exception {
+        when(setUserTeam.setTeam(eq(new Email("boris@x5.ru")), any()))
+                .thenReturn(Optional.of(userWithTeam("Platform")));
+
+        mvc.perform(put("/api/v2/users/boris@x5.ru/team")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"team\":\"Platform\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("boris@x5.ru"))
+                .andExpect(jsonPath("$.team").value("Platform"));
+    }
+
+    @Test
+    @DisplayName("PUT /{email}/team для несуществующего → 404")
+    void setTeamNotFound() throws Exception {
+        when(setUserTeam.setTeam(any(), any())).thenReturn(Optional.empty());
+
+        mvc.perform(put("/api/v2/users/unknown@x5.ru/team")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"team\":\"Platform\"}"))
+                .andExpect(status().isNotFound());
     }
 }

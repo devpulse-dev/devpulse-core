@@ -18,5 +18,6 @@ import ru.x5.devpulse.adapter.rest.api.model.AuthorSummary;
 public interface AuthorSummaryMapper {
 
     @Mapping(target = "nonMergeCommits", expression = "java(s.nonMergeCommits())")
+    @Mapping(target = "isLead", source = "lead")
     AuthorSummary toDto(ru.x5.devpulse.domain.model.stats.AuthorSummary s);
 }

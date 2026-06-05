@@ -33,7 +33,9 @@ public record AuthorSummary(
         long addedLines,
         long deletedLines,
         long testAddedLines,
-        ActivityScore activity
+        ActivityScore activity,
+        String team,
+        boolean lead
 ) {
 
     /** Коммиты без мерджей. Используется для сортировки «по активности». */
@@ -41,15 +43,18 @@ public record AuthorSummary(
         return Math.max(0, commits - mergeCommits);
     }
 
-    /** Возвращает копию с дополненными displayName и avatarUrl (для enrichment в use case). */
-    public AuthorSummary withProfile(String displayName, String avatarUrl) {
+    /**
+     * Возвращает копию с дополненными профильными полями из {@code unified_user}
+     * (для enrichment в use case): displayName, avatarUrl, команда и признак лида.
+     */
+    public AuthorSummary withProfile(String displayName, String avatarUrl, String team, boolean lead) {
         return new AuthorSummary(email, displayName, avatarUrl,
-                commits, mergeCommits, addedLines, deletedLines, testAddedLines, activity);
+                commits, mergeCommits, addedLines, deletedLines, testAddedLines, activity, team, lead);
     }
 
-    /** Возвращает копию с проставленным {@link ActivityScore}. */
+    /** Возвращает копию с проставленным {@link ActivityScore} (team/lead сохраняются). */
     public AuthorSummary withActivity(ActivityScore activity) {
         return new AuthorSummary(email, displayName, avatarUrl,
-                commits, mergeCommits, addedLines, deletedLines, testAddedLines, activity);
+                commits, mergeCommits, addedLines, deletedLines, testAddedLines, activity, team, lead);
     }
 }

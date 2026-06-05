@@ -45,3 +45,9 @@ databaseChangeLog:
       file: liquibase/migration/022-create-merge-request-and-review.yaml
   - include:
       file: liquibase/migration/023-drop-kaiten-user.yaml
+  - include:
+      file: liquibase/migration/024-add-team-to-unified-user.yaml
+  - include:
+      file: liquibase/migration/025-assign-user-teams.yaml
+  - include:
+      file: liquibase/migration/026-add-team-lead.yaml

@@ -146,7 +146,7 @@ public final class StatsSummarizer {
             // displayName, avatarUrl и activity — null. Enrichment делает use case из
             // unified_user; activity считается только в GetDashboardService.
             return new AuthorSummary(email, null, null,
-                    commits, mergeCommits, addedLines, deletedLines, testAddedLines, null);
+                    commits, mergeCommits, addedLines, deletedLines, testAddedLines, null, null, false);
         }
     }
 

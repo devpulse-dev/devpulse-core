@@ -1,0 +1,35 @@
+# Признак лида команды на unified_user + засев DEV-лидов по орг-структуре.
+#
+# Один лид на команду (инвариант держит app-слой при назначении через PUT /teams/lead).
+# Команды по-прежнему деривятся из строкового unified_user.team; канонический справочник
+# команд (отдельная таблица) — кандидат на Фазу 2.
+databaseChangeLog:
+  - changeSet:
+      id: 026-add-team-lead
+      author: boris.osechinskiy
+      changes:
+        - addColumn:
+            tableName: unified_user
+            columns:
+              - column:
+                  name: is_lead
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+        - sql:
+            comment: "Засев DEV-лидов команд по орг-структуре"
+            sql: >
+              UPDATE unified_user SET is_lead = true
+              WHERE email IN (
+                'dmitry.dyukov@x5.ru',
+                's.sova@x5.ru',
+                'a.sadriev@x5.ru',
+                'ilnur.nasibullin@x5.ru',
+                'kiril.aksyutik@x5.ru',
+                'alexey.saynukov@x5.ru'
+              );
+      rollback:
+        - dropColumn:
+            tableName: unified_user
+            columnName: is_lead

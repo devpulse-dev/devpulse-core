@@ -24,12 +24,14 @@ public record ReviewAuthorStats(
         int commentsGiven,
         int reviewsReceived,
         double avgTimeToMergeHours,
-        int mergedMrCount
+        int mergedMrCount,
+        String team,
+        boolean lead
 ) {
 
-    /** Копия с дозаполненными displayName/avatarUrl (enrichment в use case). */
-    public ReviewAuthorStats withProfile(String displayName, String avatarUrl) {
+    /** Копия с дозаполненными профильными полями (displayName/avatarUrl/команда/лид). */
+    public ReviewAuthorStats withProfile(String displayName, String avatarUrl, String team, boolean lead) {
         return new ReviewAuthorStats(email, displayName, avatarUrl,
-                reviewsGiven, commentsGiven, reviewsReceived, avgTimeToMergeHours, mergedMrCount);
+                reviewsGiven, commentsGiven, reviewsReceived, avgTimeToMergeHours, mergedMrCount, team, lead);
     }
 }

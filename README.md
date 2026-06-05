@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/devpulse-dev/DevPulse-core/actions/workflows/ci.yml/badge.svg)](https://github.com/devpulse-dev/DevPulse-core/actions/workflows/ci.yml)
 
-Сервис аналитики активности разработчиков: собирает коммиты из Git-репозиториев и карточки задач из Kaiten, агрегирует ежедневную статистику по авторам и отдаёт её через REST API для фронта.
+Сервис аналитики активности разработчиков: собирает коммиты из Git-репозиториев, карточки задач из Kaiten и ревью-метрики из GitLab, агрегирует ежедневную статистику по авторам — плюс команды с лидами и досье к performance review — и отдаёт всё через REST API для фронта.
 
 > **Документы:**
 > - **REST API** — описан в OpenAPI-контрактах в отдельном репо
@@ -79,7 +79,7 @@ DevPulse/
 
 ## Структура БД
 
-PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibase/migration/`. Перенесены 1-в-1 из v1, плюс одна новая (`015-create-collection-run.yaml`) под журнал прогонов сбора.
+PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibase/migration/`. Добавляем только новые нумерованные файлы, применённые не редактируем (последняя — `026-add-team-lead.yaml`).
 
 Ключевые таблицы:
 
@@ -87,9 +87,36 @@ PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibas
 |---|---|
 | `commit_details` | Один git-коммит со статистикой строк, привязкой к UnifiedUser и `kaiten_card_id` (если в сообщении был номер задачи) |
 | `daily_author_stats` | Дневной агрегат (commits, lines added/deleted, test added) по ключу `(email, date, repository_name)` |
-| `unified_user` | Один человек = один `id`. Объединяет git author по email и Kaiten user через `kaiten_id` |
-| `kaiten_user` / `kaiten_card` / `kaiten_card_member` | Зеркало Kaiten API |
+| `unified_user` | Один человек = один `id`. Объединяет git author (email), Kaiten (`kaiten_id`) и GitLab (`gitlab_id`). Несёт `team` (команда) и `is_lead` (лид команды) |
+| `merge_request` / `mr_review` | Ревью-метрики из GitLab: MR + участие ревьюеров (approve, кол-во комментов), для `GET /stats/reviews` |
 | `collection_run` | Журнал прогонов сбора: started/finished, since/until, status, error |
+
+> **Kaiten больше не зеркалится в БД.** Таблицы `kaiten_*` удалены (миграции 021/023): карточки тянутся live через `KaitenGateway` с Caffeine-кэшем (TTL 5 мин), пользователи синхронизируются прямо в `unified_user`.
+
+---
+
+## Performance review и команды
+
+Поверх daily-агрегатов и ревью-метрик собрано два пользовательских блока. Оба — read-model,
+без отдельного сбора данных.
+
+**Performance review** (`GET /api/v2/performance/review?email=&from=&to=&compareToPrevious=`) —
+«досье» по одному человеку за период: коммиты/строки/тест-строки (git), given/received-ревью
+(GitLab), счётчики дефектов и задач разработки по карточкам Kaiten. Каждая метрика — с дельтой
+к предыдущему равному периоду (`MetricDelta`). Композиция в `PerformanceReviewService`, чистая
+арифметика (дельты, счёт карточек, highlights) — в доменном `PerformanceReviewAssembler`.
+
+> **Осознанные ограничения** (см. ADR в `REFACTORING.md`): карточки Kaiten не персистятся →
+> дефекты/задачи считаются по *текущему* состоянию («снапшот как сейчас»), поэтому у них нет
+> дельты к прошлому периоду. `testAddedLines` — это **строки** тест-кода, не число тестов.
+> Единого композитного «балла» намеренно нет (HR-контекст) — только сырые метрики + дельты.
+
+**Команды и лиды.** Команда — поле `unified_user.team` (строка), лид — `is_lead` (один на команду).
+Команды деривятся группировкой (`TeamAssembler`), без отдельной таблицы. `GET /api/v2/teams`
+отдаёт `{ name, lead, members }`; членство меняется через `PUT /api/v2/users/{email}/team`,
+лид — через `PUT /api/v2/teams/lead`. Поля `team` и `isLead` присутствуют **во всех** DTO с
+информацией о разработчике (`UserProfile`, `AuthorSummary`, `ReviewAuthor`) — фронт показывает
+принадлежность к команде и значок лида везде без кросс-резолва.
 
 ---
 
@@ -190,16 +217,16 @@ done
 
 | Contract | Что описывает |
 |---|---|
-| `shared-contract` | Общие schemas (Email, Period, Page, AuthorSummary, Commit, KaitenCard, ProblemDetails…) |
+| `shared-contract` | Общие schemas (Email, Period, Page, `UserProfile` (с `team`/`isLead`), `AuthorSummary` (с `team`/`isLead`), `ReviewAuthor`, Commit, KaitenCard, ProblemDetails…) |
 | `collection-contract` | `POST /api/v2/collection/runs`, `GET /api/v2/collection/runs/{id}` |
 | `dashboard-contract` | `GET /api/v2/dashboard` (paginated, sorted by activity score) |
-| `stats-contract` | `GET /api/v2/stats/{daily,weekly,summary}` |
-| `users-contract` | `GET /api/v2/users/{email}/{profile,commits}` |
+| `stats-contract` | `GET /api/v2/stats/{daily,weekly,summary,reviews}`, `GET /api/v2/performance/review` (досье к perf-review) |
+| `users-contract` | `GET /api/v2/users` (+`?team=`), `GET /api/v2/users/{email}/{profile,commits}`, `PUT /api/v2/users/{email}/team`; тег **Teams**: `GET /api/v2/teams`, `PUT /api/v2/teams/lead` |
 | `kaiten-contract` | `POST /api/v2/kaiten/sync-users` |
 
 Каждый contract — Maven-артефакт в GitHub Packages (`com.devpulse:<name>:<version>`).
 **Lockstep-версионирование:** все 6 contract'ов публикуются одной версией (единый
-`<revision>` в корневом pom OAS-репо). Текущая — `1.2.0`. На нашей стороне это одна
+`<revision>` в корневом pom OAS-репо). Текущая — `1.7.0`. На нашей стороне это одна
 property `devpulse-oas.version` в `adapter-rest/pom.xml`.
 
 ### Как это работает на бэке

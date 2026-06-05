@@ -68,7 +68,7 @@ public final class ReviewSummarizer {
             result.add(new ReviewAuthorStats(
                     e.getKey(), null, null,
                     a.reviewsGiven, a.commentsGiven, a.reviewsReceived,
-                    avgTtm, a.mergedMrCount));
+                    avgTtm, a.mergedMrCount, null, false));
         }
 
         result.sort(Comparator

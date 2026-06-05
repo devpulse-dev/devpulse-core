@@ -35,4 +35,16 @@ public record Period(LocalDate from, LocalDate to) {
     public boolean contains(LocalDate date) {
         return !date.isBefore(from) && !date.isAfter(to);
     }
+
+    /**
+     * Предыдущий период равной длины, встык перед {@code from}.
+     *
+     * <p>Например {@code [2026-01-01..2026-03-31]} (90 дней) →
+     * {@code [2025-10-03..2025-12-31]}. Используется для дельт в perf-review.</p>
+     */
+    public Period previousAdjacent() {
+        long days = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
+        LocalDate prevTo = from.minusDays(1);
+        return new Period(prevTo.minusDays(days - 1), prevTo);
+    }
 }

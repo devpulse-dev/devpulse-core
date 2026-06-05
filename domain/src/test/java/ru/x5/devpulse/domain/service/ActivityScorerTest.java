@@ -39,7 +39,7 @@ class ActivityScorerTest {
                 new Email("a@x5.ru"), null, null,
                 commits, merges,
                 /*added*/ totalLines, /*deleted*/ 0, /*test*/ 0,
-                /*activity*/ null);
+                /*activity*/ null, null, false);
 
         ActivityScore score = ActivityScorer.score(author, EXPECTED);
 
@@ -54,7 +54,7 @@ class ActivityScorerTest {
     void noCommits() {
         AuthorSummary empty = new AuthorSummary(
                 new Email("ghost@x5.ru"), null, null,
-                0, 0, 0, 0, 0, null);
+                0, 0, 0, 0, 0, null, null, false);
 
         ActivityScore score = ActivityScorer.score(empty, EXPECTED);
 
@@ -71,7 +71,7 @@ class ActivityScorerTest {
                 new Email("lead@x5.ru"), null, null,
                 /*commits*/ 100, /*merges*/ 100,
                 /*added*/ 0, /*deleted*/ 0, /*test*/ 0,
-                /*activity*/ null);
+                /*activity*/ null, null, false);
 
         ActivityScore score = ActivityScorer.score(teamlead, EXPECTED);
 
@@ -87,7 +87,7 @@ class ActivityScorerTest {
                 new Email("boomer@x5.ru"), null, null,
                 /*commits*/ 50, /*merges*/ 0,
                 /*added*/ 50_000, /*deleted*/ 0, /*test*/ 0, // 1000 строк/коммит
-                /*activity*/ null);
+                /*activity*/ null, null, false);
 
         ActivityScore score = ActivityScorer.score(boomer, EXPECTED);
 
@@ -108,7 +108,7 @@ class ActivityScorerTest {
                 new Email("dev@x5.ru"), null, null,
                 /*commits*/ 50, /*merges*/ 0,
                 /*added*/ 2500, /*deleted*/ 0, /*test*/ 0, // 50 строк/коммит — здорово
-                /*activity*/ null);
+                /*activity*/ null, null, false);
 
         ActivityScore score = ActivityScorer.score(normalDev, EXPECTED);
 

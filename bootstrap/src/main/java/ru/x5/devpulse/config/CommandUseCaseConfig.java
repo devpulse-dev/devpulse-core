@@ -6,6 +6,8 @@ import ru.x5.devpulse.adapter.kaiten.KaitenProperties;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
+import ru.x5.devpulse.application.port.in.SetTeamLeadUseCase;
+import ru.x5.devpulse.application.port.in.SetUserTeamUseCase;
 import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
 import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
@@ -21,6 +23,8 @@ import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.application.service.CollectDailyStatsService;
 import ru.x5.devpulse.application.service.CollectGitStatsService;
 import ru.x5.devpulse.application.service.CollectReviewsService;
+import ru.x5.devpulse.application.service.SetTeamLeadService;
+import ru.x5.devpulse.application.service.SetUserTeamService;
 import ru.x5.devpulse.application.service.SyncKaitenUsersService;
 
 /**
@@ -79,5 +83,17 @@ class CommandUseCaseConfig {
             KaitenProperties kaitenProperties) {
         return new SyncKaitenUsersService(
                 kaitenGateway, unifiedUserRepository, kaitenProperties.userRefreshInterval());
+    }
+
+    /** Назначение/снятие команды пользователя (управление командами с фронта). */
+    @Bean
+    SetUserTeamUseCase setUserTeamUseCase(UnifiedUserRepository unifiedUserRepository) {
+        return new SetUserTeamService(unifiedUserRepository);
+    }
+
+    /** Назначение/снятие лида команды (один лид на команду). */
+    @Bean
+    SetTeamLeadUseCase setTeamLeadUseCase(UnifiedUserRepository unifiedUserRepository) {
+        return new SetTeamLeadService(unifiedUserRepository);
     }
 }

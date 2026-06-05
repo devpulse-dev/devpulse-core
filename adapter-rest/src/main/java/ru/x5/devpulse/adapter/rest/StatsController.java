@@ -9,16 +9,19 @@ import org.springframework.web.bind.annotation.RestController;
 import ru.x5.devpulse.adapter.rest.api.StatsApi;
 import ru.x5.devpulse.adapter.rest.api.model.DailyStats;
 import ru.x5.devpulse.adapter.rest.api.model.HourlyStats;
+import ru.x5.devpulse.adapter.rest.api.model.PerformanceReview;
 import ru.x5.devpulse.adapter.rest.api.model.PeriodSummary;
 import ru.x5.devpulse.adapter.rest.api.model.ReviewStats;
 import ru.x5.devpulse.adapter.rest.api.model.WeeklyStats;
 import ru.x5.devpulse.adapter.rest.mapper.DailyStatsMapper;
 import ru.x5.devpulse.adapter.rest.mapper.HourlyStatsMapper;
+import ru.x5.devpulse.adapter.rest.mapper.PerformanceReviewMapper;
 import ru.x5.devpulse.adapter.rest.mapper.PeriodSummaryMapper;
 import ru.x5.devpulse.adapter.rest.mapper.ReviewStatsMapper;
 import ru.x5.devpulse.adapter.rest.mapper.WeeklyStatsMapper;
 import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetHourlyStatsUseCase;
+import ru.x5.devpulse.application.port.in.GetPerformanceReviewUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
@@ -38,12 +41,14 @@ class StatsController implements StatsApi {
     private final GetPeriodSummaryUseCase getPeriodSummary;
     private final GetHourlyStatsUseCase getHourlyStats;
     private final GetReviewStatsUseCase getReviewStats;
+    private final GetPerformanceReviewUseCase getPerformanceReview;
 
     private final DailyStatsMapper dailyStatsMapper;
     private final WeeklyStatsMapper weeklyStatsMapper;
     private final PeriodSummaryMapper periodSummaryMapper;
     private final HourlyStatsMapper hourlyStatsMapper;
     private final ReviewStatsMapper reviewStatsMapper;
+    private final PerformanceReviewMapper performanceReviewMapper;
 
     @Override
     public ResponseEntity<List<DailyStats>> getDailyStats(LocalDate from, LocalDate to) {
@@ -79,5 +84,15 @@ class StatsController implements StatsApi {
     public ResponseEntity<ReviewStats> getReviewStats(LocalDate from, LocalDate to) {
         return ResponseEntity.ok(reviewStatsMapper.toDto(
                 getReviewStats.get(new Period(from, to))));
+    }
+
+    @Override
+    public ResponseEntity<PerformanceReview> getPerformanceReview(String email, LocalDate from,
+                                                                  LocalDate to, Boolean compareToPrevious) {
+        boolean compare = Boolean.TRUE.equals(compareToPrevious);
+        return getPerformanceReview.review(new Email(email), new Period(from, to), compare)
+                .map(performanceReviewMapper::toDto)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }

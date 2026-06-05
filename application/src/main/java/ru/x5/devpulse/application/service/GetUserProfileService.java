@@ -111,6 +111,6 @@ public final class GetUserProfileService implements GetUserProfileUseCase {
             deleted += s.deletedLines();
             testAdded += s.testAddedLines();
         }
-        return new AuthorSummary(email, null, null, commits, mergeCommits, added, deleted, testAdded, null);
+        return new AuthorSummary(email, null, null, commits, mergeCommits, added, deleted, testAdded, null, null, false);
     }
 }
