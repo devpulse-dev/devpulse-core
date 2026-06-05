@@ -71,6 +71,10 @@ kaiten:
     max-retries: 10
     retry-initial-backoff-ms: 5000
     retry-max-backoff-ms: 60000
+    # Как часто рефрешить name/avatar уже привязанных unified_user из Kaiten
+    # (порог по lastSyncedAt). Свежие в пределах интервала API не дёргают.
+    # Формат java.time.Duration (3d / 12h / 30m). Default: 3d.
+    user-refresh-interval: ${KAITEN_USER_REFRESH_INTERVAL:3d}
     # ВНИМАНИЕ: только для локальной разработки на машинах без корпоративного X5 CA
     # в truststore. Отключает проверку SSL-сертификата для Kaiten.
     # Default: false. В local профиле можно включить через KAITEN_INSECURE_SSL=true.

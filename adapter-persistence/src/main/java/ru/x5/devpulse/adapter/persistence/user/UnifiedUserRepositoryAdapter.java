@@ -109,10 +109,14 @@ class UnifiedUserRepositoryAdapter implements UnifiedUserRepository {
     public void updateKaitenId(Email email, KaitenUserId kaitenId, String name, String avatarUrl) {
         // Email.value() — lowercase (инвариант VO).
         jpa.findByEmail(email.value()).ifPresent(user -> {
+            LocalDateTime now = LocalDateTime.now();
             user.setKaitenId(kaitenId.value());
             user.setName(name);
             user.setAvatarUrl(avatarUrl);
-            user.setUpdatedAt(LocalDateTime.now());
+            user.setUpdatedAt(now);
+            // lastSyncedAt = момент последней синхронизации с Kaiten. На него опирается
+            // staleness-гейт в SyncKaitenUsersService (рефреш привязанных не чаще раза в N дней).
+            user.setLastSyncedAt(now);
             jpa.save(user);
         });
     }
