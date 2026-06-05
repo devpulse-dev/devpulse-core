@@ -1,0 +1,30 @@
+# Команда пользователя в unified_user.
+#
+# Фича «Подготовка к Performance Review»: людей группируют по командам, назначение —
+# через фронт (PUT /users/{email}/team). На Фазе 1 это свободный текст (nullable VARCHAR),
+# без справочника команд. Канонический справочник (таблица team + FK) — кандидат на Фазу 2,
+# если понадобится валидация/переименование/иерархия. См. future.md.
+databaseChangeLog:
+  - changeSet:
+      id: 024-add-team-to-unified-user
+      author: boris.osechinskiy
+      changes:
+        - addColumn:
+            tableName: unified_user
+            columns:
+              - column:
+                  name: team
+                  type: VARCHAR(255)
+        - createIndex:
+            indexName: idx_unified_user_team
+            tableName: unified_user
+            columns:
+              - column:
+                  name: team
+      rollback:
+        - dropIndex:
+            indexName: idx_unified_user_team
+            tableName: unified_user
+        - dropColumn:
+            tableName: unified_user
+            columnName: team

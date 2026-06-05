@@ -316,19 +316,19 @@ class QueryUseCasesTest {
     private static UnifiedUser userWithKaiten(long kaitenId) {
         LocalDateTime now = LocalDateTime.now();
         return new UnifiedUser(1L, EMAIL, "boris", "Boris", null,
-                new KaitenUserId(kaitenId), null, now, now, now);
+                new KaitenUserId(kaitenId), null, null, false, now, now, now);
     }
 
     private static UnifiedUser userWithoutKaiten() {
         LocalDateTime now = LocalDateTime.now();
         return new UnifiedUser(1L, EMAIL, "boris", "Boris", null,
-                null, null, now, now, now);
+                null, null, null, false, now, now, now);
     }
 
     private static UnifiedUser userWithProfile(Email email, String name, String avatarUrl) {
         LocalDateTime now = LocalDateTime.now();
         return new UnifiedUser(1L, email, email.value().split("@")[0], name, avatarUrl,
-                null, null, now, now, now);
+                null, null, null, false, now, now, now);
     }
 
     private static ru.x5.devpulse.domain.model.git.Commit commitForCard(String cardIdString) {

@@ -1,0 +1,105 @@
+# Проставление команд пользователям по орг-структуре (Фаза 1 perf-review).
+#
+# Матчинг людей из орг-структуры с unified_user — по email (стабильный уникальный ключ;
+# заодно отсекает placeholder/дубль-строки). В каждую команду входят DEV-лид + разработчики.
+#
+# ПРИМЕЧАНИЯ:
+#  - Delivery-лиды (Оленьков, Володина, Круглов, Гайдай, Ситник, Шестаков) в unified_user
+#    отсутствуют (нет git/kaiten-активности) — не назначаются.
+#  - «Кузнецова Анжелика» из структуры смэтчена на единственную Анжелику в БД —
+#    anzh.feoktistova@x5.ru (Anzhelika Feoktistova). Вероятная смена фамилии; если это не она —
+#    поправить отдельной миграцией.
+databaseChangeLog:
+  - changeSet:
+      id: 025-assign-user-teams
+      author: boris.osechinskiy
+      changes:
+        - sql:
+            comment: "Операции (Администрирование)"
+            sql: >
+              UPDATE unified_user SET team = 'Операции (Администрирование)'
+              WHERE email IN (
+                'dmitry.dyukov@x5.ru',
+                'vadim.dvoryankin@x5.ru',
+                'anzh.feoktistova@x5.ru',
+                'mikha.kolesnikov@x5.ru',
+                'taras.taturevich@x5.ru',
+                'vitaly.krasnov@x5.ru'
+              );
+        - sql:
+            comment: "Ценообразование"
+            sql: >
+              UPDATE unified_user SET team = 'Ценообразование'
+              WHERE email IN (
+                's.sova@x5.ru',
+                'an.kiselev@x5.ru',
+                'taras.kramarenko@x5.ru',
+                'a.olkhovatova@x5.ru',
+                'nikitasemenov@x5.ru',
+                'kirill.trifonov@x5.ru',
+                'p.maslov@x5.ru',
+                'evgeny.botylev@x5.ru',
+                'dias.arkharov@x5.ru'
+              );
+        - sql:
+            comment: "Учет товара"
+            sql: >
+              UPDATE unified_user SET team = 'Учет товара'
+              WHERE email IN (
+                'a.sadriev@x5.ru',
+                'artepopov@x5.ru',
+                'arseniy.chevtaykin@x5.ru',
+                'alekse.bysha@x5.ru',
+                'maksim.tormozov@x5.ru',
+                'pavel.pugach@x5.ru',
+                'm.kim@x5.ru',
+                'vasil.gavrilov@x5.ru'
+              );
+        - sql:
+            comment: "Логистика"
+            sql: >
+              UPDATE unified_user SET team = 'Логистика'
+              WHERE email IN (
+                'ilnur.nasibullin@x5.ru',
+                'dragomir.onich@x5.ru',
+                'aleksey.balakin@x5.ru',
+                'd.gusev@x5.ru',
+                'maksim.tseynar@x5.ru',
+                'edua.ivanov@x5.ru',
+                'iri.imametdinova@x5.ru',
+                'pavel.trusov@x5.ru'
+              );
+        - sql:
+            comment: "Маркировка"
+            sql: >
+              UPDATE unified_user SET team = 'Маркировка'
+              WHERE email IN (
+                'kiril.aksyutik@x5.ru',
+                'tatiana.matvienko@x5.ru',
+                'aleksand.dorofeev@x5.ru',
+                'vladisla.gritsev@x5.ru',
+                'vikto.zhigunov@x5.ru',
+                'boris.osechinskiy@x5.ru',
+                'ily.galochkin@x5.ru',
+                'nikit.tomashov@x5.ru',
+                'stepan.ermakov@x5.ru',
+                'ilya.vatsevich@x5.ru'
+              );
+        - sql:
+            comment: "Ядро"
+            sql: >
+              UPDATE unified_user SET team = 'Ядро'
+              WHERE email IN (
+                'alexey.saynukov@x5.ru',
+                'ivmatveev@x5.ru',
+                'konstan.talalaev@x5.ru',
+                'pavel.komar@x5.ru',
+                'ni.sviridov@x5.ru',
+                'alexander.zharikov@x5.ru'
+              );
+      rollback:
+        - sql:
+            sql: >
+              UPDATE unified_user SET team = NULL
+              WHERE team IN ('Операции (Администрирование)', 'Ценообразование', 'Учет товара',
+                             'Логистика', 'Маркировка', 'Ядро');

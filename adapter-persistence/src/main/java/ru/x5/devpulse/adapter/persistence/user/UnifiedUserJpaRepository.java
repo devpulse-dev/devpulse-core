@@ -10,4 +10,6 @@ interface UnifiedUserJpaRepository extends JpaRepository<UnifiedUserEntity, Long
     Optional<UnifiedUserEntity> findByEmail(String email);
 
     List<UnifiedUserEntity> findByEmailIn(Collection<String> emails);
+
+    List<UnifiedUserEntity> findByTeam(String team);
 }

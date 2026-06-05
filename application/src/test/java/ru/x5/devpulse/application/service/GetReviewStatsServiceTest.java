@@ -81,6 +81,6 @@ class GetReviewStatsServiceTest {
     private static UnifiedUser userWithProfile(Email email, String name, String avatarUrl) {
         LocalDateTime now = LocalDateTime.now();
         return new UnifiedUser(1L, email, email.localPart(), name, avatarUrl,
-                null, null, now, now, now);
+                null, null, null, false, now, now, now);
     }
 }

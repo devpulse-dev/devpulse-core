@@ -44,6 +44,12 @@ public class UnifiedUserEntity {
     @Column(name = "gitlab_id")
     private Integer gitlabId;
 
+    @Column(name = "team")
+    private String team;
+
+    @Column(name = "is_lead", nullable = false)
+    private boolean lead;
+
     @Column(name = "last_synced_at")
     private LocalDateTime lastSyncedAt;
 

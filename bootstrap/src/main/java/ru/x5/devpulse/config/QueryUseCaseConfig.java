@@ -7,11 +7,14 @@ import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
 import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetDashboardUseCase;
 import ru.x5.devpulse.application.port.in.GetHourlyStatsUseCase;
+import ru.x5.devpulse.application.port.in.GetPerformanceReviewUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserCommitsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserProfileUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
+import ru.x5.devpulse.application.port.in.ListTeamsUseCase;
+import ru.x5.devpulse.application.port.in.ListUsersUseCase;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
 import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
@@ -27,6 +30,9 @@ import ru.x5.devpulse.application.service.GetReviewStatsService;
 import ru.x5.devpulse.application.service.GetUserCommitsService;
 import ru.x5.devpulse.application.service.GetUserProfileService;
 import ru.x5.devpulse.application.service.GetWeeklyStatsService;
+import ru.x5.devpulse.application.service.ListTeamsService;
+import ru.x5.devpulse.application.service.ListUsersService;
+import ru.x5.devpulse.application.service.PerformanceReviewService;
 
 /**
  * Wiring query-side use case'ов (read-only).
@@ -86,6 +92,29 @@ class QueryUseCaseConfig {
             KaitenGateway kaitenGateway) {
         return new GetUserProfileService(
                 unifiedUserRepository, dailyStatsRepository, commitRepository, kaitenGateway);
+    }
+
+    /** Досье к perf-review — композиция git/ревью/карточек по одному человеку. */
+    @Bean
+    GetPerformanceReviewUseCase getPerformanceReviewUseCase(
+            UnifiedUserRepository unifiedUserRepository,
+            DailyStatsRepository dailyStatsRepository,
+            ReviewStatsRepository reviewStatsRepository,
+            KaitenGateway kaitenGateway) {
+        return new PerformanceReviewService(
+                unifiedUserRepository, dailyStatsRepository, reviewStatsRepository, kaitenGateway);
+    }
+
+    /** Список пользователей (picker perf-review + управление командами). */
+    @Bean
+    ListUsersUseCase listUsersUseCase(UnifiedUserRepository unifiedUserRepository) {
+        return new ListUsersService(unifiedUserRepository);
+    }
+
+    /** Список команд (имя + лид + участники) — для фильтра по командам и «кто откуда». */
+    @Bean
+    ListTeamsUseCase listTeamsUseCase(UnifiedUserRepository unifiedUserRepository) {
+        return new ListTeamsService(unifiedUserRepository);
     }
 
     @Bean

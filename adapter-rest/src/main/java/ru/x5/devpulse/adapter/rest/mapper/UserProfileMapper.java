@@ -1,6 +1,7 @@
 package ru.x5.devpulse.adapter.rest.mapper;
 
 import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
 import org.mapstruct.ReportingPolicy;
 import ru.x5.devpulse.adapter.rest.api.model.UserProfile;
 
@@ -16,5 +17,6 @@ import ru.x5.devpulse.adapter.rest.api.model.UserProfile;
         unmappedSourcePolicy = ReportingPolicy.IGNORE)
 public interface UserProfileMapper {
 
+    @Mapping(target = "isLead", source = "lead")
     UserProfile toDto(ru.x5.devpulse.domain.model.user.UnifiedUser u);
 }
