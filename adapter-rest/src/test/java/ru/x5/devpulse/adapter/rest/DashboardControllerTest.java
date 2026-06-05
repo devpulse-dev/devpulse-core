@@ -40,7 +40,7 @@ class DashboardControllerTest {
                 new Email("boris@x5.ru"), "Boris", "https://avatar/1",
                 /*commits*/ 50, /*mergeCommits*/ 5,
                 /*added*/ 200, /*deleted*/ 80, /*testAdded*/ 30,
-                /*activity*/ null);
+                /*activity*/ null, /*team*/ "Маркировка", /*lead*/ true);
         when(getDashboard.get(any(), any())).thenReturn(new Dashboard(
                 new Period(LocalDate.now().minusDays(30), LocalDate.now()),
                 new Page<>(List.of(boris), 0, 20, 1)));
@@ -57,7 +57,9 @@ class DashboardControllerTest {
                 .andExpect(jsonPath("$.items[0].avatarUrl").value("https://avatar/1"))
                 .andExpect(jsonPath("$.items[0].commits").value(50))
                 .andExpect(jsonPath("$.items[0].nonMergeCommits").value(45))
-                .andExpect(jsonPath("$.items[0].mergeCommits").value(5));
+                .andExpect(jsonPath("$.items[0].mergeCommits").value(5))
+                .andExpect(jsonPath("$.items[0].team").value("Маркировка"))
+                .andExpect(jsonPath("$.items[0].isLead").value(true));
 
         ArgumentCaptor<Period> periodCap = ArgumentCaptor.forClass(Period.class);
         ArgumentCaptor<PageRequest> pageCap = ArgumentCaptor.forClass(PageRequest.class);

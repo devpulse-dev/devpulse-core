@@ -103,6 +103,6 @@ public final class PerformanceReviewService implements GetPerformanceReviewUseCa
             }
         }
         // Нет ревью-активности за период — нули.
-        return new ReviewAuthorStats(email, null, null, 0, 0, 0, 0.0, 0);
+        return new ReviewAuthorStats(email, null, null, 0, 0, 0, 0.0, 0, null, false);
     }
 }

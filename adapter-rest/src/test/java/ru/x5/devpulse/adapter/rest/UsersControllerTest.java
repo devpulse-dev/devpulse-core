@@ -55,7 +55,7 @@ class UsersControllerTest {
         var user = new UnifiedUser(1L, email, "boris", "Boris", null,
                 new KaitenUserId(7L), null, null, false,
                 LocalDateTime.now(), LocalDateTime.now(), LocalDateTime.now());
-        var summary = new AuthorSummary(email, "Boris", null, 10, 1, 100, 50, 20, null);
+        var summary = new AuthorSummary(email, "Boris", null, 10, 1, 100, 50, 20, null, null, false);
 
         when(getUserProfile.findProfile(eq(email), any()))
                 .thenReturn(Optional.of(new UserProfile(

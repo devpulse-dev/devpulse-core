@@ -132,39 +132,84 @@ highlights со ссылками → печать (Фаза 1 — print-CSS). В
 - [x] бэк: `UnifiedUser.lead`, домен `Team` + `TeamAssembler`, порт `updateLead`/`clearLeadForTeam`,
       use case'ы `ListTeams`/`SetTeamLead`, `TeamsController`, `TeamMapper`, `UserProfileMapper(isLead)`, wiring
 - [x] тесты: `TeamAssemblerTest`, `TeamServicesTest`, `TeamsControllerTest`
-- [ ] publish OAS 1.6.0 + bump `devpulse-oas.version` 1.5.0 → 1.6.0 + `mvn -U` ← **за тобой**
-- [ ] фронт: глобальный фильтр по всем командам (вместо хардкода Маркировки), отображение лидов
+- [x] publish OAS 1.6.0 + bump `devpulse-oas.version` 1.5.0 → 1.6.0 + `mvn -U` (вошло в train 1.7.0)
+- [x] фронт: глобальный фильтр по всем командам (вместо хардкода Маркировки), отображение лидов
       («кто откуда»), управление командой (add/exclude member, assign/remove lead)
+
+### Итерация 3 — team/isLead везде, где есть инфо о разработчике (API 1.7.0)
+
+Дашборд и stats-листы отдают `AuthorSummary`/`ReviewAuthor` — у них team/isLead НЕ было
+(только у `UserProfile`). Добавили, чтобы принадлежность к команде и значок лида были видны везде.
+
+- [x] OAS 1.6.0 → 1.7.0: shared `AuthorSummary` и `ReviewAuthor` += `team`, `isLead`; lint/typecheck зелёные
+- [x] бэк: домен `AuthorSummary`/`ReviewAuthorStats` += `team`/`lead`, `withProfile(...)` расширен,
+      `withActivity` сохраняет team/lead; enrichment (`AuthorSummaryEnricher`, `GetReviewStatsService`)
+      проставляет из `unified_user`; мапперы `AuthorSummaryMapper`/`ReviewStatsMapper` (`lead→isLead`)
+- [x] тесты: dashboard и /stats/reviews ассертят `team`/`isLead`; поправлены все call-site
+- [x] publish OAS 1.7.0 + bump `devpulse-oas.version` 1.6.0 → 1.7.0 + `mvn -U`, бэк-тесты зелёные
+
+**Где теперь есть team/isLead:** `/dashboard`, `/stats/summary`, `/stats/weekly`, `/stats/reviews`
+(через `AuthorSummary`/`ReviewAuthor`), `/users`, `/users/{email}/profile`, `/teams`,
+`/performance/review` (через `UserProfile`). Фронт может показывать команду+лида везде без кросс-резолва.
 
 ## Статус
 
-**Бэкенд готов и протестирован, API 1.6.0.** Perf-review (фронт сделан) + команды/лиды.
-Осталось: опубликовать OAS 1.6.0 и доработать фронт под команды-фильтр/лидов.
+**Фаза 1 завершена — бэк + фронт + OAS 1.7.0.** Сделано: perf-review (досье с дельтами),
+команды/лиды first-class (`/teams`, назначение лида), team/isLead во всех developer-эндпоинтах,
+глобальный фильтр по командам и управление составом команд на фронте.
 
-## Фронт — готовый контракт (types из `@devpulse-dev/api-types` ^1.6.0)
+Открытых задач по Фазе 1 нет. Дальше — по желанию: Фаза 2 (экспорт PDF + персист отчёта),
+Фаза 3 (снимки карточек Kaiten для точной истории дефектов), канонический справочник команд.
 
-Раздел `/performance-review` + управление командами. Все ручки под префиксом `/api/v2`.
+**TODO (housekeeping):** перенести зафиксированное из этого `future.md` в `README.md`/`REFACTORING.md`
+и удалить файл — он задумывался как временный единый источник правды на время реализации.
 
-**Команды и лиды (Итерация 2):**
-- `GET /teams` → `Team[]` `{ name, lead: UserProfile|null, members: UserProfile[] }` — для
-  глобального фильтра по командам и отображения «кто откуда» (лид виден). У `UserProfile` теперь есть `isLead`.
-- `PUT /teams/lead` body `{ team, email: string|null }` → `Team` — назначить (email) / снять (null) лида.
-- членство: `PUT /users/{email}/team` body `{ team }` (имя — добавить/перевести, `null` — исключить).
-- глобальный фильтр: дропдаун из `GET /teams` (имена) + members для резолва по командам.
+## Фронт — готовый контракт (types из `@devpulse-dev/api-types` ^1.7.0)
 
-**Perf-review:**
-- `GET /users` (опц. `?team=`) → `UserProfile[]` (с `team`, `isLead`) — picker человека и фильтр по команде.
-- `PUT /users/{email}/team` body `{ team: string | null }` → `UserProfile` — назначить/снять команду (404 если нет юзера).
+> Канонический референс для фронта. Все ручки под префиксом `/api/v2`. Ошибки — RFC 7807
+> `application/problem+json` (`{type,title,status,detail,instance}`). `displayName`/`avatarUrl`/`team`
+> nullable; `isLead` — boolean (default false).
+
+### Команда и лид — показываем ВЕЗДЕ, где есть разработчик
+
+`team` (string|null) и `isLead` (boolean) теперь есть в **обоих** профильных DTO:
+- **`UserProfile`** → `/users`, `/users/{email}/profile`, `/teams` (lead/members), `/performance/review` (subject);
+- **`AuthorSummary`** → `/dashboard` (items), `/stats/summary` (topAuthors), `/stats/weekly` (authors);
+- **`ReviewAuthor`** → `/stats/reviews` (authors).
+
+То есть в карточке/строке любого разработчика бери `team` и `isLead` прямо из ответа — кросс-резолв не нужен.
+UI: чип с названием команды + значок/бейдж лида (`isLead === true`). `team === null` → «без команды».
+
+### Команды и лиды — управление
+
+- `GET /teams` → `Team[]` `{ name: string, lead: UserProfile|null, members: UserProfile[] }`.
+  Источник имён команд для дропдаунов и экран «кто откуда».
+- `PUT /teams/lead` body `{ team: string, email: string|null }` → `Team`.
+  `email` — новый лид (он же добавляется в команду, прежний лид снимается); `email=null` — снять лида. `404` — нет юзера / нет команды.
+- членство: `PUT /users/{email}/team` body `{ team: string|null }` → `UserProfile`.
+  имя команды — добавить/перевести; `null` — исключить. `404` — нет юзера.
+
+### Глобальный фильтр по командам (важно про механику)
+
+**Серверного `?team=` на `/dashboard` и `/stats/*` НЕТ.** Фильтрация по команде — на фронте:
+1. дропдаун команд = имена из `GET /teams`;
+2. выбрали команду → фильтруем уже полученные списки авторов по полю `author.team === выбранная`
+   (оно теперь приходит в каждом ответе). Резолвить участников отдельно не требуется.
+
+`GET /users?team=` (серверный фильтр) есть только для **picker'а** в perf-review и экрана управления командами — не для статистики.
+
+### Perf-review
+
+- picker человека: `GET /users` (опц. `?team=`) → `UserProfile[]`.
 - `GET /performance/review?email=&from=&to=&compareToPrevious=` → `PerformanceReview`:
-  - `subject: UserProfile` (имя/аватар/команда),
-  - `period`, `comparedTo: Period | null`,
-  - `metrics`: 14 полей типа `MetricDelta { current, previous, delta, deltaPct }`
-    (git+ревью — с дельтами; `defectsInWork/Closed`, `devTasksInWork/Closed` — **снапшот, previous/delta = null**),
-  - `taskBreakdown: { defect, development }` каждый `{ inProgress, done, total }`,
+  - `subject: UserProfile` (имя/аватар/команда/лид);
+  - `period`, `comparedTo: Period | null` (null, если `compareToPrevious=false`);
+  - `metrics`: 14 полей `MetricDelta { current, previous, delta, deltaPct }`.
+    git+ревью — с дельтами; `defectsInWork/Closed`, `devTasksInWork/Closed` — **снапшот: `previous/delta/deltaPct = null`** (дельту не рисуем);
+  - `taskBreakdown: { defect, development }`, каждый `{ inProgress, done, total }`;
   - `highlights: { kind: CARD|MR, title, subtitle?, url }[]`.
+- `404` — если пользователя нет в `unified_user`.
 
-**UI-план:** шапка subject → сетка KPI-карточек (виджет `MetricDelta`: значение + ↑/↓ дельта, у снапшот-метрик дельту скрыть) → стэкбар задач (defect/dev × inProgress/done) → код/ревью секции → highlights со ссылками → print-CSS для печати. Контролы: picker человека (по `/users`, фильтр по команде), picker периода (пресеты квартал/полугодие/год + custom), тогл «сравнить с предыдущим». Не забыть zero/empty-состояния.
+**UI-план perf-review:** шапка subject → сетка KPI-карточек (виджет `MetricDelta`: значение + ↑/↓ дельта; у снапшот-метрик дельту скрыть) → стэкбар задач (defect/dev × inProgress/done) → секции код/ревью → highlights со ссылками → print-CSS. Контролы: picker человека (фильтр по команде), picker периода (пресеты квартал/полугодие/год + custom), тогл «сравнить с предыдущим». Важны zero/empty-состояния.
 
-**Подписать на UI честно:** дефекты/задачи — «по текущему состоянию карточек»; «тесты» — строки тест-кода, не число тестов.
-
-**Управление командами:** отдельный экран/модалка — список `/users`, инлайн-назначение команды через `PUT /users/{email}/team`.
+**Честные подписи на UI:** дефекты/задачи — «по текущему состоянию карточек»; «тесты» — строки тест-кода, не число тестов.

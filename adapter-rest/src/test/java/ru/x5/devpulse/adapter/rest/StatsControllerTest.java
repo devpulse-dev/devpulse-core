@@ -124,7 +124,7 @@ class StatsControllerTest {
                 new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)),
                 List.of(new ReviewAuthorStats(
                         new Email("boris@x5.ru"), "Boris", "https://kaiten.x5.ru/avatars/42.png",
-                        23, 47, 14, 18.456, 11))));
+                        23, 47, 14, 18.456, 11, "Маркировка", true))));
 
         mvc.perform(get("/api/v2/stats/reviews")
                         .param("from", "2026-05-01").param("to", "2026-05-31"))
@@ -135,7 +135,9 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.authors[0].commentsGiven").value(47))
                 .andExpect(jsonPath("$.authors[0].reviewsReceived").value(14))
                 .andExpect(jsonPath("$.authors[0].avgTimeToMergeHours").value(18.5))
-                .andExpect(jsonPath("$.authors[0].mergedMrCount").value(11));
+                .andExpect(jsonPath("$.authors[0].mergedMrCount").value(11))
+                .andExpect(jsonPath("$.authors[0].team").value("Маркировка"))
+                .andExpect(jsonPath("$.authors[0].isLead").value(true));
     }
 
     @Test
