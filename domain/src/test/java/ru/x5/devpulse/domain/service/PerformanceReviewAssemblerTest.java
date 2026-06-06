@@ -13,10 +13,12 @@ import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCardId;
 import ru.x5.devpulse.domain.model.kaiten.KaitenUrgency;
+import ru.x5.devpulse.domain.model.performance.DeliveredFeature;
+import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
+import ru.x5.devpulse.domain.model.performance.FirefightingItem;
 import ru.x5.devpulse.domain.model.performance.KaitenInsights;
 import ru.x5.devpulse.domain.model.performance.MetricDelta;
 import ru.x5.devpulse.domain.model.performance.PeriodMetrics;
-import ru.x5.devpulse.domain.model.performance.PerformanceHighlight;
 import ru.x5.devpulse.domain.model.performance.PerformanceMetrics;
 import ru.x5.devpulse.domain.model.performance.TaskStatusCounts;
 import ru.x5.devpulse.domain.model.performance.TaskTypeBreakdown;
@@ -109,34 +111,60 @@ class PerformanceReviewAssemblerTest {
     }
 
     @Nested
-    @DisplayName("highlights: пруфы со ссылками")
-    class Highlights {
+    @DisplayName("notable: тушение пожаров + доставленные доработки")
+    class Notable {
 
         @Test
-        @DisplayName("Закрытые дефекты раньше остального; карточки без url пропускаются; limit соблюдается")
-        void ordersAndLimits() {
-            LocalDateTime inQ1 = LocalDateTime.of(2026, 2, 10, 12, 0);
+        @DisplayName("Firefighting: только закрытые critical/high дефекты, критичные первыми, без url — мимо")
+        void firefighting() {
             List<KaitenCard> cards = List.of(
-                    card(1, TYPE_DEVELOPMENT, COL_IN_PROGRESS, null, "dev wip"),
-                    card(2, TYPE_DEFECT, COL_DONE, inQ1, "closed defect"),
-                    cardNoUrl(3, TYPE_DEFECT, COL_DONE, inQ1, "defect no url"));
+                    fireDefect(1, KaitenUrgency.HIGH, true, "https://k/1"),
+                    fireDefect(2, KaitenUrgency.CRITICAL, true, "https://k/2"),
+                    fireDefect(3, KaitenUrgency.MEDIUM, true, "https://k/3"),   // не crit/high → мимо
+                    fireDefect(4, KaitenUrgency.HIGH, false, "https://k/4"),    // в работе → мимо
+                    fireDefect(5, KaitenUrgency.CRITICAL, true, null));         // без url → мимо
 
-            List<PerformanceHighlight> hl = PerformanceReviewAssembler.highlights(cards, Q1, 10);
+            var ff = PerformanceReviewAssembler
+                    .notable(cards, Q1, DevelopmentRollup.EMPTY, 10).firefighting();
 
-            assertAll("highlights",
-                    () -> assertThat(hl).hasSize(2),                              // без-url отброшен
-                    () -> assertThat(hl.get(0).title()).isEqualTo("closed defect"), // закрытый дефект — первый
-                    () -> assertThat(hl.get(0).kind()).isEqualTo(PerformanceHighlight.Kind.CARD),
-                    () -> assertThat(hl.get(0).subtitle()).isEqualTo("DEFECT · DONE"));
+            assertAll("firefighting",
+                    () -> assertThat(ff).extracting(FirefightingItem::id)
+                            .as("critical(2) раньше high(1), остальные отброшены").containsExactly(2L, 1L),
+                    () -> assertThat(ff.get(0).urgency()).isEqualTo(KaitenUrgency.CRITICAL));
         }
 
         @Test
-        @DisplayName("limit=0 → пустой список")
-        void respectsZeroLimit() {
-            LocalDateTime inQ1 = LocalDateTime.of(2026, 2, 10, 12, 0);
-            List<PerformanceHighlight> hl = PerformanceReviewAssembler.highlights(
-                    List.of(card(1, TYPE_DEFECT, COL_DONE, inQ1, "x")), Q1, 0);
-            assertThat(hl).isEmpty();
+        @DisplayName("Delivered features: корни с done-юскейсами по убыванию; без done и ведро «без родителя» — мимо")
+        void deliveredFeatures() {
+            LocalDateTime done = LocalDateTime.of(2026, 2, 10, 12, 0);
+            List<KaitenCard> cards = List.of(
+                    build(10, TYPE_DEVELOPMENT, COL_DONE, done, 100L, "Feature A"),
+                    build(11, TYPE_DEVELOPMENT, COL_DONE, done, 100L, "Feature A"),
+                    build(12, TYPE_DEVELOPMENT, COL_IN_PROGRESS, null, 100L, "Feature A"), // не done
+                    build(13, TYPE_TASK, COL_DONE, done, 200L, "Feature B"),
+                    build(14, TYPE_DEVELOPMENT, COL_IN_PROGRESS, null, 300L, "Feature C"), // 0 done → мимо
+                    build(15, TYPE_DEVELOPMENT, COL_DONE, done, null, null));              // без родителя → мимо
+
+            var dev = PerformanceReviewAssembler.kaitenInsights(cards, Q1).development();
+            var feats = PerformanceReviewAssembler.notable(cards, Q1, dev, 10).deliveredFeatures();
+
+            assertAll("delivered features",
+                    () -> assertThat(feats).extracting(DeliveredFeature::title)
+                            .containsExactly("Feature A", "Feature B"),
+                    () -> assertThat(feats.get(0).doneCount()).isEqualTo(2),
+                    () -> assertThat(feats.get(0).totalCount()).isEqualTo(3),
+                    () -> assertThat(feats.get(1).doneCount()).isEqualTo(1));
+        }
+
+        @Test
+        @DisplayName("limit — по N на блок")
+        void respectsLimit() {
+            List<KaitenCard> cards = List.of(
+                    fireDefect(1, KaitenUrgency.CRITICAL, true, "https://k/1"),
+                    fireDefect(2, KaitenUrgency.HIGH, true, "https://k/2"));
+            var ff = PerformanceReviewAssembler
+                    .notable(cards, Q1, DevelopmentRollup.EMPTY, 1).firefighting();
+            assertThat(ff).hasSize(1);
         }
     }
 
@@ -145,9 +173,16 @@ class PerformanceReviewAssemblerTest {
         return buildCard(id, typeId, columnType, closedAt, title, "https://kaiten.x5.ru/" + id);
     }
 
-    private static KaitenCard cardNoUrl(long id, int typeId, int columnType,
-                                        LocalDateTime closedAt, String title) {
-        return buildCard(id, typeId, columnType, closedAt, title, null);
+    private static KaitenCard fireDefect(long id, KaitenUrgency urgency, boolean closed, String url) {
+        LocalDateTime done = closed ? LocalDateTime.of(2026, 2, 10, 12, 0) : null;
+        int col = closed ? COL_DONE : COL_IN_PROGRESS;
+        LocalDateTime created = LocalDateTime.of(2026, 1, 5, 10, 0);
+        LocalDateTime updated = done != null ? done : LocalDateTime.of(2026, 2, 1, 10, 0);
+        return new KaitenCard(
+                new KaitenCardId(id), "card" + id, null, TYPE_DEFECT, col,
+                "col", "board", "space", null, null,
+                created, updated, done, false, url, List.of(),
+                urgency, null, null, null, null, null);
     }
 
     private static KaitenCard buildCard(long id, int typeId, int columnType,

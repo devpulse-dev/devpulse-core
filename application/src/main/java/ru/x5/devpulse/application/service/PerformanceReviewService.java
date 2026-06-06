@@ -11,7 +11,7 @@ import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
 import ru.x5.devpulse.domain.model.performance.KaitenInsights;
-import ru.x5.devpulse.domain.model.performance.PerformanceHighlight;
+import ru.x5.devpulse.domain.model.performance.NotableResults;
 import ru.x5.devpulse.domain.model.performance.PerformanceMetrics;
 import ru.x5.devpulse.domain.model.performance.PerformanceReview;
 import ru.x5.devpulse.domain.model.performance.PeriodMetrics;
@@ -31,13 +31,14 @@ import ru.x5.devpulse.domain.service.ReviewSummarizer;
  * текущего и (опционально) предыдущего периода → дельты. Карточки Kaiten ({@link KaitenGateway})
  * тянутся live только за текущий период — снапшот «как сейчас», без дельт (см. future.md).</p>
  *
- * <p>Вся арифметика (дельты, счёт карточек, highlights) — в чистом доменном
+ * <p>Вся арифметика (дельты, счёт карточек, заметные результаты) — в чистом доменном
  * {@link PerformanceReviewAssembler}; здесь только оркестрация портов.</p>
  */
 @RequiredArgsConstructor
 public final class PerformanceReviewService implements GetPerformanceReviewUseCase {
 
-    private static final int MAX_HIGHLIGHTS = 6;
+    /** Сколько элементов показывать в каждом блоке «заметных результатов». */
+    private static final int MAX_NOTABLE = 5;
 
     private final UnifiedUserRepository unifiedUserRepository;
     private final DailyStatsRepository dailyStatsRepository;
@@ -68,11 +69,11 @@ public final class PerformanceReviewService implements GetPerformanceReviewUseCa
         TaskTypeBreakdown breakdown = PerformanceReviewAssembler.breakdown(cards, period);
         PerformanceMetrics metrics = PerformanceReviewAssembler.metrics(current, previous, breakdown);
         KaitenInsights kaiten = PerformanceReviewAssembler.kaitenInsights(cards, period);
-        List<PerformanceHighlight> highlights =
-                PerformanceReviewAssembler.highlights(cards, period, MAX_HIGHLIGHTS);
+        NotableResults notable =
+                PerformanceReviewAssembler.notable(cards, period, kaiten.development(), MAX_NOTABLE);
 
         return Optional.of(new PerformanceReview(
-                user, period, comparedTo, metrics, breakdown, kaiten, highlights));
+                user, period, comparedTo, metrics, breakdown, kaiten, notable));
     }
 
     /** Сырые git+ревью-метрики одного человека за период. */

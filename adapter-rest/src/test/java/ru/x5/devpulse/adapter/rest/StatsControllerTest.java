@@ -31,13 +31,16 @@ import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCardType;
 import ru.x5.devpulse.domain.model.kaiten.KaitenColumnStatus;
+import ru.x5.devpulse.domain.model.kaiten.KaitenUrgency;
 import ru.x5.devpulse.domain.model.performance.CycleTime;
 import ru.x5.devpulse.domain.model.performance.CycleTimeBreakdown;
 import ru.x5.devpulse.domain.model.performance.DefectsSummary;
+import ru.x5.devpulse.domain.model.performance.DeliveredFeature;
 import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
+import ru.x5.devpulse.domain.model.performance.FirefightingItem;
 import ru.x5.devpulse.domain.model.performance.KaitenInsights;
 import ru.x5.devpulse.domain.model.performance.MetricDelta;
-import ru.x5.devpulse.domain.model.performance.PerformanceHighlight;
+import ru.x5.devpulse.domain.model.performance.NotableResults;
 import ru.x5.devpulse.domain.model.performance.PerformanceMetrics;
 import ru.x5.devpulse.domain.model.performance.PerformanceReview;
 import ru.x5.devpulse.domain.model.performance.RootTask;
@@ -152,7 +155,7 @@ class StatsControllerTest {
     }
 
     @Test
-    @DisplayName("GET /performance/review → 200: subject с team, дельты, breakdown, highlights")
+    @DisplayName("GET /performance/review → 200: subject, дельты, kaiten-блок, notable")
     void performanceReviewReturnsDossier() throws Exception {
         var email = new Email("boris@x5.ru");
         var user = new UnifiedUser(1L, email, "boris", "Boris", null,
@@ -166,8 +169,10 @@ class StatsControllerTest {
                 MetricDelta.snapshot(2), MetricDelta.snapshot(5),    // defectsInWork/Closed
                 MetricDelta.snapshot(3), MetricDelta.snapshot(7));   // devTasksInWork/Closed
         var breakdown = new TaskTypeBreakdown(TaskStatusCounts.of(2, 5), TaskStatusCounts.of(3, 7));
-        var highlights = List.of(new PerformanceHighlight(
-                PerformanceHighlight.Kind.CARD, "closed defect", "DEFECT · DONE", "https://kaiten.x5.ru/1"));
+        var notable = new NotableResults(
+                List.of(new FirefightingItem(1L, "closed critical defect",
+                        "https://kaiten.x5.ru/1", KaitenUrgency.CRITICAL)),
+                List.of(new DeliveredFeature(100L, "Feature A", "https://kaiten.x5.ru/100", 5, 6)));
         var kaiten = new KaitenInsights(
                 new DefectsSummary(15, 4, 11, 6, new UrgencyCounts(4, 2, 5, 4, 0)),
                 new DevelopmentRollup(3, 1, List.of(new RootTask(
@@ -178,7 +183,7 @@ class StatsControllerTest {
                 WorkBalance.of(15, 3));
         var period = new Period(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31));
         var review = new PerformanceReview(user, period, period.previousAdjacent(),
-                metrics, breakdown, kaiten, highlights);
+                metrics, breakdown, kaiten, notable);
 
         when(getPerformanceReview.review(any(), any(), anyBoolean())).thenReturn(Optional.of(review));
 
@@ -193,8 +198,11 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.metrics.commits.deltaPct").value(25.0))
                 .andExpect(jsonPath("$.metrics.defectsInWork.current").value(2.0))
                 .andExpect(jsonPath("$.taskBreakdown.defect.done").value(5))
-                .andExpect(jsonPath("$.highlights[0].kind").value("CARD"))
-                .andExpect(jsonPath("$.highlights[0].url").value("https://kaiten.x5.ru/1"))
+                // notable: тушение пожаров + доставленные доработки
+                .andExpect(jsonPath("$.notable.firefighting[0].title").value("closed critical defect"))
+                .andExpect(jsonPath("$.notable.firefighting[0].urgency").value("CRITICAL"))
+                .andExpect(jsonPath("$.notable.deliveredFeatures[0].title").value("Feature A"))
+                .andExpect(jsonPath("$.notable.deliveredFeatures[0].doneCount").value(5))
                 // kaiten-блок: дефекты по срочности, rollup разработки, cycle-time, баланс
                 .andExpect(jsonPath("$.kaiten.defects.total").value(15))
                 .andExpect(jsonPath("$.kaiten.defects.criticalHigh").value(6))

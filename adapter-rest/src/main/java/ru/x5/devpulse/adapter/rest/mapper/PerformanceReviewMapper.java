@@ -5,10 +5,12 @@ import org.mapstruct.ReportingPolicy;
 import ru.x5.devpulse.adapter.rest.api.model.CycleTime;
 import ru.x5.devpulse.adapter.rest.api.model.CycleTimeBreakdown;
 import ru.x5.devpulse.adapter.rest.api.model.DefectsSummary;
+import ru.x5.devpulse.adapter.rest.api.model.DeliveredFeature;
 import ru.x5.devpulse.adapter.rest.api.model.DevelopmentRollup;
+import ru.x5.devpulse.adapter.rest.api.model.FirefightingItem;
 import ru.x5.devpulse.adapter.rest.api.model.KaitenInsights;
 import ru.x5.devpulse.adapter.rest.api.model.MetricDelta;
-import ru.x5.devpulse.adapter.rest.api.model.PerformanceHighlight;
+import ru.x5.devpulse.adapter.rest.api.model.NotableResults;
 import ru.x5.devpulse.adapter.rest.api.model.PerformanceMetrics;
 import ru.x5.devpulse.adapter.rest.api.model.PerformanceReview;
 import ru.x5.devpulse.adapter.rest.api.model.Period;
@@ -45,7 +47,13 @@ public interface PerformanceReviewMapper {
 
     TaskStatusCounts toCounts(ru.x5.devpulse.domain.model.performance.TaskStatusCounts c);
 
-    PerformanceHighlight toHighlight(ru.x5.devpulse.domain.model.performance.PerformanceHighlight h);
+    // ── Заметные результаты (тушение пожаров / доставленные доработки) ──
+
+    NotableResults toNotable(ru.x5.devpulse.domain.model.performance.NotableResults n);
+
+    FirefightingItem toFirefighting(ru.x5.devpulse.domain.model.performance.FirefightingItem f);
+
+    DeliveredFeature toDeliveredFeature(ru.x5.devpulse.domain.model.performance.DeliveredFeature d);
 
     // ── Kaiten insights (дефекты по срочности / rollup разработки / cycle-time / баланс) ──
 
