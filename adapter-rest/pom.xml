@@ -15,7 +15,7 @@
     <description>HTTP entry point. Controllers implement OpenAPI-generated *Api interfaces; DTOs are generated from devpulse-oas contract.</description>
 
     <properties>
-        <devpulse-oas.version>1.7.0</devpulse-oas.version>
+        <devpulse-oas.version>1.9.0</devpulse-oas.version>
 
         <openapi-generator.version>7.10.0</openapi-generator.version>
     </properties>

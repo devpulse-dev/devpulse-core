@@ -29,12 +29,23 @@ import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.RepoName;
+import ru.x5.devpulse.domain.model.kaiten.KaitenCardType;
+import ru.x5.devpulse.domain.model.kaiten.KaitenColumnStatus;
+import ru.x5.devpulse.domain.model.performance.CycleTime;
+import ru.x5.devpulse.domain.model.performance.CycleTimeBreakdown;
+import ru.x5.devpulse.domain.model.performance.DefectsSummary;
+import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
+import ru.x5.devpulse.domain.model.performance.KaitenInsights;
 import ru.x5.devpulse.domain.model.performance.MetricDelta;
 import ru.x5.devpulse.domain.model.performance.PerformanceHighlight;
 import ru.x5.devpulse.domain.model.performance.PerformanceMetrics;
 import ru.x5.devpulse.domain.model.performance.PerformanceReview;
+import ru.x5.devpulse.domain.model.performance.RootTask;
 import ru.x5.devpulse.domain.model.performance.TaskStatusCounts;
 import ru.x5.devpulse.domain.model.performance.TaskTypeBreakdown;
+import ru.x5.devpulse.domain.model.performance.UrgencyCounts;
+import ru.x5.devpulse.domain.model.performance.UseCaseRef;
+import ru.x5.devpulse.domain.model.performance.WorkBalance;
 import ru.x5.devpulse.domain.model.review.ReviewAuthorStats;
 import ru.x5.devpulse.domain.model.review.ReviewStats;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
@@ -157,9 +168,17 @@ class StatsControllerTest {
         var breakdown = new TaskTypeBreakdown(TaskStatusCounts.of(2, 5), TaskStatusCounts.of(3, 7));
         var highlights = List.of(new PerformanceHighlight(
                 PerformanceHighlight.Kind.CARD, "closed defect", "DEFECT · DONE", "https://kaiten.x5.ru/1"));
+        var kaiten = new KaitenInsights(
+                new DefectsSummary(15, 4, 11, 6, new UrgencyCounts(4, 2, 5, 4, 0)),
+                new DevelopmentRollup(3, 1, List.of(new RootTask(
+                        100L, "Root A", "https://kaiten.x5.ru/100",
+                        List.of(new UseCaseRef(11L, "UC1", "https://kaiten.x5.ru/11",
+                                KaitenColumnStatus.DONE, KaitenCardType.DEVELOPMENT))))),
+                new CycleTimeBreakdown(new CycleTime(2.0, 2.5, 4), new CycleTime(7.0, 8.2, 8)),
+                WorkBalance.of(15, 3));
         var period = new Period(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31));
         var review = new PerformanceReview(user, period, period.previousAdjacent(),
-                metrics, breakdown, highlights);
+                metrics, breakdown, kaiten, highlights);
 
         when(getPerformanceReview.review(any(), any(), anyBoolean())).thenReturn(Optional.of(review));
 
@@ -175,7 +194,19 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.metrics.defectsInWork.current").value(2.0))
                 .andExpect(jsonPath("$.taskBreakdown.defect.done").value(5))
                 .andExpect(jsonPath("$.highlights[0].kind").value("CARD"))
-                .andExpect(jsonPath("$.highlights[0].url").value("https://kaiten.x5.ru/1"));
+                .andExpect(jsonPath("$.highlights[0].url").value("https://kaiten.x5.ru/1"))
+                // kaiten-блок: дефекты по срочности, rollup разработки, cycle-time, баланс
+                .andExpect(jsonPath("$.kaiten.defects.total").value(15))
+                .andExpect(jsonPath("$.kaiten.defects.criticalHigh").value(6))
+                .andExpect(jsonPath("$.kaiten.defects.byUrgency.critical").value(4))
+                .andExpect(jsonPath("$.kaiten.development.useCaseCount").value(3))
+                .andExpect(jsonPath("$.kaiten.development.rootTaskCount").value(1))
+                .andExpect(jsonPath("$.kaiten.development.roots[0].title").value("Root A"))
+                .andExpect(jsonPath("$.kaiten.development.roots[0].useCases[0].type").value("DEVELOPMENT"))
+                .andExpect(jsonPath("$.kaiten.cycleTime.defects.medianDays").value(2.0))
+                .andExpect(jsonPath("$.kaiten.cycleTime.development.medianDays").value(7.0))
+                .andExpect(jsonPath("$.kaiten.balance.defectCount").value(15))
+                .andExpect(jsonPath("$.kaiten.balance.buildCount").value(3));
     }
 
     @Test

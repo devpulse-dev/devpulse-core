@@ -9,10 +9,10 @@ import ru.x5.devpulse.domain.model.user.UnifiedUser;
  * Read-side агрегат «досье к Performance Review» по одному человеку за период.
  * Обслуживает {@code GET /api/v2/performance/review}.
  *
- * <p>Композиция четырёх источников: профиль ({@link UnifiedUser}), git+ревью-метрики с
- * дельтами ({@link PerformanceMetrics}), карточки Kaiten ({@link TaskTypeBreakdown},
- * снапшот «как сейчас») и highlights-пруфы. Не хранится в БД — формируется on-the-fly
- * use case'ом из уже собранных данных.</p>
+ * <p>Композиция источников: профиль ({@link UnifiedUser}), git+ревью-метрики с дельтами
+ * ({@link PerformanceMetrics}), карточки Kaiten — простой счётчик ({@link TaskTypeBreakdown})
+ * и развёрнутая аналитика ({@link KaitenInsights}: дефекты по срочности, rollup разработки,
+ * cycle-time, баланс), highlights-пруфы. Снапшот «как сейчас», не хранится в БД.</p>
  *
  * @param comparedTo предыдущий период сравнения; {@code null}, если сравнение не запрашивалось
  */
@@ -22,6 +22,7 @@ public record PerformanceReview(
         Period comparedTo,
         PerformanceMetrics metrics,
         TaskTypeBreakdown taskBreakdown,
+        KaitenInsights kaiten,
         List<PerformanceHighlight> highlights
 ) {
 

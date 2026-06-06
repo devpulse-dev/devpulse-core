@@ -152,19 +152,34 @@ highlights со ссылками → печать (Фаза 1 — print-CSS). В
 (через `AuthorSummary`/`ReviewAuthor`), `/users`, `/users/{email}/profile`, `/teams`,
 `/performance/review` (через `UserProfile`). Фронт может показывать команду+лида везде без кросс-резолва.
 
+### Итерация 4 — углублённая аналитика по Kaiten в perf-review (API 1.8.0)
+
+Два блока по карточкам Kaiten в досье: **дефекты по срочности** и **разработка по корневой задаче**,
+плюс **cycle-time** и **баланс** работы. Источник — расширенный маппинг карточек (срочность из
+`id_2561`, родитель из `parents[0]`, таймстампы переходов).
+
+- [x] шаг 1 — `KaitenCard` += urgency/parent/cycle-time; `KaitenCardType` += `TASK(6)`;
+      `KaitenUrgency` (4523/4524/4525/4526); маппер + тесты
+- [x] шаг 2 — доменная агрегация `PerformanceReviewAssembler.kaitenInsights` (defects-by-urgency,
+      dev-rollup по `parentId`, cycle-time median/mean, balance) + тесты
+- [x] шаг 3 — OAS 1.7.0 → 1.8.0 (`PerformanceReview.kaiten` + 8 схем; shared `KaitenCard.cardType` += TASK);
+      сервис зовёт `kaitenInsights`; `PerformanceReviewMapper`; `StatsControllerTest` ассертит блок
+- [ ] publish OAS 1.8.0 + bump `devpulse-oas.version` 1.7.0 → 1.8.0 + `mvn -U` ← **за тобой**
+- [ ] фронт: блоки «Дефекты по срочности» и «Разработка по корневой задаче» (аккордеон) + cycle-time/баланс
+
 ## Статус
 
-**Фаза 1 завершена — бэк + фронт + OAS 1.7.0.** Сделано: perf-review (досье с дельтами),
-команды/лиды first-class (`/teams`, назначение лида), team/isLead во всех developer-эндпоинтах,
-глобальный фильтр по командам и управление составом команд на фронте.
+**Фаза 1 + углублённая Kaiten-аналитика — бэк + OAS 1.8.0.** Сделано: perf-review (досье с дельтами +
+дефекты по срочности, rollup разработки, cycle-time, баланс), команды/лиды first-class, team/isLead
+во всех developer-эндпоинтах. Осталось: опубликовать OAS 1.8.0 и доделать фронт-блоки Итерации 4.
 
-Открытых задач по Фазе 1 нет. Дальше — по желанию: Фаза 2 (экспорт PDF + персист отчёта),
+Дальше — по желанию: Фаза 2 (экспорт PDF + персист отчёта),
 Фаза 3 (снимки карточек Kaiten для точной истории дефектов), канонический справочник команд.
 
 **TODO (housekeeping):** перенести зафиксированное из этого `future.md` в `README.md`/`REFACTORING.md`
 и удалить файл — он задумывался как временный единый источник правды на время реализации.
 
-## Фронт — готовый контракт (types из `@devpulse-dev/api-types` ^1.7.0)
+## Фронт — готовый контракт (types из `@devpulse-dev/api-types` ^1.8.0)
 
 > Канонический референс для фронта. Все ручки под префиксом `/api/v2`. Ошибки — RFC 7807
 > `application/problem+json` (`{type,title,status,detail,instance}`). `displayName`/`avatarUrl`/`team`
@@ -206,10 +221,52 @@ UI: чип с названием команды + значок/бейдж лид
   - `period`, `comparedTo: Period | null` (null, если `compareToPrevious=false`);
   - `metrics`: 14 полей `MetricDelta { current, previous, delta, deltaPct }`.
     git+ревью — с дельтами; `defectsInWork/Closed`, `devTasksInWork/Closed` — **снапшот: `previous/delta/deltaPct = null`** (дельту не рисуем);
-  - `taskBreakdown: { defect, development }`, каждый `{ inProgress, done, total }`;
+  - `taskBreakdown: { defect, development }`, каждый `{ inProgress, done, total }` — простые счётчики для KPI-плиток;
+  - **`kaiten: KaitenInsights`** — углублённая аналитика по карточкам (детально ниже);
   - `highlights: { kind: CARD|MR, title, subtitle?, url }[]`.
 - `404` — если пользователя нет в `unified_user`.
 
-**UI-план perf-review:** шапка subject → сетка KPI-карточек (виджет `MetricDelta`: значение + ↑/↓ дельта; у снапшот-метрик дельту скрыть) → стэкбар задач (defect/dev × inProgress/done) → секции код/ревью → highlights со ссылками → print-CSS. Контролы: picker человека (фильтр по команде), picker периода (пресеты квартал/полугодие/год + custom), тогл «сравнить с предыдущим». Важны zero/empty-состояния.
+**UI-план perf-review:** шапка subject → сетка KPI-карточек (виджет `MetricDelta`: значение + ↑/↓ дельта; у снапшот-метрик дельту скрыть) → **два блока по Kaiten** (см. ниже) → секции код/ревью → highlights со ссылками → print-CSS. Контролы: picker человека (фильтр по команде), picker периода (пресеты квартал/полугодие/год + custom), тогл «сравнить с предыдущим». Важны zero/empty-состояния.
 
-**Честные подписи на UI:** дефекты/задачи — «по текущему состоянию карточек»; «тесты» — строки тест-кода, не число тестов.
+**Честные подписи на UI:** дефекты/задачи — «по текущему состоянию карточек» (снапшот, не историческая правда); «тесты» — строки тест-кода, не число тестов.
+
+### Perf-review → блоки по Kaiten (`review.kaiten`)
+
+Тип `KaitenInsights = { defects, development, cycleTime, balance }`. Считается за период по карточкам,
+где человек участник; «релевантна» карточка, **закрытая в периоде ИЛИ сейчас в работе** (снапшот).
+
+**1. Дефекты по срочности — `kaiten.defects`**
+```
+{ total, inWork, closed, criticalHigh,
+  byUrgency: { critical, high, medium, low, unknown } }   // всё int
+```
+- UI: donut/stacked-bar по `byUrgency` (Критичный/Высокий/Средний/Низкий/Не задана).
+- KPI «🔥 горящие» = `criticalHigh` (критичные+высокие) — отдельной крупной плиткой, это главный сигнал нагрузки/качества, а не общее число.
+- `total = inWork + closed`. `unknown` — срочность не проставлена в карточке.
+
+**2. Разработка по корневой задаче — `kaiten.development`**
+```
+{ useCaseCount, rootTaskCount,
+  roots: [ { id: int64|null, title, url: string|null,
+             useCases: [ { id, title, url|null, status, type } ] } ] }
+```
+- Хедлайн: `useCaseCount` юскейсов в `rootTaskCount` корневых задачах (тип 6 «Задача» учитывается как разработка).
+- UI: **аккордеон** — список `roots` (родительские задачи), раскрытие показывает `useCases`. Заголовок строки — `root.title` (+ ссылка `root.url`), бейдж с числом юскейсов (`useCases.length`).
+- `useCase.status ∈ {NEW, IN_PROGRESS, DONE, UNKNOWN}` — статус-чип; `useCase.type ∈ {DEVELOPMENT, TASK}` — мелкий тег (на практике только эти два).
+- **Особый случай:** `root.id === null` → синтетическое ведро «Без корневой задачи» (карточки без родителя). Приходит **последним** в `roots`. `rootTaskCount` его НЕ включает (это только реальные родители). Рендерить отдельно/в конце.
+
+**3. Cycle-time — `kaiten.cycleTime`** (раздельно дефекты / разработка)
+```
+{ defects:     { medianDays: number|null, meanDays: number|null, count: int },
+  development: { medianDays: number|null, meanDays: number|null, count: int } }
+```
+- **Разделено намеренно:** у дефектов и разработки разная длительность (разработка дольше) — общая медиана вводила бы в заблуждение.
+- Время от «в работу» до «готово» по закрытым в периоде карточкам. `count === 0` → `medianDays/meanDays = null` → «нет данных» в этом ведре.
+- UI: две группы — «Дефекты» и «Разработка», в каждой плитки медиана/среднее (дней) + подпись `по count карточкам`. Медиана честнее среднего (выбросы) — её крупнее.
+
+**4. Баланс работы — `kaiten.balance`**
+```
+{ defectCount, buildCount, defectShare, buildShare }   // *Count int, *Share 0..1
+```
+- Доля firefighting (дефекты) vs building (разработка+задачи). UI: горизонтальный split-bar `defectShare`/`buildShare` + подпись «N дефектов : M разработка». Высокая `defectShare` — сигнал «тушит пожары».
+- При отсутствии карточек все нули (`defectShare = buildShare = 0`).

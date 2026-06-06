@@ -1,6 +1,7 @@
 package ru.x5.devpulse.adapter.kaiten;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -10,6 +11,7 @@ import ru.x5.devpulse.adapter.kaiten.dto.KaitenMemberDto;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenUserDto;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCardId;
+import ru.x5.devpulse.domain.model.kaiten.KaitenUrgency;
 import ru.x5.devpulse.domain.model.kaiten.KaitenUser;
 import ru.x5.devpulse.domain.model.user.Email;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
@@ -33,7 +35,49 @@ interface KaitenCardMapper {
     @Mapping(target = "ownerName", source = "dto.owner.fullName")
     @Mapping(target = "url", expression = "java(buildCardUrl(webBaseUrl, dto.id()))")
     @Mapping(target = "memberIds", source = "dto.members", qualifiedByName = "membersToIds")
+    @Mapping(target = "urgency", expression = "java(urgencyFrom(dto.properties()))")
+    @Mapping(target = "parentId", expression = "java(parentIdFrom(dto.parents()))")
+    @Mapping(target = "parentTitle", expression = "java(parentTitleFrom(dto.parents()))")
+    @Mapping(target = "parentUrl", expression = "java(parentUrlFrom(dto.parents(), webBaseUrl))")
+    @Mapping(target = "inProgressAt", source = "dto.inProgressAt")
+    @Mapping(target = "doneAt", source = "dto.doneAt")
     KaitenCard toDomain(KaitenCardDto dto, String webBaseUrl);
+
+    /** Срочность из property {@code id_2561} (массив; берём первый код). */
+    default KaitenUrgency urgencyFrom(Map<String, Object> properties) {
+        if (properties == null) return KaitenUrgency.UNKNOWN;
+        return KaitenUrgency.fromId(firstInt(properties.get("id_2561")));
+    }
+
+    default KaitenCardId parentIdFrom(List<KaitenCardDto.KaitenParentDto> parents) {
+        return (parents == null || parents.isEmpty()) ? null : new KaitenCardId(parents.get(0).id());
+    }
+
+    default String parentTitleFrom(List<KaitenCardDto.KaitenParentDto> parents) {
+        return (parents == null || parents.isEmpty()) ? null : parents.get(0).title();
+    }
+
+    default String parentUrlFrom(List<KaitenCardDto.KaitenParentDto> parents, String webBaseUrl) {
+        return (parents == null || parents.isEmpty()) ? null : buildCardUrl(webBaseUrl, parents.get(0).id());
+    }
+
+    /** {@code [4524]} / {@code 4524} / {@code "4524"} → {@code 4524}; иначе {@code null}. */
+    private static Integer firstInt(Object value) {
+        Object v = value;
+        if (v instanceof List<?> list) {
+            if (list.isEmpty()) return null;
+            v = list.get(0);
+        }
+        if (v instanceof Number n) return n.intValue();
+        if (v instanceof String s) {
+            try {
+                return Integer.valueOf(s.trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
+    }
 
     /**
      * Собирает web-URL карточки: {@code {webBaseUrl}/{cardId}}. Если baseUrl не задан —

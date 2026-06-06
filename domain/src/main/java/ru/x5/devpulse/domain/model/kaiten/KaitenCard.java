@@ -1,8 +1,10 @@
 package ru.x5.devpulse.domain.model.kaiten;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 
 /**
@@ -32,12 +34,19 @@ public record KaitenCard(
         LocalDateTime closedAt,
         boolean archived,
         String url,
-        List<KaitenUserId> memberIds
+        List<KaitenUserId> memberIds,
+        KaitenUrgency urgency,
+        KaitenCardId parentId,
+        String parentTitle,
+        String parentUrl,
+        LocalDateTime inProgressAt,
+        LocalDateTime doneAt
 ) {
 
     public KaitenCard {
         Objects.requireNonNull(id, "card id required");
         memberIds = memberIds == null ? List.of() : List.copyOf(memberIds);
+        urgency = urgency == null ? KaitenUrgency.UNKNOWN : urgency;
     }
 
     /** Производная: классифицированный тип карточки (DEVELOPMENT / DEFECT / OTHER). */
@@ -52,5 +61,21 @@ public record KaitenCard(
 
     public boolean isClosed() {
         return columnStatus() == KaitenColumnStatus.DONE || closedAt != null;
+    }
+
+    /** Есть ли у карточки корневая (родительская) задача — для rollup разработки. */
+    public boolean hasParent() {
+        return parentId != null;
+    }
+
+    /**
+     * Cycle-time: от первого перехода «в работу» до перехода «готово».
+     * {@link Optional#empty()}, если таймстампы отсутствуют или некорректны.
+     */
+    public Optional<Duration> cycleTime() {
+        if (inProgressAt == null || doneAt == null || doneAt.isBefore(inProgressAt)) {
+            return Optional.empty();
+        }
+        return Optional.of(Duration.between(inProgressAt, doneAt));
     }
 }

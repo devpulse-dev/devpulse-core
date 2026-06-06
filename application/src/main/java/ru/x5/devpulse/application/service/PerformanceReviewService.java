@@ -10,6 +10,7 @@ import ru.x5.devpulse.application.port.out.ReviewStatsRepository;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
+import ru.x5.devpulse.domain.model.performance.KaitenInsights;
 import ru.x5.devpulse.domain.model.performance.PerformanceHighlight;
 import ru.x5.devpulse.domain.model.performance.PerformanceMetrics;
 import ru.x5.devpulse.domain.model.performance.PerformanceReview;
@@ -66,10 +67,12 @@ public final class PerformanceReviewService implements GetPerformanceReviewUseCa
 
         TaskTypeBreakdown breakdown = PerformanceReviewAssembler.breakdown(cards, period);
         PerformanceMetrics metrics = PerformanceReviewAssembler.metrics(current, previous, breakdown);
+        KaitenInsights kaiten = PerformanceReviewAssembler.kaitenInsights(cards, period);
         List<PerformanceHighlight> highlights =
                 PerformanceReviewAssembler.highlights(cards, period, MAX_HIGHLIGHTS);
 
-        return Optional.of(new PerformanceReview(user, period, comparedTo, metrics, breakdown, highlights));
+        return Optional.of(new PerformanceReview(
+                user, period, comparedTo, metrics, breakdown, kaiten, highlights));
     }
 
     /** Сырые git+ревью-метрики одного человека за период. */

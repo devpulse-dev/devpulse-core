@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Карточка задачи, как её возвращает Kaiten API.
@@ -28,12 +29,24 @@ public record KaitenCardDto(
         @JsonProperty("updated") LocalDateTime updatedAt,
         @JsonProperty("closed") LocalDateTime closedAt,
         boolean archived,
-        List<KaitenMemberDto> members
+        List<KaitenMemberDto> members,
+        /** Кастомные property карточки (динамические ключи). Срочность — {@code id_2561:[code]}. */
+        @JsonProperty("properties") Map<String, Object> properties,
+        /** Родительские карточки (для rollup разработки берём первую). */
+        @JsonProperty("parents") List<KaitenParentDto> parents,
+        /** Первый переход «в работу» — начало cycle-time. */
+        @JsonProperty("first_moved_to_in_progress_at") LocalDateTime inProgressAt,
+        /** Последний переход «готово» — конец cycle-time. */
+        @JsonProperty("last_moved_to_done_at") LocalDateTime doneAt
 ) {
 
     /** Вложенная ссылка на board/space — только id и name. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record KaitenNamedRefDto(long id, String name) {}
+
+    /** Родительская карточка — берём id и title (url строим из id). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record KaitenParentDto(long id, String title) {}
 
     /**
      * Колонка на доске: {@code title} — что показать (например «В уточнении»),
