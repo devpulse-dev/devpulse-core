@@ -7,9 +7,9 @@ package ru.x5.devpulse.domain.model.performance;
 public record KaitenInsights(
         DefectsSummary defects,
         DevelopmentRollup development,
-        CycleTime cycleTime,
+        CycleTimeBreakdown cycleTime,
         WorkBalance balance
 ) {
     public static final KaitenInsights EMPTY = new KaitenInsights(
-            DefectsSummary.EMPTY, DevelopmentRollup.EMPTY, CycleTime.EMPTY, WorkBalance.EMPTY);
+            DefectsSummary.EMPTY, DevelopmentRollup.EMPTY, CycleTimeBreakdown.EMPTY, WorkBalance.EMPTY);
 }

@@ -12,6 +12,7 @@ import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCardType;
 import ru.x5.devpulse.domain.model.kaiten.KaitenColumnStatus;
 import ru.x5.devpulse.domain.model.performance.CycleTime;
+import ru.x5.devpulse.domain.model.performance.CycleTimeBreakdown;
 import ru.x5.devpulse.domain.model.performance.DefectsSummary;
 import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
 import ru.x5.devpulse.domain.model.performance.KaitenInsights;
@@ -161,7 +162,7 @@ public final class PerformanceReviewAssembler {
         }
         DefectsSummary defects = defects(relevant, period);
         DevelopmentRollup development = developmentRollup(relevant);
-        CycleTime cycleTime = cycleTime(relevant, period);
+        CycleTimeBreakdown cycleTime = cycleTime(relevant, period);
         WorkBalance balance = WorkBalance.of(defects.total(), development.useCaseCount());
         return new KaitenInsights(defects, development, cycleTime, balance);
     }
@@ -230,14 +231,29 @@ public final class PerformanceReviewAssembler {
         }
     }
 
-    /** Cycle-time (дни) по карточкам, закрытым в периоде и имеющим оба таймстампа. */
-    private static CycleTime cycleTime(List<KaitenCard> relevant, Period period) {
-        List<Double> days = new ArrayList<>();
+    /**
+     * Cycle-time (дни) по карточкам, закрытым в периоде, раздельно: дефекты vs разработка.
+     * У них разная длительность — общая медиана была бы некорректной.
+     */
+    private static CycleTimeBreakdown cycleTime(List<KaitenCard> relevant, Period period) {
+        List<Double> defectDays = new ArrayList<>();
+        List<Double> devDays = new ArrayList<>();
         for (KaitenCard c : relevant) {
-            if (closedInPeriod(c, period)) {
-                c.cycleTime().ifPresent(d -> days.add(d.toMinutes() / 1440.0));
+            if (!closedInPeriod(c, period) || c.cycleTime().isEmpty()) {
+                continue;
+            }
+            double days = c.cycleTime().get().toMinutes() / 1440.0;
+            KaitenCardType type = c.cardType();
+            if (type == KaitenCardType.DEFECT) {
+                defectDays.add(days);
+            } else if (type.isBuildWork()) {
+                devDays.add(days);
             }
         }
+        return new CycleTimeBreakdown(cycleTimeOf(defectDays), cycleTimeOf(devDays));
+    }
+
+    private static CycleTime cycleTimeOf(List<Double> days) {
         if (days.isEmpty()) {
             return CycleTime.EMPTY;
         }

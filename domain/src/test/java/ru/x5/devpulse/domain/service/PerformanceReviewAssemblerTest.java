@@ -213,18 +213,22 @@ class PerformanceReviewAssemblerTest {
         }
 
         @Test
-        @DisplayName("Cycle-time: медиана/среднее в днях по закрытым в периоде")
+        @DisplayName("Cycle-time раздельно: дефекты и разработка считаются по своим вёдрам")
         void cycleTime() {
+            LocalDateTime start = LocalDateTime.of(2026, 2, 1, 9, 0);
             List<KaitenCard> cards = List.of(
-                    withCycle(20, LocalDateTime.of(2026, 2, 1, 9, 0), LocalDateTime.of(2026, 2, 4, 9, 0)),
-                    withCycle(21, LocalDateTime.of(2026, 2, 1, 9, 0), LocalDateTime.of(2026, 2, 6, 9, 0)));
+                    withCycle(20, TYPE_DEFECT, start, LocalDateTime.of(2026, 2, 2, 9, 0)),       // дефект 1д
+                    withCycle(21, TYPE_DEVELOPMENT, start, LocalDateTime.of(2026, 2, 4, 9, 0)),  // разработка 3д
+                    withCycle(22, TYPE_DEVELOPMENT, start, LocalDateTime.of(2026, 2, 6, 9, 0))); // разработка 5д
 
             var ct = PerformanceReviewAssembler.kaitenInsights(cards, Q1).cycleTime();
 
-            assertAll("cycle-time",
-                    () -> assertThat(ct.count()).isEqualTo(2),
-                    () -> assertThat(ct.medianDays()).isEqualTo(4.0),
-                    () -> assertThat(ct.meanDays()).isEqualTo(4.0));
+            assertAll("cycle-time раздельно",
+                    () -> assertThat(ct.defects().count()).isEqualTo(1),
+                    () -> assertThat(ct.defects().medianDays()).isEqualTo(1.0),
+                    () -> assertThat(ct.development().count()).isEqualTo(2),
+                    () -> assertThat(ct.development().medianDays()).isEqualTo(4.0),
+                    () -> assertThat(ct.development().meanDays()).isEqualTo(4.0));
         }
 
         @Test
@@ -258,8 +262,8 @@ class PerformanceReviewAssemblerTest {
         return insightCard(id, typeId, columnType, closedAt, KaitenUrgency.UNKNOWN, parentId, parentTitle, null, null);
     }
 
-    private static KaitenCard withCycle(long id, LocalDateTime inProgress, LocalDateTime done) {
-        return insightCard(id, TYPE_DEVELOPMENT, COL_DONE, done, KaitenUrgency.UNKNOWN, null, null, inProgress, done);
+    private static KaitenCard withCycle(long id, int typeId, LocalDateTime inProgress, LocalDateTime done) {
+        return insightCard(id, typeId, COL_DONE, done, KaitenUrgency.UNKNOWN, null, null, inProgress, done);
     }
 
     private static KaitenCard insightCard(long id, int typeId, int columnType, LocalDateTime closedAt,

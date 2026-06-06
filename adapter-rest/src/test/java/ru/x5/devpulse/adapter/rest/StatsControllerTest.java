@@ -32,6 +32,7 @@ import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCardType;
 import ru.x5.devpulse.domain.model.kaiten.KaitenColumnStatus;
 import ru.x5.devpulse.domain.model.performance.CycleTime;
+import ru.x5.devpulse.domain.model.performance.CycleTimeBreakdown;
 import ru.x5.devpulse.domain.model.performance.DefectsSummary;
 import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
 import ru.x5.devpulse.domain.model.performance.KaitenInsights;
@@ -173,7 +174,7 @@ class StatsControllerTest {
                         100L, "Root A", "https://kaiten.x5.ru/100",
                         List.of(new UseCaseRef(11L, "UC1", "https://kaiten.x5.ru/11",
                                 KaitenColumnStatus.DONE, KaitenCardType.DEVELOPMENT))))),
-                new CycleTime(3.0, 8.2, 12),
+                new CycleTimeBreakdown(new CycleTime(2.0, 2.5, 4), new CycleTime(7.0, 8.2, 8)),
                 WorkBalance.of(15, 3));
         var period = new Period(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31));
         var review = new PerformanceReview(user, period, period.previousAdjacent(),
@@ -202,7 +203,8 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.kaiten.development.rootTaskCount").value(1))
                 .andExpect(jsonPath("$.kaiten.development.roots[0].title").value("Root A"))
                 .andExpect(jsonPath("$.kaiten.development.roots[0].useCases[0].type").value("DEVELOPMENT"))
-                .andExpect(jsonPath("$.kaiten.cycleTime.medianDays").value(3.0))
+                .andExpect(jsonPath("$.kaiten.cycleTime.defects.medianDays").value(2.0))
+                .andExpect(jsonPath("$.kaiten.cycleTime.development.medianDays").value(7.0))
                 .andExpect(jsonPath("$.kaiten.balance.defectCount").value(15))
                 .andExpect(jsonPath("$.kaiten.balance.buildCount").value(3));
     }

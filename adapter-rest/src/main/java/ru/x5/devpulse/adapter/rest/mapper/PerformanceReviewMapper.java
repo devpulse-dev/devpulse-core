@@ -3,6 +3,7 @@ package ru.x5.devpulse.adapter.rest.mapper;
 import org.mapstruct.Mapper;
 import org.mapstruct.ReportingPolicy;
 import ru.x5.devpulse.adapter.rest.api.model.CycleTime;
+import ru.x5.devpulse.adapter.rest.api.model.CycleTimeBreakdown;
 import ru.x5.devpulse.adapter.rest.api.model.DefectsSummary;
 import ru.x5.devpulse.adapter.rest.api.model.DevelopmentRollup;
 import ru.x5.devpulse.adapter.rest.api.model.KaitenInsights;
@@ -59,6 +60,8 @@ public interface PerformanceReviewMapper {
     RootTask toRoot(ru.x5.devpulse.domain.model.performance.RootTask r);
 
     UseCaseRef toUseCase(ru.x5.devpulse.domain.model.performance.UseCaseRef u);
+
+    CycleTimeBreakdown toCycleTimeBreakdown(ru.x5.devpulse.domain.model.performance.CycleTimeBreakdown c);
 
     CycleTime toCycleTime(ru.x5.devpulse.domain.model.performance.CycleTime c);
 
