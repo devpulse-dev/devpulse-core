@@ -76,15 +76,16 @@ public final class PerformanceReviewAssembler {
         int devDone = 0;
         for (KaitenCard card : cards) {
             KaitenCardType type = card.cardType();
-            if (type != KaitenCardType.DEFECT && type != KaitenCardType.DEVELOPMENT) {
+            boolean defect = type == KaitenCardType.DEFECT;
+            boolean build = type.isBuildWork();   // DEVELOPMENT + TASK
+            if (!defect && !build) {
                 continue;
             }
             boolean closed = closedInPeriod(card, period);
-            boolean inWork = !card.isClosed() && card.columnStatus() == KaitenColumnStatus.IN_PROGRESS;
-            if (!closed && !inWork) {
+            if (!closed && !inWork(card)) {
                 continue;
             }
-            if (type == KaitenCardType.DEFECT) {
+            if (defect) {
                 if (closed) defectDone++; else defectIn++;
             } else {
                 if (closed) devDone++; else devIn++;
@@ -104,19 +105,19 @@ public final class PerformanceReviewAssembler {
         List<Scored> scored = new ArrayList<>();
         for (KaitenCard card : cards) {
             KaitenCardType type = card.cardType();
-            if (type != KaitenCardType.DEFECT && type != KaitenCardType.DEVELOPMENT) {
+            boolean defect = type == KaitenCardType.DEFECT;
+            if (!defect && !type.isBuildWork()) {
                 continue;
             }
             if (card.url() == null || card.url().isBlank()) {
                 continue;
             }
             boolean closed = closedInPeriod(card, period);
-            boolean inWork = !card.isClosed() && card.columnStatus() == KaitenColumnStatus.IN_PROGRESS;
-            if (!closed && !inWork) {
+            if (!closed && !inWork(card)) {
                 continue;
             }
             // rank: меньше = выше. Закрытые дефекты (0) → закрытые задачи (1) → дефекты в работе (2) → задачи (3).
-            int rank = (closed ? 0 : 2) + (type == KaitenCardType.DEFECT ? 0 : 1);
+            int rank = (closed ? 0 : 2) + (defect ? 0 : 1);
             String subtitle = type.name() + " · " + (closed ? "DONE" : "IN_PROGRESS");
             scored.add(new Scored(
                     new PerformanceHighlight(PerformanceHighlight.Kind.CARD, card.title(), subtitle, card.url()),
