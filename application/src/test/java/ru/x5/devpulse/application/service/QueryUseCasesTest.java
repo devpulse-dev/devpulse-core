@@ -352,6 +352,7 @@ class QueryUseCasesTest {
                 "Board", "Space",
                 null, null, now, now, null, false,
                 "https://kaiten.x5.ru/" + id,
-                List.of());
+                List.of(),
+                null, null, null, null, null, null);
     }
 }

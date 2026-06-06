@@ -155,6 +155,7 @@ class PerformanceReviewAssemblerTest {
         return new KaitenCard(
                 new KaitenCardId(id), title, null, typeId, columnType,
                 "col", "board", "space", null, null,
-                created, updated, closedAt, false, url, List.of());
+                created, updated, closedAt, false, url, List.of(),
+                null, null, null, null, null, null);
     }
 }

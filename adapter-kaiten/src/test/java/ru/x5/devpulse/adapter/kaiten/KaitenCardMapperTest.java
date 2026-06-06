@@ -12,10 +12,12 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mapstruct.factory.Mappers;
+import java.util.Map;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenCardDto;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenMemberDto;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenUserDto;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
+import ru.x5.devpulse.domain.model.kaiten.KaitenUrgency;
 
 @DisplayName("KaitenCardMapper: webBaseUrl → KaitenCard.url + полные mappings")
 class KaitenCardMapperTest {
@@ -58,7 +60,11 @@ class KaitenCardMapperTest {
                 /* updatedAt */ LocalDateTime.of(2026, 5, 20, 12, 0),
                 /* closedAt */ null,
                 /* archived */ false,
-                /* members */ List.of(new KaitenMemberDto(7L, null, null, null), new KaitenMemberDto(8L, null, null, null)));
+                /* members */ List.of(new KaitenMemberDto(7L, null, null, null), new KaitenMemberDto(8L, null, null, null)),
+                /* properties */ Map.of("id_2561", List.of(4524)),
+                /* parents */ List.of(new KaitenCardDto.KaitenParentDto(111L, "Root task")),
+                /* inProgressAt */ LocalDateTime.of(2026, 5, 2, 9, 0),
+                /* doneAt */ LocalDateTime.of(2026, 5, 5, 9, 0));
 
         KaitenCard card = mapper.toDomain(dto, "https://kaiten.x5.ru");
 
@@ -75,7 +81,12 @@ class KaitenCardMapperTest {
                 () -> assertThat(card.archived()).isFalse(),
                 () -> assertThat(card.url()).isEqualTo("https://kaiten.x5.ru/555"),
                 () -> assertThat(card.memberIds())
-                        .extracting(m -> m.value()).containsExactly(7L, 8L));
+                        .extracting(m -> m.value()).containsExactly(7L, 8L),
+                () -> assertThat(card.urgency()).as("id_2561:[4524] → HIGH").isEqualTo(KaitenUrgency.HIGH),
+                () -> assertThat(card.parentId().value()).isEqualTo(111L),
+                () -> assertThat(card.parentTitle()).isEqualTo("Root task"),
+                () -> assertThat(card.parentUrl()).isEqualTo("https://kaiten.x5.ru/111"),
+                () -> assertThat(card.cycleTime()).as("in_progress→done заполнено").isPresent());
     }
 
     @Test
@@ -86,7 +97,8 @@ class KaitenCardMapperTest {
                 new KaitenCardDto.KaitenColumnDto(1L, "New", 1),
                 new KaitenCardDto.KaitenNamedRefDto(1L, "b"),
                 new KaitenCardDto.KaitenNamedRefDto(1L, "s"),
-                null, null, null, null, false, List.of());
+                null, null, null, null, false, List.of(),
+                null, null, null, null);
 
         KaitenCard card = mapper.toDomain(dto, "");
 
@@ -94,6 +106,9 @@ class KaitenCardMapperTest {
                 () -> assertThat(card.url()).isNull(),
                 () -> assertThat(card.id().value()).isEqualTo(42L),
                 () -> assertThat(card.columnType()).isEqualTo(1),
-                () -> assertThat(card.columnTitle()).isEqualTo("New"));
+                () -> assertThat(card.columnTitle()).isEqualTo("New"),
+                () -> assertThat(card.urgency()).as("нет properties → UNKNOWN").isEqualTo(KaitenUrgency.UNKNOWN),
+                () -> assertThat(card.parentId()).as("нет parents → null").isNull(),
+                () -> assertThat(card.cycleTime()).as("нет таймстампов → empty").isEmpty());
     }
 }
