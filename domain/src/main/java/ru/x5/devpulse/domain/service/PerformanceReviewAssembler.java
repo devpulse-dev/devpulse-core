@@ -11,14 +11,17 @@ import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCardType;
 import ru.x5.devpulse.domain.model.kaiten.KaitenColumnStatus;
+import ru.x5.devpulse.domain.model.kaiten.KaitenUrgency;
 import ru.x5.devpulse.domain.model.performance.CycleTime;
 import ru.x5.devpulse.domain.model.performance.CycleTimeBreakdown;
 import ru.x5.devpulse.domain.model.performance.DefectsSummary;
+import ru.x5.devpulse.domain.model.performance.DeliveredFeature;
 import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
+import ru.x5.devpulse.domain.model.performance.FirefightingItem;
 import ru.x5.devpulse.domain.model.performance.KaitenInsights;
 import ru.x5.devpulse.domain.model.performance.MetricDelta;
+import ru.x5.devpulse.domain.model.performance.NotableResults;
 import ru.x5.devpulse.domain.model.performance.PeriodMetrics;
-import ru.x5.devpulse.domain.model.performance.PerformanceHighlight;
 import ru.x5.devpulse.domain.model.performance.PerformanceMetrics;
 import ru.x5.devpulse.domain.model.performance.RootTask;
 import ru.x5.devpulse.domain.model.performance.TaskStatusCounts;
@@ -29,7 +32,7 @@ import ru.x5.devpulse.domain.model.performance.WorkBalance;
 
 /**
  * Чистая логика сборки досье к perf-review: дельты git+ревью-метрик, счёт карточек по
- * типу/статусу и формирование highlights. Stateless, без I/O — легко тестируется.
+ * типу/статусу и формирование «заметных результатов». Stateless, без I/O — легко тестируется.
  */
 public final class PerformanceReviewAssembler {
 
@@ -98,37 +101,55 @@ public final class PerformanceReviewAssembler {
     }
 
     /**
-     * Highlights-пруфы: заметные карточки со ссылкой. Сначала закрытые в периоде (сделанная
-     * работа — главное доказательство), потом в работе; дефекты раньше задач. Без url — пропускаем.
+     * Заметные результаты — два осмысленных среза:
+     * <ul>
+     *   <li><b>firefighting</b> — закрытые в периоде дефекты {@code urgency ∈ {CRITICAL, HIGH}},
+     *       сортировка: критичные раньше → свежие раньше;</li>
+     *   <li><b>deliveredFeatures</b> — корневые задачи с завершёнными юскейсами, сортировка по
+     *       числу done-юскейсов (затем по размеру фичи).</li>
+     * </ul>
+     * По {@code limit} элементов на блок. Строится на надёжных сигналах (срочность/завершённость/
+     * уровень фичи) — без member.type и time_spent (см. {@link NotableResults}).
+     *
+     * @param development уже посчитанный rollup (источник корневых задач) — не пересчитываем
      */
-    public static List<PerformanceHighlight> highlights(List<KaitenCard> cards, Period period, int limit) {
-        record Scored(PerformanceHighlight highlight, int rank) {}
-        List<Scored> scored = new ArrayList<>();
-        for (KaitenCard card : cards) {
-            KaitenCardType type = card.cardType();
-            boolean defect = type == KaitenCardType.DEFECT;
-            if (!defect && !type.isBuildWork()) {
-                continue;
-            }
-            if (card.url() == null || card.url().isBlank()) {
-                continue;
-            }
-            boolean closed = closedInPeriod(card, period);
-            if (!closed && !inWork(card)) {
-                continue;
-            }
-            // rank: меньше = выше. Закрытые дефекты (0) → закрытые задачи (1) → дефекты в работе (2) → задачи (3).
-            int rank = (closed ? 0 : 2) + (defect ? 0 : 1);
-            String subtitle = type.name() + " · " + (closed ? "DONE" : "IN_PROGRESS");
-            scored.add(new Scored(
-                    new PerformanceHighlight(PerformanceHighlight.Kind.CARD, card.title(), subtitle, card.url()),
-                    rank));
-        }
-        return scored.stream()
-                .sorted(Comparator.comparingInt(Scored::rank))
+    public static NotableResults notable(List<KaitenCard> cards, Period period,
+                                         DevelopmentRollup development, int limit) {
+        List<FirefightingItem> firefighting = cards.stream()
+                .filter(c -> c.cardType() == KaitenCardType.DEFECT)
+                .filter(c -> closedInPeriod(c, period))
+                .filter(c -> c.urgency() == KaitenUrgency.CRITICAL || c.urgency() == KaitenUrgency.HIGH)
+                .filter(c -> c.url() != null && !c.url().isBlank())
+                .sorted(Comparator
+                        .comparingInt((KaitenCard c) -> c.urgency() == KaitenUrgency.CRITICAL ? 0 : 1)
+                        .thenComparing(PerformanceReviewAssembler::closedAtKey, Comparator.reverseOrder()))
                 .limit(Math.max(0, limit))
-                .map(Scored::highlight)
+                .map(c -> new FirefightingItem(c.id().value(), c.title(), c.url(), c.urgency()))
                 .toList();
+
+        List<DeliveredFeature> deliveredFeatures = development.roots().stream()
+                .filter(r -> r.id() != null)   // только реальные корневые задачи (не ведро «без родителя»)
+                .map(PerformanceReviewAssembler::toDeliveredFeature)
+                .filter(f -> f.doneCount() > 0)
+                .sorted(Comparator.comparingInt(DeliveredFeature::doneCount).reversed()
+                        .thenComparing(Comparator.comparingInt(DeliveredFeature::totalCount).reversed()))
+                .limit(Math.max(0, limit))
+                .toList();
+
+        return new NotableResults(firefighting, deliveredFeatures);
+    }
+
+    private static DeliveredFeature toDeliveredFeature(RootTask root) {
+        int done = (int) root.useCases().stream()
+                .filter(u -> u.status() == KaitenColumnStatus.DONE)
+                .count();
+        return new DeliveredFeature(root.id(), root.title(), root.url(), done, root.useCaseCount());
+    }
+
+    /** Ключ сортировки по «свежести закрытия»: closedAt → updatedAt → MIN. */
+    private static LocalDateTime closedAtKey(KaitenCard card) {
+        if (card.closedAt() != null) return card.closedAt();
+        return card.updatedAt() != null ? card.updatedAt() : LocalDateTime.MIN;
     }
 
     private static boolean closedInPeriod(KaitenCard card, Period period) {

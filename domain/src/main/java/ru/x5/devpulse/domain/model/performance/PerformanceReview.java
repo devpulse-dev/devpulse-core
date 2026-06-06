@@ -1,6 +1,5 @@
 package ru.x5.devpulse.domain.model.performance;
 
-import java.util.List;
 import java.util.Objects;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
@@ -12,7 +11,7 @@ import ru.x5.devpulse.domain.model.user.UnifiedUser;
  * <p>Композиция источников: профиль ({@link UnifiedUser}), git+ревью-метрики с дельтами
  * ({@link PerformanceMetrics}), карточки Kaiten — простой счётчик ({@link TaskTypeBreakdown})
  * и развёрнутая аналитика ({@link KaitenInsights}: дефекты по срочности, rollup разработки,
- * cycle-time, баланс), highlights-пруфы. Снапшот «как сейчас», не хранится в БД.</p>
+ * cycle-time, баланс), {@link NotableResults заметные результаты}. Снапшот «как сейчас», не хранится в БД.</p>
  *
  * @param comparedTo предыдущий период сравнения; {@code null}, если сравнение не запрашивалось
  */
@@ -23,12 +22,11 @@ public record PerformanceReview(
         PerformanceMetrics metrics,
         TaskTypeBreakdown taskBreakdown,
         KaitenInsights kaiten,
-        List<PerformanceHighlight> highlights
+        NotableResults notable
 ) {
 
     public PerformanceReview {
         Objects.requireNonNull(subject, "subject required");
         Objects.requireNonNull(period, "period required");
-        highlights = highlights == null ? List.of() : List.copyOf(highlights);
     }
 }

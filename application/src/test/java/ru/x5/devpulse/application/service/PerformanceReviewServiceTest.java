@@ -119,7 +119,8 @@ class PerformanceReviewServiceTest {
         assertAll("нет kaiten_id",
                 () -> assertThat(r.taskBreakdown().defect().total()).isZero(),
                 () -> assertThat(r.taskBreakdown().development().total()).isZero(),
-                () -> assertThat(r.highlights()).isEmpty(),
+                () -> assertThat(r.notable().firefighting()).isEmpty(),
+                () -> assertThat(r.notable().deliveredFeatures()).isEmpty(),
                 () -> verify(kaitenGateway, never()).fetchCardsForMember(any(), any()));
     }
 

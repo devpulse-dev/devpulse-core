@@ -63,7 +63,7 @@ metrics:    набор MetricDelta { current, previous, delta, deltaPct }:
             reviewsGiven, commentsGiven, reviewsReceived, avgTimeToMergeHours, mergedMrCount,
             defectsInWork, defectsClosed, devTasksInWork, devTasksClosed
 taskBreakdown: { defect: {inProgress, done, total}, development: {...} }
-highlights:    [ { kind: CARD|MR, title, url, ... } ]   # пруфы со ссылками
+notable:       { firefighting: [...], deliveredFeatures: [...] }  # заметные результаты
 ```
 
 Команды (users-contract):
@@ -90,7 +90,7 @@ PUT  /users/{email}/team     # body { team: string|null } — назначить
 picker периода (пресеты квартал/полугодие/год + custom) + тогл «сравнить с предыдущим».
 Layout: шапка subject → сетка KPI с дельтами → разбивка задач (стэкбар defect/dev по
 статусам) → код → ревью (given vs received) → heatmap (переиспользуем weekly/hourly) →
-highlights со ссылками → печать (Фаза 1 — print-CSS). Важны zero/empty-состояния.
+заметные результаты → печать (Фаза 1 — print-CSS). Важны zero/empty-состояния.
 
 ## Команды и лиды — модель
 
@@ -164,14 +164,32 @@ highlights со ссылками → печать (Фаза 1 — print-CSS). В
       dev-rollup по `parentId`, cycle-time median/mean, balance) + тесты
 - [x] шаг 3 — OAS 1.7.0 → 1.8.0 (`PerformanceReview.kaiten` + 8 схем; shared `KaitenCard.cardType` += TASK);
       сервис зовёт `kaitenInsights`; `PerformanceReviewMapper`; `StatsControllerTest` ассертит блок
-- [ ] publish OAS 1.8.0 + bump `devpulse-oas.version` 1.7.0 → 1.8.0 + `mvn -U` ← **за тобой**
+- [x] publish OAS 1.8.0 + bump `devpulse-oas.version` 1.7.0 → 1.8.0 + `mvn -U`
 - [ ] фронт: блоки «Дефекты по срочности» и «Разработка по корневой задаче» (аккордеон) + cycle-time/баланс
+
+### Итерация 5 — cycle-time раздельно + типизированные «заметные результаты» (API 2.0.0)
+
+- [x] OAS 1.8.0 → 1.9.0: `cycleTime` → `CycleTimeBreakdown { defects, development }`
+      (у дефектов и разработки разная длительность — общая медиана некорректна)
+- [x] OAS 1.9.0 → **2.0.0 (major)**: убрали плоский `highlights`, добавили
+      `notable: { firefighting[], deliveredFeatures[] }`. **Breaking** (поле удалено) → major-бамп
+      (oasdiff-гейт не пускал minor). `firefighting` = закрытые critical/high дефекты;
+      `deliveredFeatures` = корневые задачи с done-юскейсами. member.type/time_spent НЕ используются
+      (первый = владелец карточки, второй заполняется руками → near-zero, проверено на выгрузке)
+- [x] бэк: `NotableResults`/`FirefightingItem`/`DeliveredFeature`, `PerformanceReviewAssembler.notable`,
+      `PerformanceReviewMapper`, тесты (`...AssemblerTest.Notable`, `StatsControllerTest`)
+- [x] bump `devpulse-oas.version` → **2.0.0** в `adapter-rest/pom.xml`
+- [ ] publish train 2.0.0 + поднять зависимость фронта `@devpulse-dev/api-types` до `^2.0.0`
+      (`^1.x` major не подхватит) ← **за тобой**
+- [ ] фронт: переключить `highlights` → `notable.firefighting`/`notable.deliveredFeatures`;
+      cycle-time показывать двумя группами (дефекты/разработка)
 
 ## Статус
 
-**Фаза 1 + углублённая Kaiten-аналитика — бэк + OAS 1.8.0.** Сделано: perf-review (досье с дельтами +
-дефекты по срочности, rollup разработки, cycle-time, баланс), команды/лиды first-class, team/isLead
-во всех developer-эндпоинтах. Осталось: опубликовать OAS 1.8.0 и доделать фронт-блоки Итерации 4.
+**Фаза 1 + Kaiten-аналитика + заметные результаты — бэк + OAS 2.0.0.** Сделано: perf-review
+(дельты + дефекты по срочности + rollup разработки + cycle-time раздельно + баланс + типизированные
+notable), команды/лиды first-class, team/isLead во всех developer-эндпоинтах. Осталось: задеплоить
+train 2.0.0, поднять зависимость фронта до `^2.0.0` и доделать фронт-блоки.
 
 Дальше — по желанию: Фаза 2 (экспорт PDF + персист отчёта),
 Фаза 3 (снимки карточек Kaiten для точной истории дефектов), канонический справочник команд.
@@ -179,7 +197,7 @@ highlights со ссылками → печать (Фаза 1 — print-CSS). В
 **TODO (housekeeping):** перенести зафиксированное из этого `future.md` в `README.md`/`REFACTORING.md`
 и удалить файл — он задумывался как временный единый источник правды на время реализации.
 
-## Фронт — готовый контракт (types из `@devpulse-dev/api-types` ^1.8.0)
+## Фронт — готовый контракт (types из `@devpulse-dev/api-types` ^2.0.0)
 
 > Канонический референс для фронта. Все ручки под префиксом `/api/v2`. Ошибки — RFC 7807
 > `application/problem+json` (`{type,title,status,detail,instance}`). `displayName`/`avatarUrl`/`team`
@@ -223,12 +241,29 @@ UI: чип с названием команды + значок/бейдж лид
     git+ревью — с дельтами; `defectsInWork/Closed`, `devTasksInWork/Closed` — **снапшот: `previous/delta/deltaPct = null`** (дельту не рисуем);
   - `taskBreakdown: { defect, development }`, каждый `{ inProgress, done, total }` — простые счётчики для KPI-плиток;
   - **`kaiten: KaitenInsights`** — углублённая аналитика по карточкам (детально ниже);
-  - `highlights: { kind: CARD|MR, title, subtitle?, url }[]`.
+  - **`notable: NotableResults`** — заметные результаты (детально ниже).
 - `404` — если пользователя нет в `unified_user`.
 
-**UI-план perf-review:** шапка subject → сетка KPI-карточек (виджет `MetricDelta`: значение + ↑/↓ дельта; у снапшот-метрик дельту скрыть) → **два блока по Kaiten** (см. ниже) → секции код/ревью → highlights со ссылками → print-CSS. Контролы: picker человека (фильтр по команде), picker периода (пресеты квартал/полугодие/год + custom), тогл «сравнить с предыдущим». Важны zero/empty-состояния.
+**UI-план perf-review:** шапка subject → сетка KPI-карточек (виджет `MetricDelta`: значение + ↑/↓ дельта; у снапшот-метрик дельту скрыть) → **два блока по Kaiten** + **заметные результаты** (см. ниже) → секции код/ревью → print-CSS. Контролы: picker человека (фильтр по команде), picker периода (пресеты квартал/полугодие/год + custom), тогл «сравнить с предыдущим». Важны zero/empty-состояния.
 
 **Честные подписи на UI:** дефекты/задачи — «по текущему состоянию карточек» (снапшот, не историческая правда); «тесты» — строки тест-кода, не число тестов.
+
+### Perf-review → Заметные результаты (`review.notable`)
+
+`NotableResults = { firefighting, deliveredFeatures }` — два осмысленных среза вместо старого
+плоского списка. Строятся на надёжных сигналах; **member.type («ответственный») и time_spent НЕ
+используются** (первый = владелец/создатель карточки, не исполнитель; второй заполняется руками и
+почти всегда near-zero — проверено на выгрузке).
+
+**🔥 `firefighting: FirefightingItem[]`** — `{ id, title, url: string|null, urgency }`
+- Закрытые в периоде дефекты `urgency ∈ {CRITICAL, HIGH}`. Сортировка: критичные → свежие. До 5.
+- UI: список «потушенных пожаров» с бейджем срочности и ссылкой. Пусто → «критичных/высоких дефектов не закрывал» (тоже инфа).
+
+**🚀 `deliveredFeatures: DeliveredFeature[]`** — `{ id, title, url: string|null, doneCount, totalCount }`
+- Корневые задачи с завершёнными юскейсами. Сортировка по `doneCount` desc. До 5. Ведро «без родителя» и фичи с `doneCount=0` сюда не попадают.
+- UI: «Доставил фичу X — `doneCount`/`totalCount` юскейсов». Прогресс-бар `doneCount/totalCount` + ссылка на корневую задачу.
+
+> ⚠️ **`url` зависит от `KAITEN_WEB_BASE_URL`.** Если не задан — `url = null` у всех карточек (и в notable, и в `/profile`, и в rollup). Это была причина пустого блока — теперь проверь, что env задан.
 
 ### Perf-review → блоки по Kaiten (`review.kaiten`)
 
