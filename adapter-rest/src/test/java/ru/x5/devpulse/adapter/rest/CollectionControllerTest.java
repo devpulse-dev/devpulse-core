@@ -38,36 +38,36 @@ class CollectionControllerTest {
     @MockitoBean GetCollectionRunUseCase getCollectionRun;
 
     @Test
-    @DisplayName("POST без тела → запуск с since=null, возвращает финальный run (SUCCESS)")
+    @DisplayName("POST без тела → since=null, 202 + прогон RUNNING (async)")
     void startWithoutBody() throws Exception {
         UUID id = UUID.randomUUID();
         when(collectDailyStats.run(any())).thenReturn(new CollectionRun(
-                id, LocalDateTime.now(), LocalDateTime.now(),
+                id, LocalDateTime.now(), null,
                 LocalDateTime.of(2026, 5, 1, 0, 0),
                 LocalDateTime.of(2026, 5, 31, 23, 59),
-                CollectionStatus.SUCCESS, null));
+                CollectionStatus.RUNNING, null));
 
         mvc.perform(post("/api/v2/collection/runs"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("SUCCESS"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("RUNNING"))
                 .andExpect(jsonPath("$.id").value(id.toString()));
     }
 
     @Test
-    @DisplayName("POST с since → значение прокидывается в use case")
+    @DisplayName("POST с since → значение прокидывается в use case, 202 + RUNNING")
     void startWithSince() throws Exception {
         UUID id = UUID.randomUUID();
         when(collectDailyStats.run(any())).thenReturn(new CollectionRun(
-                id, LocalDateTime.now(), LocalDateTime.now(),
+                id, LocalDateTime.now(), null,
                 LocalDateTime.of(2026, 5, 10, 0, 0),
                 LocalDateTime.now(),
-                CollectionStatus.SUCCESS, null));
+                CollectionStatus.RUNNING, null));
 
         mvc.perform(post("/api/v2/collection/runs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"since\":\"2026-05-10T00:00:00\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("SUCCESS"));
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("RUNNING"));
     }
 
     @Test

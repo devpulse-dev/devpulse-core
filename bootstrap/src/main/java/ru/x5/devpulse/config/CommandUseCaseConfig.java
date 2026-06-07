@@ -10,6 +10,7 @@ import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
 import ru.x5.devpulse.application.port.in.SetTeamLeadUseCase;
 import ru.x5.devpulse.application.port.in.SetUserTeamUseCase;
 import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
+import ru.x5.devpulse.application.port.out.BackgroundRunner;
 import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
 import ru.x5.devpulse.application.port.out.CommitRepository;
@@ -51,10 +52,11 @@ class CommandUseCaseConfig {
             CollectReviewsUseCase collectReviews,
             CollectionRunRepository collectionRunRepository,
             CollectionLock collectionLock,
-            KaitenCardsCache kaitenCardsCache) {
+            KaitenCardsCache kaitenCardsCache,
+            BackgroundRunner backgroundRunner) {
         return new CollectDailyStatsService(
                 collectGitStats, syncKaitenUsers, collectReviews, collectionRunRepository,
-                collectionLock, kaitenCardsCache);
+                collectionLock, kaitenCardsCache, backgroundRunner);
     }
 
     /** Отмена идущего прогона — ставит флаг, сбор остановится на ближайшем checkpoint'е. */

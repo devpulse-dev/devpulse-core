@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -27,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
 import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
+import ru.x5.devpulse.application.port.out.BackgroundRunner;
 import ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException;
 import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
@@ -36,12 +38,13 @@ import ru.x5.devpulse.domain.model.collection.CollectionStatus;
 import ru.x5.devpulse.domain.model.user.Email;
 
 /**
- * Тест orchestrator-уровня. Проверяет lifecycle CollectionRun, distributed lock и
- * корректное делегирование двум worker'ам. Сама git-фаза покрывается отдельно в
- * {@link CollectGitStatsServiceTest}, sync — в {@link SyncKaitenUsersServiceTest}.
+ * Тест orchestrator-уровня (async POST). {@code run()} возвращает RUNNING и диспатчит сбор в фон;
+ * в тестах {@link BackgroundRunner} выполняет задачу inline, поэтому терминальный статус проверяем
+ * по <b>сохранённому</b> прогону (последний {@code save}), а не по возвращаемому значению.
+ * Сама git-фаза — в {@link CollectGitStatsServiceTest}, sync — в {@link SyncKaitenUsersServiceTest}.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("CollectDailyStatsService (orchestrator: lock + run lifecycle + delegation)")
+@DisplayName("CollectDailyStatsService (orchestrator: async lock + run lifecycle + delegation)")
 class CollectDailyStatsServiceTest {
 
     private static final LocalDateTime SINCE = LocalDateTime.of(2026, 5, 1, 0, 0);
@@ -53,16 +56,29 @@ class CollectDailyStatsServiceTest {
     @Mock private CollectionLock collectionLock;
     @Mock private CollectionLock.Handle lockHandle;
     @Mock private KaitenCardsCache kaitenCardsCache;
+    @Mock private BackgroundRunner backgroundRunner;
 
     @InjectMocks private CollectDailyStatsService service;
 
     @BeforeEach
-    void stubLockAcquired() {
+    void setup() {
         lenient().when(collectionLock.acquireOrThrow()).thenReturn(lockHandle);
+        // BackgroundRunner выполняет задачу синхронно — тесты остаются детерминированными.
+        lenient().doAnswer(inv -> {
+            ((Runnable) inv.getArgument(0)).run();
+            return null;
+        }).when(backgroundRunner).run(any());
+    }
+
+    /** Последний сохранённый прогон — терминальный (RUNNING сохраняется в прологе, терминал — в фоне). */
+    private CollectionRun lastSaved() {
+        ArgumentCaptor<CollectionRun> captor = ArgumentCaptor.forClass(CollectionRun.class);
+        verify(collectionRunRepository, atLeastOnce()).save(captor.capture());
+        return captor.getValue();
     }
 
     @Test
-    @DisplayName("Happy path: lock → STARTED → git + kaiten → SUCCESS")
+    @DisplayName("Happy path: 202(RUNNING) → фон: git + kaiten → SUCCESS, лок освобождён")
     void happyPath() {
         when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of(new Email("boris@x5.ru")));
 
@@ -71,10 +87,27 @@ class CollectDailyStatsServiceTest {
         ArgumentCaptor<CollectionRun> runs = ArgumentCaptor.forClass(CollectionRun.class);
         verify(collectionRunRepository, times(2)).save(runs.capture());
         assertAll("orchestration",
-                () -> assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS),
+                () -> assertThat(result.status()).as("POST отдаёт RUNNING (202)")
+                        .isEqualTo(CollectionStatus.RUNNING),
+                () -> assertThat(runs.getAllValues().get(0).status()).as("сначала — RUNNING")
+                        .isEqualTo(CollectionStatus.RUNNING),
+                () -> assertThat(runs.getAllValues().get(1).status()).as("в фоне — SUCCESS")
+                        .isEqualTo(CollectionStatus.SUCCESS),
                 () -> verify(collectGitStats).collect(any(), any(), any()),
                 () -> verify(syncKaitenUsers).syncAll(),
                 () -> verify(lockHandle).close());
+    }
+
+    @Test
+    @DisplayName("run() возвращает RUNNING сразу и диспатчит сбор в фон (202-семантика)")
+    void dispatchesToBackgroundAndReturnsRunning() {
+        when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
+
+        CollectionRun result = service.run(SINCE);
+
+        assertAll("async-диспатч",
+                () -> assertThat(result.status()).isEqualTo(CollectionStatus.RUNNING),
+                () -> verify(backgroundRunner).run(any()));
     }
 
     @Test
@@ -82,11 +115,12 @@ class CollectDailyStatsServiceTest {
     void gitFailureMarksFailedAndSkipsKaiten() {
         when(collectGitStats.collect(any(), any(), any())).thenThrow(new RuntimeException("boom"));
 
-        CollectionRun result = service.run(SINCE);
+        service.run(SINCE);
 
+        CollectionRun terminal = lastSaved();
         assertAll("git упал",
-                () -> assertThat(result.status()).isEqualTo(CollectionStatus.FAILED),
-                () -> assertThat(result.error()).hasValue("boom"),
+                () -> assertThat(terminal.status()).isEqualTo(CollectionStatus.FAILED),
+                () -> assertThat(terminal.error()).hasValue("boom"),
                 () -> verify(syncKaitenUsers, never()).syncAll(),
                 () -> verify(collectionRunRepository, times(2)).save(any()));
     }
@@ -97,14 +131,14 @@ class CollectDailyStatsServiceTest {
         when(collectGitStats.collect(any(), any(), any()))
                 .thenThrow(new CollectionCancelledException("cancelled by op"));
 
-        CollectionRun result = service.run(SINCE);
+        service.run(SINCE);
 
+        CollectionRun terminal = lastSaved();
         assertAll("отмена",
-                () -> assertThat(result.status()).isEqualTo(CollectionStatus.CANCELLED),
-                () -> assertThat(result.error()).hasValue("cancelled by op"),
+                () -> assertThat(terminal.status()).isEqualTo(CollectionStatus.CANCELLED),
+                () -> assertThat(terminal.error()).hasValue("cancelled by op"),
                 () -> verify(syncKaitenUsers, never()).syncAll(),
-                () -> verify(kaitenCardsCache, never()).invalidateAll(),
-                () -> verify(collectionRunRepository, times(2)).save(any()));
+                () -> verify(kaitenCardsCache, never()).invalidateAll());
     }
 
     @Test
@@ -113,9 +147,9 @@ class CollectDailyStatsServiceTest {
         when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
         when(syncKaitenUsers.syncAll()).thenThrow(new RuntimeException("kaiten 429"));
 
-        CollectionRun result = service.run(SINCE);
+        service.run(SINCE);
 
-        assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS);
+        assertThat(lastSaved().status()).isEqualTo(CollectionStatus.SUCCESS);
     }
 
     @Test
@@ -124,10 +158,10 @@ class CollectDailyStatsServiceTest {
         when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
         doThrow(new RuntimeException("gitlab unreachable")).when(collectReviews).collect(any());
 
-        CollectionRun result = service.run(SINCE);
+        service.run(SINCE);
 
         assertAll("reviews-фаза",
-                () -> assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS),
+                () -> assertThat(lastSaved().status()).isEqualTo(CollectionStatus.SUCCESS),
                 () -> verify(collectReviews).collect(any()));
     }
 
@@ -146,7 +180,21 @@ class CollectDailyStatsServiceTest {
     }
 
     @Test
-    @DisplayName("Lock занят ⇒ 409, ничего не дёрнули, handle.close НЕ зовётся")
+    @DisplayName("Пустой период (since>=until) → SUCCESS сразу, фон не диспатчится, лок освобождён")
+    void emptyPeriodShortCircuits() {
+        LocalDateTime future = LocalDateTime.now().plusDays(1); // effectiveSince >= until(now)
+
+        CollectionRun result = service.run(future);
+
+        assertAll("короткое замыкание пустого периода",
+                () -> assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS),
+                () -> verify(backgroundRunner, never()).run(any()),
+                () -> verify(lockHandle).close(),
+                () -> verifyNoInteractions(collectGitStats));
+    }
+
+    @Test
+    @DisplayName("Lock занят ⇒ 409 синхронно, ничего не дёрнули, фон не диспатчится")
     void lockAlreadyHeldThrowsAndStartsNothing() {
         when(collectionLock.acquireOrThrow())
                 .thenThrow(new CollectionAlreadyRunningException());
@@ -158,12 +206,13 @@ class CollectDailyStatsServiceTest {
                 () -> verifyNoInteractions(collectGitStats),
                 () -> verifyNoInteractions(syncKaitenUsers),
                 () -> verifyNoInteractions(collectionRunRepository),
+                () -> verifyNoInteractions(backgroundRunner),
                 () -> verifyNoInteractions(lockHandle));
     }
 
     @Test
-    @DisplayName("Lock освобождается после успешного сбора (try-with-resources)")
-    void lockReleasedAfterSuccess() {
+    @DisplayName("Lock освобождается после завершения фонового сбора")
+    void lockReleasedAfterRun() {
         when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
 
         service.run(SINCE);
@@ -182,7 +231,7 @@ class CollectDailyStatsServiceTest {
     }
 
     @Test
-    @DisplayName("При FAILED git — кэш НЕ инвалидируется (зачем тратить если данные не свежее)")
+    @DisplayName("При FAILED git — кэш НЕ инвалидируется")
     void cacheNotInvalidatedAfterGitFailure() {
         when(collectGitStats.collect(any(), any(), any())).thenThrow(new RuntimeException("git boom"));
 
@@ -198,9 +247,9 @@ class CollectDailyStatsServiceTest {
         doThrow(new RuntimeException("cache impl boom"))
                 .when(kaitenCardsCache).invalidateAll();
 
-        CollectionRun result = service.run(SINCE);
+        service.run(SINCE);
 
         // сбор успешен, ошибка кэша только в логе
-        assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS);
+        assertThat(lastSaved().status()).isEqualTo(CollectionStatus.SUCCESS);
     }
 }

@@ -17,9 +17,10 @@ import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
  * Эндпоинты управления прогонами сбора. Контракт — {@link CollectionApi},
  * сгенерированный из {@code collection-api.yaml}.
  *
- * <p>{@code POST /api/v2/collection/runs} запускает сбор синхронно. При попытке
- * параллельного запуска срабатывает {@code pg_try_advisory_lock} и
- * {@link ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException}
+ * <p>{@code POST /api/v2/collection/runs} запускает сбор <b>асинхронно</b> — отдаёт 202 +
+ * прогон в RUNNING, сам сбор идёт в фоне (статус через {@code GET .../latest} или {@code /{id}}).
+ * При попытке параллельного запуска срабатывает {@code pg_try_advisory_lock} (берётся синхронно
+ * до ответа) и {@link ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException}
  * мапится в 409 через {@code ApiExceptionHandler}.</p>
  */
 @RestController
@@ -31,10 +32,14 @@ class CollectionController implements CollectionApi {
     private final GetCollectionRunUseCase getCollectionRun;
     private final CollectionRunMapper collectionRunMapper;
 
+    /**
+     * Запуск сбора. Асинхронно: 202 + прогон в RUNNING (с id); сам сбор идёт в фоне.
+     * 409 (через ApiExceptionHandler) если другой сбор уже идёт.
+     */
     @Override
     public ResponseEntity<CollectionRun> startCollectionRun(CollectionRunRequest body) {
         var since = body == null ? null : body.getSince();
-        return ResponseEntity.ok(collectionRunMapper.toDto(collectDailyStats.run(since)));
+        return ResponseEntity.accepted().body(collectionRunMapper.toDto(collectDailyStats.run(since)));
     }
 
     /**
