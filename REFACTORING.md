@@ -713,4 +713,36 @@ JPA-операциям (`order_updates` и т.п.).
 `application.service` (final, не покидает слой). Флаг `cancel_requested` — не часть доменного
 `CollectionRun` (run-control сигнал), маппером не трогается (`@Mapping(ignore)`).
 
+---
+
+## ADR-13. Startup-реконсиляция осиротевших RUNNING-прогонов (review #2)
+
+**Контекст.** Процесс упал/убит mid-run (OOM, `kill -9`, деплой) → запись `collection_run`
+остаётся в `RUNNING` навсегда (некому перевести в терминал). Advisory-lock Postgres отпускается
+(смерть сессии), новый сбор стартует, но `GET /collection/runs/latest` отдаёт фантом как «сбор
+идёт» бесконечно, а cancel по нему мёртв (некому прочитать флаг). Review #2 показало: пока поллинг
+на фронте был выпилен — пробел был невидим; `/latest` сделал его вредным для UI.
+
+**Решение (multi-instance-safe).** Политика — в `StartupReconciliationService` (application.service,
+Spring-free, Lombok); Spring-триггер `StartupReconciliationTrigger` (bootstrap,
+`@EventListener(ApplicationReadyEvent)`) только дёргает её. Разделение принципиальное: bootstrap —
+composition root без бизнес-логики и без Lombok; политика жизненного цикла collection-run живёт в
+application (рядом с оркестратором, который так же использует `CollectionLock`). Сервис
+берёт advisory-lock через тот же `CollectionLock`.
+- Лок **свободен** → ни один сбор не идёт нигде (single-flight) → любой `RUNNING` это фантом →
+  `failOrphanedRunning()` (bulk UPDATE `RUNNING → FAILED`).
+- Лок **занят** → реальный сбор идёт на другом инстансе → `RUNNING` НЕ трогаем (его допишет
+  ведущий). Ловим `CollectionAlreadyRunningException`, пропускаем.
+
+Лок берётся на миллисекунды (один bulk-UPDATE) и сразу отпускается (try-with-resources) — не мешает
+реальному сбору стартовать следом. Это корректно и для single-, и для multi-instance: не нужен ни
+порог по времени (который оставлял бы фантом висеть часами), ни риск снести живой прогон.
+
+**Почему не «fail all RUNNING на старте без лока».** При rolling-деплое pod B стартовал бы во время
+живого сбора на pod A и снёс бы его `RUNNING` → `FAILED` (self-heal'ится при финальном save, но окно
+вранья в UI). Лок-гейт это исключает.
+
+Тесты: `StartupReconciliationServiceTest` (лок свободен → reconcile + release; занят → skip),
+`CollectionRunRepositoryAdapterIT.failOrphanedRunningMarksRunningAsFailed`.
+
 

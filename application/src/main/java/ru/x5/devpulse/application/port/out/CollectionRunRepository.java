@@ -25,6 +25,15 @@ public interface CollectionRunRepository {
      */
     Optional<LocalDateTime> findLastSuccessfulUntil();
 
+    /**
+     * Переводит все «осиротевшие» {@code RUNNING}-прогоны в {@code FAILED} (вызывается на старте
+     * под advisory-локом: если лок свободен — ни один сбор не идёт, значит RUNNING — фантом от
+     * упавшего процесса).
+     *
+     * @return сколько прогонов переведено
+     */
+    int failOrphanedRunning();
+
     /** Ставит флаг кооперативной отмены прогона (cancel-эндпоинт). */
     void markCancelRequested(UUID id);
 

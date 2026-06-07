@@ -25,6 +25,7 @@ import ru.x5.devpulse.application.service.CancelCollectionService;
 import ru.x5.devpulse.application.service.CollectDailyStatsService;
 import ru.x5.devpulse.application.service.CollectGitStatsService;
 import ru.x5.devpulse.application.service.CollectReviewsService;
+import ru.x5.devpulse.application.service.StartupReconciliationService;
 import ru.x5.devpulse.application.service.SetTeamLeadService;
 import ru.x5.devpulse.application.service.SetUserTeamService;
 import ru.x5.devpulse.application.service.SyncKaitenUsersService;
@@ -60,6 +61,17 @@ class CommandUseCaseConfig {
     @Bean
     CancelCollectionUseCase cancelCollectionUseCase(CollectionRunRepository collectionRunRepository) {
         return new CancelCollectionService(collectionRunRepository);
+    }
+
+    /**
+     * Политика startup-реконсиляции осиротевших RUNNING (lock-based). Триггерит её
+     * {@code StartupReconciliationTrigger} на {@code ApplicationReadyEvent}.
+     */
+    @Bean
+    StartupReconciliationService startupReconciliationService(
+            CollectionLock collectionLock,
+            CollectionRunRepository collectionRunRepository) {
+        return new StartupReconciliationService(collectionLock, collectionRunRepository);
     }
 
     /** Worker — фаза сбора ревью-метрик из GitLab (MR/approvals/notes → merge_request/mr_review). */

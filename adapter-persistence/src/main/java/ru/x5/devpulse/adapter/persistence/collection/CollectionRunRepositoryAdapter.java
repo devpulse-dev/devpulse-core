@@ -39,6 +39,14 @@ class CollectionRunRepositoryAdapter implements CollectionRunRepository {
 
     @Override
     @Transactional
+    public int failOrphanedRunning() {
+        return jpa.failOrphanedRunning(
+                LocalDateTime.now(),
+                "Прерван рестартом приложения (orphaned RUNNING при старте)");
+    }
+
+    @Override
+    @Transactional
     public void markCancelRequested(UUID id) {
         jpa.markCancelRequested(id);
     }

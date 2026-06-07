@@ -1,6 +1,7 @@
 package ru.x5.devpulse.adapter.persistence.collection;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertAll;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -48,6 +49,25 @@ class CollectionRunRepositoryAdapterIT extends PostgresContainerSupport {
         assertThat(repo.findLastSuccessfulUntil())
                 .as("CANCELLED игнорируется — курсор остаётся на SUCCESS")
                 .contains(UNTIL_EARLY);
+    }
+
+    @Test
+    @DisplayName("failOrphanedRunning: RUNNING → FAILED, терминальные не трогаются")
+    void failOrphanedRunningMarksRunningAsFailed() {
+        CollectionRun orphan = CollectionRun.start(SINCE, UNTIL_EARLY); // RUNNING
+        CollectionRun done = CollectionRun.start(SINCE, UNTIL_LATE).succeeded();
+        repo.save(orphan);
+        repo.save(done);
+
+        repo.failOrphanedRunning();
+
+        assertAll("реконсиляция осиротевших",
+                () -> assertThat(repo.findById(orphan.id())).get()
+                        .extracting(CollectionRun::status)
+                        .as("осиротевший RUNNING → FAILED").isEqualTo(CollectionStatus.FAILED),
+                () -> assertThat(repo.findById(done.id())).get()
+                        .extracting(CollectionRun::status)
+                        .as("терминальный SUCCESS не тронут").isEqualTo(CollectionStatus.SUCCESS));
     }
 
     @Test

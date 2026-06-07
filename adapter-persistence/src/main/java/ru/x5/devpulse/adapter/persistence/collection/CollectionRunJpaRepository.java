@@ -20,6 +20,17 @@ interface CollectionRunJpaRepository extends JpaRepository<CollectionRunEntity, 
     /** Самый свежий прогон по startedAt (идущий = самый свежий, т.к. сбор single-flight). */
     Optional<CollectionRunEntity> findFirstByOrderByStartedAtDesc();
 
+    /** Переводит все RUNNING → FAILED (startup-реконсиляция осиротевших прогонов). */
+    @Modifying
+    @Query("""
+            update CollectionRunEntity r
+               set r.status = ru.x5.devpulse.domain.model.collection.CollectionStatus.FAILED,
+                   r.finishedAt = :now,
+                   r.errorMessage = :reason
+             where r.status = ru.x5.devpulse.domain.model.collection.CollectionStatus.RUNNING
+            """)
+    int failOrphanedRunning(@Param("now") LocalDateTime now, @Param("reason") String reason);
+
     /** Ставит флаг отмены (cancel-эндпоинт). */
     @Modifying
     @Query("update CollectionRunEntity r set r.cancelRequested = true where r.id = :id")
