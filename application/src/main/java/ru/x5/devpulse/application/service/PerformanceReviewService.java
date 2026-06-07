@@ -3,6 +3,7 @@ package ru.x5.devpulse.application.service;
 import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import ru.x5.devpulse.application.port.in.GetPerformanceReviewUseCase;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
@@ -34,6 +35,7 @@ import ru.x5.devpulse.domain.service.ReviewSummarizer;
  * <p>Вся арифметика (дельты, счёт карточек, заметные результаты) — в чистом доменном
  * {@link PerformanceReviewAssembler}; здесь только оркестрация портов.</p>
  */
+@Slf4j
 @RequiredArgsConstructor
 public final class PerformanceReviewService implements GetPerformanceReviewUseCase {
 
@@ -65,6 +67,14 @@ public final class PerformanceReviewService implements GetPerformanceReviewUseCa
         List<KaitenCard> cards = user.kaiten()
                 .map(kid -> kaitenGateway.fetchCardsForMember(kid, period.fromAtStartOfDay()))
                 .orElseGet(List::of);
+
+        // Видимость тихого искажения: закрытые карточки без closedAt → период по updatedAt (P2-2).
+        int approxClosed = PerformanceReviewAssembler.closedCardsMissingClosedAt(cards);
+        if (approxClosed > 0) {
+            log.info("perf-review {}: {} из {} карточек закрыты без closedAt — период определён "
+                            + "по updatedAt (приближение, метрики done могут быть завышены)",
+                    email.value(), approxClosed, cards.size());
+        }
 
         TaskTypeBreakdown breakdown = PerformanceReviewAssembler.breakdown(cards, period);
         PerformanceMetrics metrics = PerformanceReviewAssembler.metrics(current, previous, breakdown);
