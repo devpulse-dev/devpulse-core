@@ -554,7 +554,7 @@ nullable FK). ✓
 
 | # | Проблема | Почему критично | План фикса | Файлы | Статус |
 |---|---|---|---|---|---|
-| P0-1 | **`GenerationType.IDENTITY` убивает JDBC batch inserts** | `hibernate.jdbc.batch_size=100 / order_inserts=true` в `application.yml` — **мёртвая конфигурация**: при IDENTITY Hibernate не может батчить INSERT (обязан вернуть id после каждой строки). `saveAll(500)` = 500 round-trip'ов. На «миллионах коммитов» (заявка в javadoc `GitCliClient`/`GitGatewayAdapter`) это бутылочное горло записи. | `commit_details` пишется append-only (без update) → перевести insert на **`JdbcTemplate` native batch insert** (как ADR-6 уже делает для recompute). Сразу даёт батчинг, обходит IDENTITY, убирает Hibernate dirty-checking на hot-path. То же для `mr_review`. `application.yml`: добавить `reWriteBatchedInserts=true` в JDBC URL. | `CommitRepositoryAdapter`, (`CommitDetailsEntity` остаётся для чтения), `ReviewWriteRepositoryAdapter`, `application.yml` | ⬜ |
+| P0-1 | **`GenerationType.IDENTITY` убивает JDBC batch inserts** | `hibernate.jdbc.batch_size=100 / order_inserts=true` в `application.yml` — **мёртвая конфигурация**: при IDENTITY Hibernate не может батчить INSERT (обязан вернуть id после каждой строки). `saveAll(500)` = 500 round-trip'ов. На «миллионах коммитов» (заявка в javadoc `GitCliClient`/`GitGatewayAdapter`) это бутылочное горло записи. | ✅ Сделано для `commit_details` (hot-path): `saveAll` → native `JdbcTemplate.batchUpdate` (обходит IDENTITY), `reWriteBatchedInserts=true` через Hikari data-source-properties, удалён мёртвый `toEntity`. **ADR-11.** `mr_review` native insert вынесен в P1-3 (тот же адаптер). | `CommitRepositoryAdapter`, `CommitEntityMapper`, `application.yml` | ✅ |
 | P0-2 | **Zombie-detection грузит ВСЕ хеши репо в heap** — противоречит O(1)-памяти | `findHashesByRepoAndPeriod` тянул все хеши репо за период в `HashSet<CommitHash>`; плюс `seenInGit` копил все хеши прогона. Финальная cleanup-tx материализовала миллионы строк → OOM. | ✅ Сделано: **mark-and-sweep по `collected_at`** (лучше, чем черновой temp-table/`unnest`). Existing-коммиты помечаются `markSeen(runMark)`, sweep `deleteZombies(repo, period, runMark)` считает set-разность в БД. `seenInGit` удалён → heap O(batch). Индекс `idx_commit_details_repo_date` (миграция 027). IT `markAndSweepZombies`. | `CommitRepository`, `CommitDetailsJpaRepository`, `CommitRepositoryAdapter`, `CollectGitStatsService`, migration 027 | ✅ |
 | P0-3 | **Per-repo recompute → O(K²) write amplification** | `recomputeFromCommits` делает `DELETE ... WHERE email=ANY(...)` **без фильтра по репо** и зовётся в цикле per-repo. Автор, активный в K репо, переписывает свои daily-строки по всем K репо — K раз за прогон. При 1000 репо и тимлидах-в-десятках-репо это заметно. | ✅ Сделано: `recompute` вынесен из per-repo цикла в `collect()` — один вызов над `allAffected` в конце прогона. Sweep остаётся per-repo. Trade-off (потеря per-repo атомарности recompute) зафиксирован в **ADR-10**. Тест `singleRecomputeForWholeRun`. | `CollectGitStatsService` | ✅ |
 
@@ -564,7 +564,7 @@ nullable FK). ✓
 |---|---|---|---|---|---|
 | P1-1 | **Дубль `findOrCreateAll` + leak оркестрации в адаптер** | `CollectGitStatsService.persistCommitBatch` зовёт `findOrCreateAll`, и `CommitRepositoryAdapter.saveAll` зовёт его **ещё раз**. Двойная работа + адаптер persistence управляет identity (use-case concern). | ✅ Сделано: `saveAll(commits, Map<Email,Long>)` принимает готовый маппинг, адаптер только пишет; `findOrCreateAll` остался единственной точкой в use-case; убрана зависимость `UnifiedUserRepository` из адаптера. | `CommitRepository` (port), `CommitRepositoryAdapter`, `CollectGitStatsService` | ✅ |
 | P1-2 | **Сбор нельзя отменить; reviews-fan-out без общего deadline** | `POST /collection/runs` запускает операцию на часы, держит advisory lock + connection, отмены через API нет. `ReviewGatewayAdapter` `ExecutorService.close()` ждёт все задачи без таймаута; залипший MR в rate-limiter подвешивает фазу. Ошибки отдельных MR молча проглатываются. | (а) Общий deadline на фазу reviews (overall timeout, прерывание оставшихся задач). (б) Счётчик «потеряно N MR» в лог/метрику вместо тихого drop. (в) Отметить отмену сбора как отдельную задачу (нужен ли `DELETE /collection/runs/{id}` — решить). | `ReviewGatewayAdapter`, `GitlabProperties` | ⬜ |
-| P1-3 | **N+1 в reviews upsert** | `findByGitlabProjectIdAndGitlabMrIid` в цикле по каждому MR — десятки тысяч точечных SELECT на backfill. | Батч-lookup существующих MR одним запросом `WHERE (project_id, iid) IN (...)` на чанк, дальше map в памяти. | `MergeRequestJpaRepository`, `ReviewWriteRepositoryAdapter` | ⬜ |
+| P1-3 | **N+1 в reviews upsert** (+ `mr_review` native insert из P0-1) | `findByGitlabProjectIdAndGitlabMrIid` в цикле по каждому MR — десятки тысяч точечных SELECT на backfill. Плюс `mr_review` на IDENTITY → `reviewJpa.saveAll` без батчинга. | Батч-lookup существующих MR одним запросом `WHERE (project_id, iid) IN (...)` на чанк, дальше map в памяти. `mr_review` insert → native `JdbcTemplate.batchUpdate` (перенесено из P0-1). | `MergeRequestJpaRepository`, `ReviewWriteRepositoryAdapter` | ⬜ |
 
 ### P2 — hardening / честность документации
 
@@ -581,8 +581,8 @@ nullable FK). ✓
 1. ✅ **P1-1** (дубль `findOrCreateAll`) — самый дешёвый и безопасный, разогрев.
 2. ✅ **P0-2** (zombie mark-and-sweep) — чинит OOM, локализован в per-repo tx.
 3. ✅ **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
-4. ⬜ **P0-1** (batch insert) — крупнее, отдельный коммит + возможная миграция/конфиг.
-5. ⬜ **P1-3** (N+1 reviews), **P1-2** (deadline reviews) — adapter-reviews.
+4. ✅ **P0-1** (native batch insert commit_details + reWriteBatchedInserts). `mr_review` → P1-3.
+5. ⬜ **P1-3** (N+1 reviews + mr_review native insert), **P1-2** (deadline reviews) — adapter-reviews.
 6. **P2-1** (Retry-After), затем P2-2/P2-3 по мере сил.
 
 > ⚠️ **Build-замечание:** полный `mvn verify` требует доступа к GitHub Packages (OAS-контракты)
@@ -625,5 +625,43 @@ daily-строк по всем K репо — **O(K²) записи** для cro
 `AND repository_name = ?` в DELETE и пересобирать только текущий репо. Но `recompute` логически
 работает по ключу `(email, date)` агрегата, и фильтр по репо усложнил бы инвариант «daily_stats —
 чистое derived state из commit_details» (Фича 4). Один проход в конце — проще и быстрее.
+
+---
+
+## ADR-11. Native batch insert для commit_details вместо JPA saveAll (P0-1)
+
+**Контекст.** `CommitDetailsEntity` (как и большинство сущностей) использует
+`@GeneratedValue(strategy = IDENTITY)`. При IDENTITY Hibernate **не может** батчить INSERT: ему
+нужно вернуть сгенерированный id после каждой строки, поэтому `saveAll(500)` шёл 500 отдельными
+round-trip'ами. При этом в `application.yml` стоят `hibernate.jdbc.batch_size=100 /
+order_inserts=true` — для `commit_details` это была **мёртвая конфигурация**. На «миллионах
+коммитов» (заявка в javadoc стрима) запись становилась узким местом.
+
+**Решение.** `commit_details` пишется append-only, сгенерированный id обратно не нужен. Поэтому
+`CommitRepositoryAdapter.saveAll` переведён на native `JdbcTemplate.batchUpdate` с явным
+`INSERT ... VALUES (?,…)` (14 колонок), `batchSize=500`. Это:
+- обходит IDENTITY-ограничение Hibernate (батчинг реально работает);
+- убирает dirty-checking и построение persistence-context на hot-path;
+- держится принципа ADR-6 («bulk через JdbcTemplate, не Hibernate»).
+
+Дополнительно в JDBC включён **`reWriteBatchedInserts=true`** (через
+`spring.datasource.hikari.data-source-properties`) — pgjdbc переписывает серию single-row INSERT
+в один multi-row INSERT. Без него даже `batchUpdate` шлёт по строке за раз. Заданием через
+data-source-properties (а не в URL) гарантируем, что флаг применится независимо от того, как
+задан `DB_URL` в проде.
+
+Мёртвый `CommitEntityMapper.toEntity` удалён — маппер остался только для чтения (`toDomain`).
+Сама `CommitDetailsEntity` и её IDENTITY-id оставлены: для **чтения** (JPA-проекции, `findByAuthor`)
+это корректно и менять схему незачем.
+
+**Не входит в P0-1 (вынесено в P1-3).** `mr_review` тоже на IDENTITY и пишется
+`reviewJpa.saveAll`, а `merge_request` требует возврата id для связки ревью. Их перевод на native
+insert логично делать вместе с устранением N+1 в `ReviewWriteRepositoryAdapter` (P1-3) — это один
+и тот же адаптер и одна транзакционная логика. Здесь не трогаем, чтобы коммит был сфокусирован на
+самом горячем пути (commit_details = миллионы строк против десятков тысяч у reviews).
+
+**Что НЕ делали.** `unified_user` тоже IDENTITY, но это few-rows-per-run (по новому автору) —
+не hot-path, оставлено на JPA. `hibernate.jdbc.batch_size` оставлен: он ещё помогает остальным
+JPA-операциям (`order_updates` и т.п.).
 
 

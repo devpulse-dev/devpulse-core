@@ -14,6 +14,12 @@ spring:
     password: ${DB_PASSWORD:postgres}
     hikari:
       maximum-pool-size: 20
+      data-source-properties:
+        # pgjdbc переписывает серию single-row INSERT в один multi-row INSERT при batchUpdate.
+        # Критично для native batch insert commit_details (P0-1): без этого даже JdbcTemplate.batchUpdate
+        # шлёт по одному round-trip'у на строку. Задаём через data-source-properties, чтобы работало
+        # независимо от того, как задан DB_URL в проде.
+        reWriteBatchedInserts: true
 
   jpa:
     open-in-view: false
