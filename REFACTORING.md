@@ -556,7 +556,7 @@ nullable FK). ✓
 |---|---|---|---|---|---|
 | P0-1 | **`GenerationType.IDENTITY` убивает JDBC batch inserts** | `hibernate.jdbc.batch_size=100 / order_inserts=true` в `application.yml` — **мёртвая конфигурация**: при IDENTITY Hibernate не может батчить INSERT (обязан вернуть id после каждой строки). `saveAll(500)` = 500 round-trip'ов. На «миллионах коммитов» (заявка в javadoc `GitCliClient`/`GitGatewayAdapter`) это бутылочное горло записи. | `commit_details` пишется append-only (без update) → перевести insert на **`JdbcTemplate` native batch insert** (как ADR-6 уже делает для recompute). Сразу даёт батчинг, обходит IDENTITY, убирает Hibernate dirty-checking на hot-path. То же для `mr_review`. `application.yml`: добавить `reWriteBatchedInserts=true` в JDBC URL. | `CommitRepositoryAdapter`, (`CommitDetailsEntity` остаётся для чтения), `ReviewWriteRepositoryAdapter`, `application.yml` | ⬜ |
 | P0-2 | **Zombie-detection грузит ВСЕ хеши репо в heap** — противоречит O(1)-памяти | `findHashesByRepoAndPeriod` тянул все хеши репо за период в `HashSet<CommitHash>`; плюс `seenInGit` копил все хеши прогона. Финальная cleanup-tx материализовала миллионы строк → OOM. | ✅ Сделано: **mark-and-sweep по `collected_at`** (лучше, чем черновой temp-table/`unnest`). Existing-коммиты помечаются `markSeen(runMark)`, sweep `deleteZombies(repo, period, runMark)` считает set-разность в БД. `seenInGit` удалён → heap O(batch). Индекс `idx_commit_details_repo_date` (миграция 027). IT `markAndSweepZombies`. | `CommitRepository`, `CommitDetailsJpaRepository`, `CommitRepositoryAdapter`, `CollectGitStatsService`, migration 027 | ✅ |
-| P0-3 | **Per-repo recompute → O(K²) write amplification** | `recomputeFromCommits` делает `DELETE ... WHERE email=ANY(...)` **без фильтра по репо** и зовётся в цикле per-repo. Автор, активный в K репо, переписывает свои daily-строки по всем K репо — K раз за прогон. При 1000 репо и тимлидах-в-десятках-репо это заметно. | Собрать `allAffected` по **всем** репо и сделать **один** recompute в конце прогона. Zombie-cleanup остаётся per-repo (он по природе per-repo). Теряем per-repo атомарность recompute — это осознанный trade-off (см. ADR-9), компенсируется идемпотентным retry. Зафиксировать новым ADR. | `CollectGitStatsService`, `DailyStatsRepository` (контракт не меняется) | ⬜ |
+| P0-3 | **Per-repo recompute → O(K²) write amplification** | `recomputeFromCommits` делает `DELETE ... WHERE email=ANY(...)` **без фильтра по репо** и зовётся в цикле per-repo. Автор, активный в K репо, переписывает свои daily-строки по всем K репо — K раз за прогон. При 1000 репо и тимлидах-в-десятках-репо это заметно. | ✅ Сделано: `recompute` вынесен из per-repo цикла в `collect()` — один вызов над `allAffected` в конце прогона. Sweep остаётся per-repo. Trade-off (потеря per-repo атомарности recompute) зафиксирован в **ADR-10**. Тест `singleRecomputeForWholeRun`. | `CollectGitStatsService` | ✅ |
 
 ### P1 — корректность / операционные риски
 
@@ -580,7 +580,7 @@ nullable FK). ✓
 
 1. ✅ **P1-1** (дубль `findOrCreateAll`) — самый дешёвый и безопасный, разогрев.
 2. ✅ **P0-2** (zombie mark-and-sweep) — чинит OOM, локализован в per-repo tx.
-3. ⬜ **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
+3. ✅ **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
 4. ⬜ **P0-1** (batch insert) — крупнее, отдельный коммит + возможная миграция/конфиг.
 5. ⬜ **P1-3** (N+1 reviews), **P1-2** (deadline reviews) — adapter-reviews.
 6. **P2-1** (Retry-After), затем P2-2/P2-3 по мере сил.
@@ -588,5 +588,42 @@ nullable FK). ✓
 > ⚠️ **Build-замечание:** полный `mvn verify` требует доступа к GitHub Packages (OAS-контракты)
 > + Docker (Testcontainers). Если локально нет — каждый шаг проверяем точечно (`mvn -pl <module> -am test`)
 > и финально гоняем CI. Коммиты атомарные, чтобы откат любого шага был дешёвым.
+
+---
+
+## ADR-10. Один recompute на прогон вместо per-repo (P0-3)
+
+**Контекст.** `DailyStatsRepositoryAdapter.recomputeFromCommits` пересобирает `daily_author_stats`
+для набора email через `DELETE ... WHERE LOWER(email)=ANY(?) AND date BETWEEN ?` + `INSERT ...
+SELECT FROM commit_details`. Важно: **DELETE не фильтрует по репозиторию** — он сносит daily-строки
+автора по ВСЕМ его репозиториям в периоде, затем `INSERT` восстанавливает их из `commit_details`
+(`GROUP BY email, date, repo`).
+
+Раньше `recompute` звался **внутри per-repo цикла** (`CollectGitStatsService.collectOneRepo`).
+Следствие: автор, активный в K репозиториях, при сборе получал K полных delete+reinsert своих
+daily-строк по всем K репо — **O(K²) записи** для cross-repo-активных людей (тимлиды, коммитящие
+в десятки репо). При 1000 репозиториев это заметная write amplification.
+
+**Решение.** `recompute` вынесен из цикла: per-repo остаётся только sweep зомби
+(`deleteZombies`, scoped по репо), а `recomputeFromCommits(allAffected, period)` вызывается
+**один раз** после обработки всех репозиториев — над объединением затронутых авторов. Каждый автор
+пересобирается ровно один раз → линейно от числа строк, без O(K²).
+
+**Trade-off (осознанный).** Теряем per-repo атомарность пересчёта. Раньше каждый репо был
+«всё-или-ничего» по своему recompute; теперь recompute — последний шаг прогона:
+- Если прогон падает на репо N, `commit_details` уже частично обновлён (репо 1..N), но
+  `daily_author_stats` ещё НЕ пересобран — он останется **stale до retry**.
+- Это компенсируется существующей семантикой: курсор двигает только `SUCCESS`, упавший прогон
+  фиксируется `FAILED`, следующий прогон стартует с того же `since`, пересобирает `commit_details`
+  (дубли отсекает `findExistingHashes`) и делает recompute заново. Идемпотентно.
+
+Окно неконсистентности `daily_stats` (между падением и retry) — то же, что уже задокументировано
+в P2-2 (наблюдаемость stale-окна — отдельный пункт). Для аналитического сервиса, где сбор ручной
+и повторяемый, это приемлемо; цена O(K²) при 1000 репо — нет.
+
+**Почему не оставили per-repo recompute с фильтром по репо.** Можно было бы добавить
+`AND repository_name = ?` в DELETE и пересобирать только текущий репо. Но `recompute` логически
+работает по ключу `(email, date)` агрегата, и фильтр по репо усложнил бы инвариант «daily_stats —
+чистое derived state из commit_details» (Фича 4). Один проход в конце — проще и быстрее.
 
 

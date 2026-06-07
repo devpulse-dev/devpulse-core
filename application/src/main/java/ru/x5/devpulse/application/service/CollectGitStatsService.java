@@ -23,25 +23,32 @@ import ru.x5.devpulse.domain.model.user.Email;
 /**
  * Реализация {@link CollectGitStatsUseCase}.
  *
- * <p><b>Пайплайн (per-repo):</b></p>
+ * <p><b>Пайплайн:</b></p>
  * <ol>
- *   <li>{@code runMark = now()} — метка начала сбора репозитория;</li>
+ *   <li>Для каждого репо: {@code runMark = now()} — метка начала сбора;</li>
  *   <li>Стрим git коммитов → {@code persistCommitBatch} per-batch (своя короткая tx):
  *       existing-коммиты помечаются {@code markSeen(runMark)}, новые — сохраняются с {@code now()};</li>
  *   <li>Аккумуляция только {@code repoAffected} (email'ы авторов) — хеши в heap НЕ копим;</li>
- *   <li>Финальная атомарная tx ({@link TransactionRunner}):
- *       {@code deleteZombies(repo, period, runMark)} (sweep: всё, что не увидено в этом сборе) +
- *       recompute daily_stats. Либо оба применены, либо ни одного.</li>
+ *   <li>Per-repo sweep: {@code deleteZombies(repo, period, runMark)} (своя tx) — удаляет всё,
+ *       что не увидено в этом сборе;</li>
+ *   <li>После всех репо — <b>один</b> {@code recomputeFromCommits(allAffected, period)} на весь
+ *       прогон (см. P0-3 / ADR-10).</li>
  * </ol>
  *
  * <p><b>Память O(1) от размера репозитория:</b> zombie-cleanup — это mark-and-sweep по
  * {@code collected_at} в БД, а не set-разность в heap. На репо с миллионом коммитов мы не
  * держим миллион хешей в памяти (ни {@code seenInGit}, ни полную выгрузку из БД). См. P0-2.</p>
  *
- * <p><b>Семантика отказа:</b> repo N упал → repos 1..N-1 консистентны (предыдущие финальные tx
- * прошли). Repo N — либо в исходном состоянии (финальная tx откатилась), либо batches уже
- * сохранены, но sweep+recompute ещё не применён. Retry идемпотентен: дубли отсекаются
- * {@code findExistingHashes}, recompute сделает всё заново.</p>
+ * <p><b>Один recompute на прогон (P0-3):</b> раньше recompute звался per-repo, а его DELETE не
+ * фильтрует по репо — автор, активный в K репо, переписывал daily-строки K раз за прогон (O(K²)).
+ * Теперь recompute один на весь прогон над объединением затронутых авторов. Trade-off — теряем
+ * per-repo атомарность пересчёта (см. ADR-10).</p>
+ *
+ * <p><b>Семантика отказа:</b> recompute — последний шаг прогона. Если репо N упал, commit_details
+ * уже частично обновлён (sweep + новые коммиты по репо 1..N), но daily_stats ещё НЕ пересобран —
+ * он останется stale до retry. Retry идемпотентен: курсор не сдвинулся (run = FAILED), повторный
+ * прогон пересоберёт commit_details (дубли отсекает {@code findExistingHashes}) и сделает recompute
+ * заново.</p>
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -65,6 +72,16 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
             allAffected.addAll(collectOneRepo(repo, since, until, period));
         }
 
+        // Один recompute на весь прогон: daily_stats для затронутых авторов пересобираются ровно
+        // один раз. Per-repo recompute давал O(K²) перезаписей для cross-repo авторов (P0-3 / ADR-10).
+        // Своя tx — DELETE+INSERT внутри recomputeFromCommits атомарны.
+        if (!allAffected.isEmpty()) {
+            transactionRunner.inTransaction(() -> {
+                dailyStatsRepository.recomputeFromCommits(allAffected, period);
+                return null;
+            });
+        }
+
         return allAffected;
     }
 
@@ -86,16 +103,9 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
             persistCommitBatch(batch, runMark);
         });
 
-        // Финальная атомарная tx: sweep zombies + recompute видимы вместе или никак.
-        // Supplier-перегрузка (с return null) — Runnable-overload default-метод в интерфейсе,
-        // mock-фреймворки его не вызывают.
-        transactionRunner.inTransaction(() -> {
-            commitRepository.deleteZombies(repo, period, runMark);
-            if (!repoAffected.isEmpty()) {
-                dailyStatsRepository.recomputeFromCommits(repoAffected, period);
-            }
-            return null;
-        });
+        // Sweep rebase/force-push зомби этого репо. Своя tx (deleteZombies @Transactional).
+        // recompute сюда НЕ входит — он вынесен в collect(), один на весь прогон (P0-3 / ADR-10).
+        commitRepository.deleteZombies(repo, period, runMark);
 
         return repoAffected;
     }

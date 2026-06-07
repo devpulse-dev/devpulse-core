@@ -38,7 +38,7 @@ import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.user.Email;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("CollectGitStatsService: git phase (stream + cleanup zombies + recompute per-repo)")
+@DisplayName("CollectGitStatsService: git phase (stream + per-repo sweep + single recompute)")
 class CollectGitStatsServiceTest {
 
     private static final RepoName REPO = new RepoName("xrg-core");
@@ -92,8 +92,8 @@ class CollectGitStatsServiceTest {
     }
 
     @Test
-    @DisplayName("Sweep zombies: deleteZombies вызывается в финальной tx с repo и period (set-разность в БД)")
-    void sweepsZombiesInFinalTx() {
+    @DisplayName("Sweep zombies: deleteZombies вызывается per-repo с repo и period (set-разность в БД)")
+    void sweepsZombiesPerRepo() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
         stubStreamCommits(List.of(commit(SHA_NEW)));
         when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
@@ -136,16 +136,30 @@ class CollectGitStatsServiceTest {
     }
 
     @Test
-    @DisplayName("Каждый repo — своя финальная tx (N репо → N tx-блоков)")
-    void oneTransactionPerRepo() {
+    @DisplayName("Recompute — один на весь прогон (union авторов всех репо), sweep — per-repo")
+    void singleRecomputeForWholeRun() {
         RepoName r1 = new RepoName("r1");
         RepoName r2 = new RepoName("r2");
         when(gitGateway.configuredRepos()).thenReturn(List.of(r1, r2));
-        doAnswer(inv -> null).when(gitGateway).streamCommits(any(), any(), any(), any());
+        // оба репо отдают по коммиту одного и того же автора
+        doAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            Consumer<List<Commit>> handler = inv.getArgument(3);
+            handler.accept(List.of(commit(SHA_NEW)));
+            return null;
+        }).when(gitGateway).streamCommits(any(), any(), any(), any());
+        when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
 
         service.collect(SINCE, UNTIL);
 
-        verify(transactionRunner, times(2)).inTransaction(any(Supplier.class));
+        assertAll("single recompute, per-repo sweep",
+                // recompute ровно один раз с объединением затронутых авторов (без O(K²))
+                () -> verify(dailyStatsRepository, times(1))
+                        .recomputeFromCommits(eq(Set.of(AUTHOR)), any()),
+                // sweep — по разу на каждый репо
+                () -> verify(commitRepository, times(2)).deleteZombies(any(), any(), any()),
+                // recompute обёрнут ровно в одну tx на прогон
+                () -> verify(transactionRunner, times(1)).inTransaction(any(Supplier.class)));
     }
 
     /* ------------ helpers ------------ */
