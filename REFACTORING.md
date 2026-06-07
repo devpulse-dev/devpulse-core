@@ -571,7 +571,7 @@ nullable FK). ✓
 
 | # | Проблема | План фикса | Файлы | Статус |
 |---|---|---|---|---|
-| P2-1 | `KaitenRateLimiter` парсит `Retry-After` только как integer-секунды, игнорит HTTP-date форму | Добавить парс HTTP-date (`Retry-After: <http-date>`) с fallback на текущую логику | `KaitenRateLimiter` (+ тест) | ⬜ |
+| P2-1 | `KaitenRateLimiter` парсит `Retry-After` только как integer-секунды, игнорит HTTP-date форму | ✅ Сделано: `retryAfterMillis` парсит обе формы RFC 7231 (delta-seconds + RFC 1123 HTTP-date, кламп в прошлом → 0); fallback на exp-backoff если ни то, ни другое. Метод стал package-private static, прямой юнит-тест `parsesRetryAfterForms`. | `KaitenRateLimiter` (+ тест) | ✅ |
 | P2-2 | Нет видимости stale-окна daily_stats (краш между батчем и recompute) | Экспонировать «last successful recompute» / метрику, либо флаг stale. Минимум — счётчик карточек без `closedAt` в perf-review (тихое искажение метрик) | `CollectionRunRepository` / observability | ⬜ |
 | P2-3 | Нагрузочных тестов под scaling-заявки нет | IT с большим набором хешей (проверка, что cleanup не держит всё в heap) + benchmark batch insert после P0-1 | `*IT` в adapter-persistence | ⬜ |
 | P2-4 | Query-side ceremony: 18 интерфейс+сервис+@Bean для pass-through чтений | **Won't-fix сейчас.** Зафиксировать как осознанный trade-off (как #16 с модулями). Свернём, только если станет тормозить разработку | (none) | ⬜ |
@@ -584,7 +584,7 @@ nullable FK). ✓
 3. ✅ **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
 4. ✅ **P0-1** (native batch insert commit_details + reWriteBatchedInserts). `mr_review` → P1-3.
 5. ✅ **P1-3** (N+1 reviews + mr_review native insert). 🟡 **P1-2** (deadline reviews сделан; отмена прогона — открытый вопрос).
-6. **P2-1** (Retry-After), затем P2-2/P2-3 по мере сил.
+6. ✅ **P2-1** (Retry-After HTTP-date). ⬜ P2-2 (observability stale-окна), P2-3 (нагрузочный IT) — по мере сил.
 
 > ⚠️ **Build-замечание:** полный `mvn verify` требует доступа к GitHub Packages (OAS-контракты)
 > + Docker (Testcontainers). Если локально нет — каждый шаг проверяем точечно (`mvn -pl <module> -am test`)

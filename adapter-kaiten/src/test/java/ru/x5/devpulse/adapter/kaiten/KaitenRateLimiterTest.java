@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -123,5 +126,36 @@ class KaitenRateLimiterTest {
         });
 
         assertThat(result).as("успех на 2-м вызове").isEqualTo("ok");
+    }
+
+    @Test
+    @DisplayName("retryAfterMillis: delta-seconds и HTTP-date (future/past), мусор и пусто → empty")
+    void parsesRetryAfterForms() {
+        assertAll("формы Retry-After (RFC 7231)",
+                () -> assertThat(KaitenRateLimiter.retryAfterMillis(header("120")))
+                        .as("120 секунд → 120000 мс").contains(120_000L),
+                () -> assertThat(KaitenRateLimiter.retryAfterMillis(header("0")))
+                        .as("0 секунд → 0 мс").contains(0L),
+                () -> assertThat(KaitenRateLimiter.retryAfterMillis(
+                                header(httpDate(Instant.now().minusSeconds(60)))))
+                        .as("HTTP-date в прошлом → 0 (кламп)").contains(0L),
+                () -> assertThat(KaitenRateLimiter.retryAfterMillis(
+                                header(httpDate(Instant.now().plusSeconds(120)))).orElseThrow())
+                        .as("HTTP-date ~через 120с → положительная задержка близко к 120000")
+                        .isBetween(60_000L, 121_000L),
+                () -> assertThat(KaitenRateLimiter.retryAfterMillis(header("garbage")))
+                        .as("не число и не дата → empty").isEmpty(),
+                () -> assertThat(KaitenRateLimiter.retryAfterMillis(new HttpHeaders()))
+                        .as("нет заголовка → empty").isEmpty());
+    }
+
+    private static HttpHeaders header(String retryAfter) {
+        HttpHeaders h = new HttpHeaders();
+        h.add(HttpHeaders.RETRY_AFTER, retryAfter);
+        return h;
+    }
+
+    private static String httpDate(Instant instant) {
+        return DateTimeFormatter.RFC_1123_DATE_TIME.format(instant.atOffset(ZoneOffset.UTC));
     }
 }
