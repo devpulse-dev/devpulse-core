@@ -13,7 +13,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.devpulse.application.port.out.CommitRepository;
-import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.CommitHash;
@@ -28,7 +27,6 @@ class CommitRepositoryAdapter implements CommitRepository {
 
     private final CommitDetailsJpaRepository jpa;
     private final CommitEntityMapper mapper;
-    private final UnifiedUserRepository unifiedUsers;
 
     @Override
     public Set<CommitHash> findExistingHashes(Collection<CommitHash> hashes) {
@@ -43,17 +41,13 @@ class CommitRepositoryAdapter implements CommitRepository {
 
     @Override
     @Transactional
-    public void saveAll(Collection<Commit> commits) {
+    public void saveAll(Collection<Commit> commits, Map<Email, Long> userByEmail) {
         if (commits == null || commits.isEmpty()) return;
 
-        // 1 batch find-or-create — все user_id одним SQL
-        Set<Email> uniqueAuthors = new HashSet<>();
-        commits.forEach(c -> uniqueAuthors.add(c.authorEmail()));
-        Map<Email, Long> userByEmail = unifiedUsers.findOrCreateAll(uniqueAuthors);
-
+        Map<Email, Long> users = userByEmail == null ? Map.of() : userByEmail;
         List<CommitDetailsEntity> entities = new ArrayList<>(commits.size());
         for (Commit c : commits) {
-            entities.add(mapper.toEntity(c, userByEmail.get(c.authorEmail())));
+            entities.add(mapper.toEntity(c, users.get(c.authorEmail())));
         }
         jpa.saveAll(entities);
         log.debug("Saved {} commits", entities.size());

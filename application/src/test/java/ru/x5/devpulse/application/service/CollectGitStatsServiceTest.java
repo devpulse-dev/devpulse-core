@@ -80,7 +80,7 @@ class CollectGitStatsServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Commit>> savedCommits = ArgumentCaptor.forClass(List.class);
-        verify(commitRepository).saveAll(savedCommits.capture());
+        verify(commitRepository).saveAll(savedCommits.capture(), any());
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Set<Email>> recomputeEmails = ArgumentCaptor.forClass(Set.class);
         verify(dailyStatsRepository).recomputeFromCommits(recomputeEmails.capture(), any());

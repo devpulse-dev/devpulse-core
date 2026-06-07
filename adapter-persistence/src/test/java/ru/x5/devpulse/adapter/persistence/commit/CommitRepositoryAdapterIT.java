@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
@@ -42,7 +43,7 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
         Commit c1 = newCommit("a".repeat(40), BORIS, JAN_5);
         Commit c2 = newCommit("b".repeat(40), BORIS, JAN_6);
 
-        repo.saveAll(List.of(c1, c2));
+        repo.saveAll(List.of(c1, c2), Map.of());
         List<Commit> found = repo.findByAuthor(BORIS, JANUARY, PageRequest.FIRST_PAGE);
 
         assertAll("сохранённые коммиты возвращаются по автору и периоду",
@@ -61,7 +62,7 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
         CommitHash known = new CommitHash("c".repeat(40));
         CommitHash unknown = new CommitHash("d".repeat(40));
         repo.saveAll(List.of(newCommit(known.value(), new Email("x@x5.ru"),
-                LocalDateTime.of(2026, 2, 1, 9, 0))));
+                LocalDateTime.of(2026, 2, 1, 9, 0))), Map.of());
 
         Set<CommitHash> existing = repo.findExistingHashes(List.of(known, unknown));
 
@@ -88,7 +89,7 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                 newCommit("2".repeat(40), BORIS, mon10b),                  // (0,10) +10
                 newCommit("3".repeat(40), BORIS, tue14),                   // (1,14) +10
                 mergeCommit("4".repeat(40), BORIS, mon10merge)             // мердж — НЕ считаем
-        ));
+        ), Map.of());
 
         Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
         List<HourlyBucket> cells = repo.aggregateHourly(may, Optional.empty());

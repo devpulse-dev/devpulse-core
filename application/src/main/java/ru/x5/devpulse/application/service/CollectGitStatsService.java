@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -121,13 +122,14 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
         }
 
         // batch find-or-create — обеспечивает наличие записи в unified_user (FK для commit_details).
+        // Identity-резолв — обязанность use case'а; адаптер saveAll получает готовый user_id-маппинг.
         Set<Email> emails = new HashSet<>(fresh.size());
         for (Commit c : fresh) {
             if (c.authorEmail() != null) emails.add(c.authorEmail());
         }
-        unifiedUserRepository.findOrCreateAll(emails);
+        Map<Email, Long> userByEmail = unifiedUserRepository.findOrCreateAll(emails);
 
-        commitRepository.saveAll(fresh);
+        commitRepository.saveAll(fresh, userByEmail);
         log.info("Батч сохранён: {} новых коммитов (из {} в батче)", fresh.size(), batch.size());
     }
 }

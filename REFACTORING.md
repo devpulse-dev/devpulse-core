@@ -529,3 +529,64 @@ nullable FK). ✓
 - Новых тестов: ~40 (включая 7 для ApiExceptionHandler, 5 для GitGatewayAdapter, 5 для CollectGitStatsService, 6 для CollectDailyStatsService, 4 для KaitenCardsCacheIT, 4 для GitCommandFailedException).
 
 
+---
+
+## Architecture review #2 — новый backlog (после reviews-фичи)
+
+> **Статус:** план составлен, идём сверху вниз. Каждый пункт — отдельный коммит.
+> Легенда: ✅ done · 🟡 in progress · ⬜ todo
+
+Второе principal-level review (уже **после** Фичи reviews/GitLab и всех 20 фиксов выше)
+нашло расхождения между гарантиями в javadoc/README и фактическим кодом. Главное: часть
+обещаний про scaling («миллионы коммитов без OOM», «batch insert») в текущем коде **не
+выполняется**. Ниже — приоритизированный backlog. P0 — то, что ломается в проде первым.
+
+### Контекст: что уже хорошо и НЕ трогаем
+
+- Per-phase изоляция сбора (git/kaiten/reviews в разных try/catch) — оставляем.
+- `pg_try_advisory_lock` single-writer + 409 — оставляем.
+- Functional-индексы под `LOWER(email)`/`CAST(date)` + `FunctionalIndexesIT` — оставляем.
+- Set-based `RECOMPUTE_SQL` (`GROUP BY`) вместо построчного upsert — оставляем.
+- `KaitenRateLimiter` reserve-slot lock-free — оставляем (кроме мелочи в P2-1).
+- ArchUnit-правила — оставляем.
+
+### P0 — ломается первым в проде (противоречит заявленным гарантиям)
+
+| # | Проблема | Почему критично | План фикса | Файлы | Статус |
+|---|---|---|---|---|---|
+| P0-1 | **`GenerationType.IDENTITY` убивает JDBC batch inserts** | `hibernate.jdbc.batch_size=100 / order_inserts=true` в `application.yml` — **мёртвая конфигурация**: при IDENTITY Hibernate не может батчить INSERT (обязан вернуть id после каждой строки). `saveAll(500)` = 500 round-trip'ов. На «миллионах коммитов» (заявка в javadoc `GitCliClient`/`GitGatewayAdapter`) это бутылочное горло записи. | `commit_details` пишется append-only (без update) → перевести insert на **`JdbcTemplate` native batch insert** (как ADR-6 уже делает для recompute). Сразу даёт батчинг, обходит IDENTITY, убирает Hibernate dirty-checking на hot-path. То же для `mr_review`. `application.yml`: добавить `reWriteBatchedInserts=true` в JDBC URL. | `CommitRepositoryAdapter`, (`CommitDetailsEntity` остаётся для чтения), `ReviewWriteRepositoryAdapter`, `application.yml` | ⬜ |
+| P0-2 | **Zombie-detection грузит ВСЕ хеши репо в heap** — противоречит O(1)-памяти | `findHashesByRepoAndPeriod` тянет все хеши репо за период в `HashSet<CommitHash>` ([CollectGitStatsService](application/src/main/java/ru/x5/devpulse/application/service/CollectGitStatsService.java)). Стриминг-парс действительно O(1), но финальная cleanup-tx материализует миллионы 40-симв. строк → десятки-сотни МБ → OOM ровно в рекламируемом сценарии (первый backfill большого репо). | Перенести set-разность **в SQL**: писать `seenInGit` во временную таблицу (или `unnest(?::text[])` чанками) и `DELETE FROM commit_details WHERE repo=? AND date∈period AND commit_hash <> ALL(seen)`. Heap не зависит от размера репо. | `CommitRepository` (port), `CommitRepositoryAdapter`, `CollectGitStatsService` | ⬜ |
+| P0-3 | **Per-repo recompute → O(K²) write amplification** | `recomputeFromCommits` делает `DELETE ... WHERE email=ANY(...)` **без фильтра по репо** и зовётся в цикле per-repo. Автор, активный в K репо, переписывает свои daily-строки по всем K репо — K раз за прогон. При 1000 репо и тимлидах-в-десятках-репо это заметно. | Собрать `allAffected` по **всем** репо и сделать **один** recompute в конце прогона. Zombie-cleanup остаётся per-repo (он по природе per-repo). Теряем per-repo атомарность recompute — это осознанный trade-off (см. ADR-9), компенсируется идемпотентным retry. Зафиксировать новым ADR. | `CollectGitStatsService`, `DailyStatsRepository` (контракт не меняется) | ⬜ |
+
+### P1 — корректность / операционные риски
+
+| # | Проблема | Почему важно | План фикса | Файлы | Статус |
+|---|---|---|---|---|---|
+| P1-1 | **Дубль `findOrCreateAll` + leak оркестрации в адаптер** | `CollectGitStatsService.persistCommitBatch` зовёт `findOrCreateAll`, и `CommitRepositoryAdapter.saveAll` зовёт его **ещё раз**. Двойная работа + адаптер persistence управляет identity (use-case concern). | Убрать `findOrCreateAll` из `saveAll`; передавать `Map<Email,Long> userByEmail` в адаптер параметром (или принимать готовые user_id). Адаптер только пишет. | `CommitRepository` (port), `CommitRepositoryAdapter`, `CollectGitStatsService` | ⬜ |
+| P1-2 | **Сбор нельзя отменить; reviews-fan-out без общего deadline** | `POST /collection/runs` запускает операцию на часы, держит advisory lock + connection, отмены через API нет. `ReviewGatewayAdapter` `ExecutorService.close()` ждёт все задачи без таймаута; залипший MR в rate-limiter подвешивает фазу. Ошибки отдельных MR молча проглатываются. | (а) Общий deadline на фазу reviews (overall timeout, прерывание оставшихся задач). (б) Счётчик «потеряно N MR» в лог/метрику вместо тихого drop. (в) Отметить отмену сбора как отдельную задачу (нужен ли `DELETE /collection/runs/{id}` — решить). | `ReviewGatewayAdapter`, `GitlabProperties` | ⬜ |
+| P1-3 | **N+1 в reviews upsert** | `findByGitlabProjectIdAndGitlabMrIid` в цикле по каждому MR — десятки тысяч точечных SELECT на backfill. | Батч-lookup существующих MR одним запросом `WHERE (project_id, iid) IN (...)` на чанк, дальше map в памяти. | `MergeRequestJpaRepository`, `ReviewWriteRepositoryAdapter` | ⬜ |
+
+### P2 — hardening / честность документации
+
+| # | Проблема | План фикса | Файлы | Статус |
+|---|---|---|---|---|
+| P2-1 | `KaitenRateLimiter` парсит `Retry-After` только как integer-секунды, игнорит HTTP-date форму | Добавить парс HTTP-date (`Retry-After: <http-date>`) с fallback на текущую логику | `KaitenRateLimiter` (+ тест) | ⬜ |
+| P2-2 | Нет видимости stale-окна daily_stats (краш между батчем и recompute) | Экспонировать «last successful recompute» / метрику, либо флаг stale. Минимум — счётчик карточек без `closedAt` в perf-review (тихое искажение метрик) | `CollectionRunRepository` / observability | ⬜ |
+| P2-3 | Нагрузочных тестов под scaling-заявки нет | IT с большим набором хешей (проверка, что cleanup не держит всё в heap) + benchmark batch insert после P0-1 | `*IT` в adapter-persistence | ⬜ |
+| P2-4 | Query-side ceremony: 18 интерфейс+сервис+@Bean для pass-through чтений | **Won't-fix сейчас.** Зафиксировать как осознанный trade-off (как #16 с модулями). Свернём, только если станет тормозить разработку | (none) | ⬜ |
+| P2-5 | `git.repositories` связывает adapter-git и adapter-reviews через общий property | **Watch.** Развязать, только когда появится не-GitLab git-хостинг | (none) | ⬜ |
+
+### Порядок исполнения
+
+1. **P1-1** (дубль `findOrCreateAll`) — самый дешёвый и безопасный, разогрев.
+2. **P0-2** (zombie-set в SQL) — чинит OOM, локализован в per-repo tx.
+3. **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
+4. **P0-1** (batch insert) — крупнее, отдельный коммит + возможная миграция/конфиг.
+5. **P1-3** (N+1 reviews), **P1-2** (deadline reviews) — adapter-reviews.
+6. **P2-1** (Retry-After), затем P2-2/P2-3 по мере сил.
+
+> ⚠️ **Build-замечание:** полный `mvn verify` требует доступа к GitHub Packages (OAS-контракты)
+> + Docker (Testcontainers). Если локально нет — каждый шаг проверяем точечно (`mvn -pl <module> -am test`)
+> и финально гоняем CI. Коммиты атомарные, чтобы откат любого шага был дешёвым.
+
+

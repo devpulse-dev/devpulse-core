@@ -62,7 +62,7 @@ class DailyStatsRepositoryAdapterIT extends PostgresContainerSupport {
         // 2. Кладём по коммиту в commit_details на каждого.
         commitRepository.saveAll(List.of(
                 commit("ab".repeat(20), alice, d1, repoX),
-                commit("cd".repeat(20), bob, d2, repoX)));
+                commit("cd".repeat(20), bob, d2, repoX)), userIds);
 
         // 3. Recompute для обоих.
         repo.recomputeFromCommits(List.of(alice, bob), period);
