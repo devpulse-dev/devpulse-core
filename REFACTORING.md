@@ -564,7 +564,7 @@ nullable FK). ✓
 |---|---|---|---|---|---|
 | P1-1 | **Дубль `findOrCreateAll` + leak оркестрации в адаптер** | `CollectGitStatsService.persistCommitBatch` зовёт `findOrCreateAll`, и `CommitRepositoryAdapter.saveAll` зовёт его **ещё раз**. Двойная работа + адаптер persistence управляет identity (use-case concern). | ✅ Сделано: `saveAll(commits, Map<Email,Long>)` принимает готовый маппинг, адаптер только пишет; `findOrCreateAll` остался единственной точкой в use-case; убрана зависимость `UnifiedUserRepository` из адаптера. | `CommitRepository` (port), `CommitRepositoryAdapter`, `CollectGitStatsService` | ✅ |
 | P1-2 | **Сбор нельзя отменить; reviews-fan-out без общего deadline** | `POST /collection/runs` запускает операцию на часы, держит advisory lock + connection, отмены через API нет. `ReviewGatewayAdapter` `ExecutorService.close()` ждёт все задачи без таймаута; залипший MR в rate-limiter подвешивает фазу. Ошибки отдельных MR молча проглатываются. | (а) Общий deadline на фазу reviews (overall timeout, прерывание оставшихся задач). (б) Счётчик «потеряно N MR» в лог/метрику вместо тихого drop. (в) Отметить отмену сбора как отдельную задачу (нужен ли `DELETE /collection/runs/{id}` — решить). | `ReviewGatewayAdapter`, `GitlabProperties` | ⬜ |
-| P1-3 | **N+1 в reviews upsert** (+ `mr_review` native insert из P0-1) | `findByGitlabProjectIdAndGitlabMrIid` в цикле по каждому MR — десятки тысяч точечных SELECT на backfill. Плюс `mr_review` на IDENTITY → `reviewJpa.saveAll` без батчинга. | Батч-lookup существующих MR одним запросом `WHERE (project_id, iid) IN (...)` на чанк, дальше map в памяти. `mr_review` insert → native `JdbcTemplate.batchUpdate` (перенесено из P0-1). | `MergeRequestJpaRepository`, `ReviewWriteRepositoryAdapter` | ⬜ |
+| P1-3 | **N+1 в reviews upsert** (+ `mr_review` native insert из P0-1) | `findByGitlabProjectIdAndGitlabMrIid` в цикле по каждому MR — десятки тысяч точечных SELECT на backfill. Плюс `mr_review` на IDENTITY → `reviewJpa.saveAll` без батчинга. | ✅ Сделано: batch-lookup `findByGitlabProjectIdInAndGitlabMrIidIn` (суперсет + фильтр по композитному ключу `MrKey`) вместо N+1; `mr_review` insert → native `JdbcTemplate.batchUpdate` (см. ADR-11). IT `batchLookupDistinguishesSameIidAcrossProjects`. | `MergeRequestJpaRepository`, `ReviewWriteRepositoryAdapter` | ✅ |
 
 ### P2 — hardening / честность документации
 
@@ -582,7 +582,7 @@ nullable FK). ✓
 2. ✅ **P0-2** (zombie mark-and-sweep) — чинит OOM, локализован в per-repo tx.
 3. ✅ **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
 4. ✅ **P0-1** (native batch insert commit_details + reWriteBatchedInserts). `mr_review` → P1-3.
-5. ⬜ **P1-3** (N+1 reviews + mr_review native insert), **P1-2** (deadline reviews) — adapter-reviews.
+5. ✅ **P1-3** (N+1 reviews + mr_review native insert). ⬜ **P1-2** (deadline reviews) — adapter-reviews.
 6. **P2-1** (Retry-After), затем P2-2/P2-3 по мере сил.
 
 > ⚠️ **Build-замечание:** полный `mvn verify` требует доступа к GitHub Packages (OAS-контракты)

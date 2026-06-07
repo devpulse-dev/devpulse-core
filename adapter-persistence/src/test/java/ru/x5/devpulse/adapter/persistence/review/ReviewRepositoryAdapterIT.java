@@ -82,6 +82,30 @@ class ReviewRepositoryAdapterIT extends PostgresContainerSupport {
                 () -> assertThat(mine.getFirst().reviews().getFirst().commentCount()).isEqualTo(5));
     }
 
+    @Test
+    @DisplayName("Batch-lookup (P1-3): два проекта с одинаковым iid в одном чанке не путаются")
+    void batchLookupDistinguishesSameIidAcrossProjects() {
+        Email authorA = new Email("p13-a@x5.ru");
+        Email authorB = new Email("p13-b@x5.ru");
+        // Одинаковый iid=5, разные project_id — суперсет batch-запроса должен фильтроваться по паре.
+        writeRepo.upsert(List.of(
+                mr(1300L, 5L, authorA, CREATED.plusHours(1), List.of(new MrReview(ALICE, true, 1))),
+                mr(1301L, 5L, authorB, CREATED.plusHours(1), List.of(new MrReview(BOB, true, 9)))));
+
+        // Повторный upsert только проекта 1300 — проект 1301 не должен задеться.
+        writeRepo.upsert(List.of(
+                mr(1300L, 5L, authorA, CREATED.plusHours(1), List.of(new MrReview(ALICE, true, 4)))));
+
+        MergeRequest a = readByAuthor(authorA);
+        MergeRequest b = readByAuthor(authorB);
+        assertAll("composite-key изоляция",
+                () -> assertThat(a.reviews()).as("проект 1300 обновлён").hasSize(1),
+                () -> assertThat(a.reviews().getFirst().commentCount()).isEqualTo(4),
+                () -> assertThat(b.reviews()).as("проект 1301 не задет").hasSize(1),
+                () -> assertThat(b.reviews().getFirst().reviewer()).isEqualTo(BOB),
+                () -> assertThat(b.reviews().getFirst().commentCount()).isEqualTo(9));
+    }
+
     private MergeRequest readByAuthor(Email author) {
         return readRepo.findMergeRequestsByPeriod(MAY).stream()
                 .filter(m -> m.author().equals(author))

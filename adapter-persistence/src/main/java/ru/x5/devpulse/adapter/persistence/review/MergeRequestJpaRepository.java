@@ -1,8 +1,8 @@
 package ru.x5.devpulse.adapter.persistence.review;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -19,6 +19,15 @@ interface MergeRequestJpaRepository extends JpaRepository<MergeRequestEntity, Lo
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    /** Поиск по натуральному ключу GitLab — для upsert при сборе. */
-    Optional<MergeRequestEntity> findByGitlabProjectIdAndGitlabMrIid(Long gitlabProjectId, Long gitlabMrIid);
+    /**
+     * Batch-lookup существующих MR по натуральному ключу GitLab — для upsert при сборе.
+     *
+     * <p>Заменяет N+1 (по одному {@code findBy} на MR). Запрос по двум IN-множествам даёт
+     * <b>суперсет</b> (декартово {@code projectIds × iids} среди существующих строк); вызывающий
+     * код фильтрует точные пары {@code (project_id, iid)} через map по композитному ключу
+     * ({@code uk_merge_request_project_iid} гарантирует 1:1). Суперсет ограничен размером чанка,
+     * т.к. iid'ы MR последовательны в пределах проекта.</p>
+     */
+    List<MergeRequestEntity> findByGitlabProjectIdInAndGitlabMrIidIn(
+            Collection<Long> projectIds, Collection<Long> iids);
 }
