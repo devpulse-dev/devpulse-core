@@ -555,14 +555,14 @@ nullable FK). ✓
 | # | Проблема | Почему критично | План фикса | Файлы | Статус |
 |---|---|---|---|---|---|
 | P0-1 | **`GenerationType.IDENTITY` убивает JDBC batch inserts** | `hibernate.jdbc.batch_size=100 / order_inserts=true` в `application.yml` — **мёртвая конфигурация**: при IDENTITY Hibernate не может батчить INSERT (обязан вернуть id после каждой строки). `saveAll(500)` = 500 round-trip'ов. На «миллионах коммитов» (заявка в javadoc `GitCliClient`/`GitGatewayAdapter`) это бутылочное горло записи. | `commit_details` пишется append-only (без update) → перевести insert на **`JdbcTemplate` native batch insert** (как ADR-6 уже делает для recompute). Сразу даёт батчинг, обходит IDENTITY, убирает Hibernate dirty-checking на hot-path. То же для `mr_review`. `application.yml`: добавить `reWriteBatchedInserts=true` в JDBC URL. | `CommitRepositoryAdapter`, (`CommitDetailsEntity` остаётся для чтения), `ReviewWriteRepositoryAdapter`, `application.yml` | ⬜ |
-| P0-2 | **Zombie-detection грузит ВСЕ хеши репо в heap** — противоречит O(1)-памяти | `findHashesByRepoAndPeriod` тянет все хеши репо за период в `HashSet<CommitHash>` ([CollectGitStatsService](application/src/main/java/ru/x5/devpulse/application/service/CollectGitStatsService.java)). Стриминг-парс действительно O(1), но финальная cleanup-tx материализует миллионы 40-симв. строк → десятки-сотни МБ → OOM ровно в рекламируемом сценарии (первый backfill большого репо). | Перенести set-разность **в SQL**: писать `seenInGit` во временную таблицу (или `unnest(?::text[])` чанками) и `DELETE FROM commit_details WHERE repo=? AND date∈period AND commit_hash <> ALL(seen)`. Heap не зависит от размера репо. | `CommitRepository` (port), `CommitRepositoryAdapter`, `CollectGitStatsService` | ⬜ |
+| P0-2 | **Zombie-detection грузит ВСЕ хеши репо в heap** — противоречит O(1)-памяти | `findHashesByRepoAndPeriod` тянул все хеши репо за период в `HashSet<CommitHash>`; плюс `seenInGit` копил все хеши прогона. Финальная cleanup-tx материализовала миллионы строк → OOM. | ✅ Сделано: **mark-and-sweep по `collected_at`** (лучше, чем черновой temp-table/`unnest`). Existing-коммиты помечаются `markSeen(runMark)`, sweep `deleteZombies(repo, period, runMark)` считает set-разность в БД. `seenInGit` удалён → heap O(batch). Индекс `idx_commit_details_repo_date` (миграция 027). IT `markAndSweepZombies`. | `CommitRepository`, `CommitDetailsJpaRepository`, `CommitRepositoryAdapter`, `CollectGitStatsService`, migration 027 | ✅ |
 | P0-3 | **Per-repo recompute → O(K²) write amplification** | `recomputeFromCommits` делает `DELETE ... WHERE email=ANY(...)` **без фильтра по репо** и зовётся в цикле per-repo. Автор, активный в K репо, переписывает свои daily-строки по всем K репо — K раз за прогон. При 1000 репо и тимлидах-в-десятках-репо это заметно. | Собрать `allAffected` по **всем** репо и сделать **один** recompute в конце прогона. Zombie-cleanup остаётся per-repo (он по природе per-repo). Теряем per-repo атомарность recompute — это осознанный trade-off (см. ADR-9), компенсируется идемпотентным retry. Зафиксировать новым ADR. | `CollectGitStatsService`, `DailyStatsRepository` (контракт не меняется) | ⬜ |
 
 ### P1 — корректность / операционные риски
 
 | # | Проблема | Почему важно | План фикса | Файлы | Статус |
 |---|---|---|---|---|---|
-| P1-1 | **Дубль `findOrCreateAll` + leak оркестрации в адаптер** | `CollectGitStatsService.persistCommitBatch` зовёт `findOrCreateAll`, и `CommitRepositoryAdapter.saveAll` зовёт его **ещё раз**. Двойная работа + адаптер persistence управляет identity (use-case concern). | Убрать `findOrCreateAll` из `saveAll`; передавать `Map<Email,Long> userByEmail` в адаптер параметром (или принимать готовые user_id). Адаптер только пишет. | `CommitRepository` (port), `CommitRepositoryAdapter`, `CollectGitStatsService` | ⬜ |
+| P1-1 | **Дубль `findOrCreateAll` + leak оркестрации в адаптер** | `CollectGitStatsService.persistCommitBatch` зовёт `findOrCreateAll`, и `CommitRepositoryAdapter.saveAll` зовёт его **ещё раз**. Двойная работа + адаптер persistence управляет identity (use-case concern). | ✅ Сделано: `saveAll(commits, Map<Email,Long>)` принимает готовый маппинг, адаптер только пишет; `findOrCreateAll` остался единственной точкой в use-case; убрана зависимость `UnifiedUserRepository` из адаптера. | `CommitRepository` (port), `CommitRepositoryAdapter`, `CollectGitStatsService` | ✅ |
 | P1-2 | **Сбор нельзя отменить; reviews-fan-out без общего deadline** | `POST /collection/runs` запускает операцию на часы, держит advisory lock + connection, отмены через API нет. `ReviewGatewayAdapter` `ExecutorService.close()` ждёт все задачи без таймаута; залипший MR в rate-limiter подвешивает фазу. Ошибки отдельных MR молча проглатываются. | (а) Общий deadline на фазу reviews (overall timeout, прерывание оставшихся задач). (б) Счётчик «потеряно N MR» в лог/метрику вместо тихого drop. (в) Отметить отмену сбора как отдельную задачу (нужен ли `DELETE /collection/runs/{id}` — решить). | `ReviewGatewayAdapter`, `GitlabProperties` | ⬜ |
 | P1-3 | **N+1 в reviews upsert** | `findByGitlabProjectIdAndGitlabMrIid` в цикле по каждому MR — десятки тысяч точечных SELECT на backfill. | Батч-lookup существующих MR одним запросом `WHERE (project_id, iid) IN (...)` на чанк, дальше map в памяти. | `MergeRequestJpaRepository`, `ReviewWriteRepositoryAdapter` | ⬜ |
 
@@ -578,11 +578,11 @@ nullable FK). ✓
 
 ### Порядок исполнения
 
-1. **P1-1** (дубль `findOrCreateAll`) — самый дешёвый и безопасный, разогрев.
-2. **P0-2** (zombie-set в SQL) — чинит OOM, локализован в per-repo tx.
-3. **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
-4. **P0-1** (batch insert) — крупнее, отдельный коммит + возможная миграция/конфиг.
-5. **P1-3** (N+1 reviews), **P1-2** (deadline reviews) — adapter-reviews.
+1. ✅ **P1-1** (дубль `findOrCreateAll`) — самый дешёвый и безопасный, разогрев.
+2. ✅ **P0-2** (zombie mark-and-sweep) — чинит OOM, локализован в per-repo tx.
+3. ⬜ **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
+4. ⬜ **P0-1** (batch insert) — крупнее, отдельный коммит + возможная миграция/конфиг.
+5. ⬜ **P1-3** (N+1 reviews), **P1-2** (deadline reviews) — adapter-reviews.
 6. **P2-1** (Retry-After), затем P2-2/P2-3 по мере сил.
 
 > ⚠️ **Build-замечание:** полный `mvn verify` требует доступа к GitHub Packages (OAS-контракты)

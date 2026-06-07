@@ -106,6 +106,33 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                         .as("фильтр по чужому email → пусто").isEmpty());
     }
 
+    @Test
+    @DisplayName("mark-and-sweep: deleteZombies сносит непомеченные, markSeen защищает увиденные")
+    void markAndSweepZombies() {
+        RepoName sweepRepo = new RepoName("sweep-test");
+        LocalDateTime when = LocalDateTime.of(2026, 3, 10, 9, 0);
+        Period march = new Period(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 31));
+        CommitHash zombie = new CommitHash("e".repeat(40));
+        CommitHash survivor = new CommitHash("f".repeat(40));
+
+        // Оба коммита сохранены ДО runMark → их collected_at < runMark.
+        repo.saveAll(List.of(
+                commitInRepo(zombie.value(), when, sweepRepo),
+                commitInRepo(survivor.value(), when, sweepRepo)), Map.of());
+
+        LocalDateTime runMark = LocalDateTime.now();
+        // survivor — «увиден в этом сборе»: collected_at поднимается до runMark.
+        repo.markSeen(List.of(survivor), runMark);
+
+        int deleted = repo.deleteZombies(sweepRepo, march, runMark);
+
+        assertAll("mark-and-sweep",
+                () -> assertThat(deleted).as("снесён ровно один зомби").isEqualTo(1),
+                () -> assertThat(repo.findExistingHashes(List.of(zombie, survivor)))
+                        .as("zombie удалён, survivor (markSeen) остался")
+                        .containsExactly(survivor));
+    }
+
     private static HourlyBucket cell(List<HourlyBucket> cells, int weekday, int hour) {
         return cells.stream()
                 .filter(c -> c.weekday() == weekday && c.hour() == hour)
@@ -125,5 +152,12 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                 new CommitHash(hash), author, when,
                 true, 10, 5, 0,
                 "merge branch", null, CORE);
+    }
+
+    private static Commit commitInRepo(String hash, LocalDateTime when, RepoName repo) {
+        return new Commit(
+                new CommitHash(hash), BORIS, when,
+                false, 10, 5, 0,
+                "fix something", null, repo);
     }
 }

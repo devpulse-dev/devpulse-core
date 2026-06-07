@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -44,7 +45,6 @@ class CollectGitStatsServiceTest {
     private static final Email AUTHOR = new Email("boris@x5.ru");
     private static final String SHA_NEW = "a".repeat(40);
     private static final String SHA_DUP = "b".repeat(40);
-    private static final String SHA_ZOMBIE = "c".repeat(40);
     private static final LocalDateTime SINCE = LocalDateTime.of(2026, 5, 1, 0, 0);
     private static final LocalDateTime UNTIL = LocalDateTime.of(2026, 5, 31, 23, 59);
 
@@ -73,8 +73,6 @@ class CollectGitStatsServiceTest {
         stubStreamCommits(List.of(commit(SHA_NEW), commit(SHA_DUP)));
         when(commitRepository.findExistingHashes(anyCollection()))
                 .thenReturn(Set.of(new CommitHash(SHA_DUP)));
-        when(commitRepository.findHashesByRepoAndPeriod(eq(REPO), any()))
-                .thenReturn(Set.of(new CommitHash(SHA_NEW), new CommitHash(SHA_DUP)));
 
         Set<Email> affected = service.collect(SINCE, UNTIL);
 
@@ -94,50 +92,47 @@ class CollectGitStatsServiceTest {
     }
 
     @Test
-    @DisplayName("Cleanup zombies: то что в БД есть, но в git нет — удаляется")
-    void cleansUpRebaseZombies() {
+    @DisplayName("Sweep zombies: deleteZombies вызывается в финальной tx с repo и period (set-разность в БД)")
+    void sweepsZombiesInFinalTx() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
         stubStreamCommits(List.of(commit(SHA_NEW)));
         when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
-        when(commitRepository.findHashesByRepoAndPeriod(eq(REPO), any()))
-                .thenReturn(Set.of(new CommitHash(SHA_NEW), new CommitHash(SHA_ZOMBIE)));
+
+        service.collect(SINCE, UNTIL);
+
+        // Какие именно строки — зомби, решает БД по collected_at; здесь проверяем сам вызов sweep'а.
+        verify(commitRepository).deleteZombies(eq(REPO), any(), any());
+    }
+
+    @Test
+    @DisplayName("Existing-коммиты помечаются markSeen — защита от sweep'а")
+    void marksExistingCommitsAsSeen() {
+        when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
+        stubStreamCommits(List.of(commit(SHA_NEW), commit(SHA_DUP)));
+        when(commitRepository.findExistingHashes(anyCollection()))
+                .thenReturn(Set.of(new CommitHash(SHA_DUP)));
 
         service.collect(SINCE, UNTIL);
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<Set<CommitHash>> deleted = ArgumentCaptor.forClass(Set.class);
-        verify(commitRepository).deleteByHashes(deleted.capture());
-        assertThat(deleted.getValue()).containsExactly(new CommitHash(SHA_ZOMBIE));
+        ArgumentCaptor<Collection<CommitHash>> seen = ArgumentCaptor.forClass(Collection.class);
+        verify(commitRepository).markSeen(seen.capture(), any());
+        assertThat(seen.getValue()).containsExactly(new CommitHash(SHA_DUP));
     }
 
     @Test
-    @DisplayName("Нет zombies → deleteByHashes не вызывается")
-    void noZombiesNoDelete() {
-        when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
-        stubStreamCommits(List.of(commit(SHA_NEW)));
-        when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
-        when(commitRepository.findHashesByRepoAndPeriod(eq(REPO), any()))
-                .thenReturn(Set.of(new CommitHash(SHA_NEW)));
-
-        service.collect(SINCE, UNTIL);
-
-        verify(commitRepository, never()).deleteByHashes(anyCollection());
-    }
-
-    @Test
-    @DisplayName("Нет коммитов и нет zombies → recompute НЕ зовётся")
+    @DisplayName("Нет коммитов → recompute НЕ зовётся, но sweep всё равно выполняется")
     void noCommitsNoRecompute() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
         doAnswer(inv -> null)
                 .when(gitGateway).streamCommits(eq(REPO), any(), any(), any());
-        when(commitRepository.findHashesByRepoAndPeriod(eq(REPO), any())).thenReturn(Set.of());
 
         Set<Email> affected = service.collect(SINCE, UNTIL);
 
-        assertAll("nothing happened",
+        assertAll("без коммитов: recompute пропущен, sweep выполнен (БД решит что чистить)",
                 () -> assertThat(affected).isEmpty(),
                 () -> verify(dailyStatsRepository, never()).recomputeFromCommits(any(), any()),
-                () -> verify(commitRepository, never()).deleteByHashes(anyCollection()));
+                () -> verify(commitRepository).deleteZombies(eq(REPO), any(), any()));
     }
 
     @Test
@@ -147,7 +142,6 @@ class CollectGitStatsServiceTest {
         RepoName r2 = new RepoName("r2");
         when(gitGateway.configuredRepos()).thenReturn(List.of(r1, r2));
         doAnswer(inv -> null).when(gitGateway).streamCommits(any(), any(), any(), any());
-        when(commitRepository.findHashesByRepoAndPeriod(any(), any())).thenReturn(Set.of());
 
         service.collect(SINCE, UNTIL);
 

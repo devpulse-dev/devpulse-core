@@ -67,23 +67,25 @@ class CommitRepositoryAdapter implements CommitRepository {
     }
 
     @Override
-    public Set<CommitHash> findHashesByRepoAndPeriod(RepoName repo, Period period) {
-        List<String> raw = jpa.findHashesByRepoAndPeriod(
-                repo.value(),
-                period.fromAtStartOfDay(),
-                period.toAtEndOfDay());
-        Set<CommitHash> result = new HashSet<>(raw.size());
-        for (String h : raw) result.add(new CommitHash(h));
-        return result;
+    @Transactional
+    public void markSeen(Collection<CommitHash> hashes, java.time.LocalDateTime seenAt) {
+        if (hashes == null || hashes.isEmpty()) return;
+        List<String> values = hashes.stream().map(CommitHash::value).toList();
+        jpa.markSeen(values, seenAt);
     }
 
     @Override
     @Transactional
-    public void deleteByHashes(Collection<CommitHash> hashes) {
-        if (hashes == null || hashes.isEmpty()) return;
-        List<String> values = hashes.stream().map(CommitHash::value).toList();
-        int deleted = jpa.deleteByCommitHashes(values);
-        log.info("Удалили {} rebase-зомби из commit_details", deleted);
+    public int deleteZombies(RepoName repo, Period period, java.time.LocalDateTime seenBefore) {
+        int deleted = jpa.deleteZombies(
+                repo.value(),
+                period.fromAtStartOfDay(),
+                period.toAtEndOfDay(),
+                seenBefore);
+        if (deleted > 0) {
+            log.info("Удалили {} rebase-зомби из commit_details (repo={})", deleted, repo.value());
+        }
+        return deleted;
     }
 
     @Override

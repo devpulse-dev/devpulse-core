@@ -38,16 +38,26 @@ public interface CommitRepository {
     List<Commit> findByAuthor(Email email, Period period, PageRequest page);
 
     /**
-     * Все хеши коммитов в указанном репозитории за период.
+     * Помечает уже существующие коммиты как «увидены в текущем сборе» (обновляет
+     * {@code collected_at}). Часть mark-and-sweep rebase-cleanup: коммиты, всё ещё
+     * присутствующие в git, защищаются от удаления в {@link #deleteZombies}.
      *
-     * <p>Используется для rebase-cleanup: сравниваем со списком хешей, фактически пришедших
-     * из {@code git log} в этом сборе. Хеши которые в БД есть, а в git'е нет — «зомби»
-     * после force-push, их удаляем через {@link #deleteByHashes}.</p>
+     * @param hashes хеши existing-коммитов из текущего батча
+     * @param seenAt метка сбора (одинаковая на весь прогон репозитория)
      */
-    Set<CommitHash> findHashesByRepoAndPeriod(RepoName repo, Period period);
+    void markSeen(Collection<CommitHash> hashes, java.time.LocalDateTime seenAt);
 
-    /** Bulk-удаление коммитов по хешам. Используется для rebase-cleanup. */
-    void deleteByHashes(Collection<CommitHash> hashes);
+    /**
+     * Удаляет rebase/force-push «зомби» — коммиты репозитория за период, которые НЕ были
+     * увидены в текущем сборе ({@code collected_at < seenBefore}).
+     *
+     * <p>Set-разность считается в БД (а не загрузкой всех хешей репозитория в heap) — память
+     * O(1) от размера репозитория. См. P0-2 в REFACTORING.md.</p>
+     *
+     * @param seenBefore метка начала сбора репозитория; всё, что старше — зомби
+     * @return сколько строк удалено
+     */
+    int deleteZombies(RepoName repo, Period period, java.time.LocalDateTime seenBefore);
 
     /**
      * Почасовая агрегация не-мердж коммитов за период по ключу (день недели × час).

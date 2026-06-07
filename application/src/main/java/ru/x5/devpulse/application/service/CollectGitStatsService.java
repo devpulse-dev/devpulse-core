@@ -25,16 +25,22 @@ import ru.x5.devpulse.domain.model.user.Email;
  *
  * <p><b>Пайплайн (per-repo):</b></p>
  * <ol>
- *   <li>Стрим git коммитов → {@code persistCommitBatch} per-batch (своя короткая tx);</li>
- *   <li>Аккумуляция: {@code seenInGit} (хеши) + {@code repoAffected} (email'ы авторов);</li>
+ *   <li>{@code runMark = now()} — метка начала сбора репозитория;</li>
+ *   <li>Стрим git коммитов → {@code persistCommitBatch} per-batch (своя короткая tx):
+ *       existing-коммиты помечаются {@code markSeen(runMark)}, новые — сохраняются с {@code now()};</li>
+ *   <li>Аккумуляция только {@code repoAffected} (email'ы авторов) — хеши в heap НЕ копим;</li>
  *   <li>Финальная атомарная tx ({@link TransactionRunner}):
- *       cleanup zombies ({@code findHashesByRepoAndPeriod} ∖ {@code seenInGit}) + recompute
- *       daily_stats. Либо оба применены, либо ни одного.</li>
+ *       {@code deleteZombies(repo, period, runMark)} (sweep: всё, что не увидено в этом сборе) +
+ *       recompute daily_stats. Либо оба применены, либо ни одного.</li>
  * </ol>
+ *
+ * <p><b>Память O(1) от размера репозитория:</b> zombie-cleanup — это mark-and-sweep по
+ * {@code collected_at} в БД, а не set-разность в heap. На репо с миллионом коммитов мы не
+ * держим миллион хешей в памяти (ни {@code seenInGit}, ни полную выгрузку из БД). См. P0-2.</p>
  *
  * <p><b>Семантика отказа:</b> repo N упал → repos 1..N-1 консистентны (предыдущие финальные tx
  * прошли). Repo N — либо в исходном состоянии (финальная tx откатилась), либо batches уже
- * сохранены, но cleanup+recompute ещё не применён. Retry идемпотентен: дубли отсекаются
+ * сохранены, но sweep+recompute ещё не применён. Retry идемпотентен: дубли отсекаются
  * {@code findExistingHashes}, recompute сделает всё заново.</p>
  */
 @Slf4j
@@ -68,29 +74,23 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
                                       Period period) {
         log.info("Стримим коммиты из {}", repo.value());
 
-        Set<CommitHash> seenInGit = new HashSet<>();
+        // Метка сбора: всё, что увидено в этом прогоне (insert либо markSeen), получит
+        // collected_at >= runMark; всё, что осталось со старым collected_at — зомби.
+        LocalDateTime runMark = LocalDateTime.now();
         Set<Email> repoAffected = new HashSet<>();
 
         gitGateway.streamCommits(repo, since, until, batch -> {
             for (Commit c : batch) {
-                seenInGit.add(c.hash());
                 if (c.authorEmail() != null) repoAffected.add(c.authorEmail());
             }
-            persistCommitBatch(batch);
+            persistCommitBatch(batch, runMark);
         });
 
-        // Финальная атомарная tx: cleanup + recompute видимы вместе или никак.
+        // Финальная атомарная tx: sweep zombies + recompute видимы вместе или никак.
         // Supplier-перегрузка (с return null) — Runnable-overload default-метод в интерфейсе,
         // mock-фреймворки его не вызывают.
         transactionRunner.inTransaction(() -> {
-            Set<CommitHash> inDb = commitRepository.findHashesByRepoAndPeriod(repo, period);
-            Set<CommitHash> zombies = new HashSet<>(inDb);
-            zombies.removeAll(seenInGit);
-            if (!zombies.isEmpty()) {
-                log.info("Repo {}: {} zombie-коммитов (rebase/force-push) — удаляем",
-                        repo.value(), zombies.size());
-                commitRepository.deleteByHashes(zombies);
-            }
+            commitRepository.deleteZombies(repo, period, runMark);
             if (!repoAffected.isEmpty()) {
                 dailyStatsRepository.recomputeFromCommits(repoAffected, period);
             }
@@ -101,9 +101,10 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
     }
 
     /**
-     * Один батч коммитов: дедуп по hash → batch find-or-create users → save commits.
+     * Один батч коммитов: дедуп по hash → existing помечаем «увиден» (markSeen) →
+     * find-or-create users → save новых. {@code runMark} — общая метка прогона.
      */
-    private void persistCommitBatch(List<Commit> batch) {
+    private void persistCommitBatch(List<Commit> batch, LocalDateTime runMark) {
         if (batch == null || batch.isEmpty()) return;
 
         Set<CommitHash> hashes = new HashSet<>(batch.size());
@@ -111,13 +112,20 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
 
         Set<CommitHash> existing = commitRepository.findExistingHashes(hashes);
 
+        // Existing-коммиты всё ещё в git — защищаем от sweep'а (bump collected_at до runMark).
+        // Делаем ДО early-return: батч может целиком состоять из existing-коммитов, и их тоже
+        // нужно пометить увиденными, иначе deleteZombies снесёт их как зомби.
+        if (!existing.isEmpty()) {
+            commitRepository.markSeen(existing, runMark);
+        }
+
         List<Commit> fresh = new ArrayList<>(batch.size());
         for (Commit c : batch) {
             if (!existing.contains(c.hash())) fresh.add(c);
         }
 
         if (fresh.isEmpty()) {
-            log.debug("Батч из {} коммитов уже в БД — пропуск", batch.size());
+            log.debug("Батч из {} коммитов уже в БД — помечены увиденными, новых нет", batch.size());
             return;
         }
 
