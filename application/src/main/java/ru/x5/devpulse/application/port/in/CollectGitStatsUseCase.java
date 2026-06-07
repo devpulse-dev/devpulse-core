@@ -20,10 +20,13 @@ public interface CollectGitStatsUseCase {
     /**
      * Прогоняет git-фазу по всем сконфигурированным репозиториям.
      *
-     * @param since начало периода (включительно)
-     * @param until конец периода
+     * @param since  начало периода (включительно)
+     * @param until  конец периода
+     * @param cancel сигнал кооперативной отмены — проверяется перед каждым репозиторием;
+     *               при отмене обход прекращается, recompute пропускается, бросается
+     *               внутренний cancel-сигнал (ловит оркестратор → CANCELLED)
      * @return email'ы всех затронутых авторов (для трассировки/метрик); пустое — если
      *         репозиториев нет или ни одного коммита не пришло
      */
-    Set<Email> collect(LocalDateTime since, LocalDateTime until);
+    Set<Email> collect(LocalDateTime since, LocalDateTime until, CancellationSignal cancel);
 }

@@ -22,6 +22,8 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException;
+import ru.x5.devpulse.application.port.out.CollectionRunNotCancellableException;
+import ru.x5.devpulse.domain.model.collection.CollectionStatus;
 
 /**
  * Тест маппинга exception → HTTP-статус через {@link ApiExceptionHandler}.
@@ -51,6 +53,15 @@ class ApiExceptionHandlerTest {
         mvc.perform(get("/api/v2/_boom").param("kind", "running"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("urn:devpulse:problem:conflict"));
+    }
+
+    @Test
+    @DisplayName("CollectionRunNotCancellableException → 409 + Collection run not cancellable")
+    void notCancellableBecomes409() throws Exception {
+        mvc.perform(get("/api/v2/_boom").param("kind", "notcancellable"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("urn:devpulse:problem:conflict"))
+                .andExpect(jsonPath("$.title").value("Collection run not cancellable"));
     }
 
     @Test
@@ -105,6 +116,8 @@ class ApiExceptionHandlerTest {
             Supplier<RuntimeException> ex = switch (kind) {
                 case "illegal" -> () -> new IllegalArgumentException("bad");
                 case "running" -> CollectionAlreadyRunningException::new;
+                case "notcancellable" -> () -> new CollectionRunNotCancellableException(
+                        java.util.UUID.randomUUID(), CollectionStatus.SUCCESS);
                 case "upstream5xx" -> () -> HttpServerErrorException.create(
                         HttpStatus.INTERNAL_SERVER_ERROR, "Kaiten 500",
                         new HttpHeaders(), new byte[0], null);

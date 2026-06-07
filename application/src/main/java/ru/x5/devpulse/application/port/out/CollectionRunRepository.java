@@ -18,4 +18,13 @@ public interface CollectionRunRepository {
      * Момент конца последнего успешного сбора — точка старта для следующего.
      */
     Optional<LocalDateTime> findLastSuccessfulUntil();
+
+    /** Ставит флаг кооперативной отмены прогона (cancel-эндпоинт). */
+    void markCancelRequested(UUID id);
+
+    /**
+     * Запрошена ли отмена прогона. Читается бегущим сбором на checkpoint'ах.
+     * Несуществующий id → {@code false}.
+     */
+    boolean isCancelRequested(UUID id);
 }

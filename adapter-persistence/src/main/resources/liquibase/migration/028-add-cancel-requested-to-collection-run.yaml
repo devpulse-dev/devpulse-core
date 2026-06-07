@@ -1,0 +1,23 @@
+# Флаг кооперативной отмены прогона (P1-2в / ADR-12).
+#
+# Cancel-эндпоинт (POST /collection/runs/{id}/cancel) ставит cancel_requested=true на любом
+# инстансе. Бегущий сбор читает флаг на checkpoint'ах (между репозиториями / фазами) и
+# останавливается, помечая прогон CANCELLED. Кросс-инстансно (флаг в БД, не in-memory).
+databaseChangeLog:
+  - changeSet:
+      id: 028-add-cancel-requested-to-collection-run
+      author: devpulse
+      changes:
+        - addColumn:
+            tableName: collection_run
+            columns:
+              - column:
+                  name: cancel_requested
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+      rollback:
+        - dropColumn:
+            tableName: collection_run
+            columnName: cancel_requested

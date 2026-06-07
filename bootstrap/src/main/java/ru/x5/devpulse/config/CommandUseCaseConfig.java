@@ -3,6 +3,7 @@ package ru.x5.devpulse.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.x5.devpulse.adapter.kaiten.KaitenProperties;
+import ru.x5.devpulse.application.port.in.CancelCollectionUseCase;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
@@ -20,6 +21,7 @@ import ru.x5.devpulse.application.port.out.ReviewGateway;
 import ru.x5.devpulse.application.port.out.ReviewWriteRepository;
 import ru.x5.devpulse.application.port.out.TransactionRunner;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
+import ru.x5.devpulse.application.service.CancelCollectionService;
 import ru.x5.devpulse.application.service.CollectDailyStatsService;
 import ru.x5.devpulse.application.service.CollectGitStatsService;
 import ru.x5.devpulse.application.service.CollectReviewsService;
@@ -52,6 +54,12 @@ class CommandUseCaseConfig {
         return new CollectDailyStatsService(
                 collectGitStats, syncKaitenUsers, collectReviews, collectionRunRepository,
                 collectionLock, kaitenCardsCache);
+    }
+
+    /** Отмена идущего прогона — ставит флаг, сбор остановится на ближайшем checkpoint'е. */
+    @Bean
+    CancelCollectionUseCase cancelCollectionUseCase(CollectionRunRepository collectionRunRepository) {
+        return new CancelCollectionService(collectionRunRepository);
     }
 
     /** Worker — фаза сбора ревью-метрик из GitLab (MR/approvals/notes → merge_request/mr_review). */

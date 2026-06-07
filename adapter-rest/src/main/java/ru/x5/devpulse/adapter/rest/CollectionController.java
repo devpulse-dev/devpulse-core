@@ -2,12 +2,14 @@ package ru.x5.devpulse.adapter.rest;
 
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 import ru.x5.devpulse.adapter.rest.api.CollectionApi;
 import ru.x5.devpulse.adapter.rest.api.model.CollectionRun;
 import ru.x5.devpulse.adapter.rest.api.model.CollectionRunRequest;
 import ru.x5.devpulse.adapter.rest.mapper.CollectionRunMapper;
+import ru.x5.devpulse.application.port.in.CancelCollectionUseCase;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
 
@@ -25,6 +27,7 @@ import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
 class CollectionController implements CollectionApi {
 
     private final CollectDailyStatsUseCase collectDailyStats;
+    private final CancelCollectionUseCase cancelCollection;
     private final GetCollectionRunUseCase getCollectionRun;
     private final CollectionRunMapper collectionRunMapper;
 
@@ -32,6 +35,19 @@ class CollectionController implements CollectionApi {
     public ResponseEntity<CollectionRun> startCollectionRun(CollectionRunRequest body) {
         var since = body == null ? null : body.getSince();
         return ResponseEntity.ok(collectionRunMapper.toDto(collectDailyStats.run(since)));
+    }
+
+    /**
+     * Отмена прогона. Асинхронно: 202 + run (RUNNING с поднятым флагом), фактическая остановка —
+     * на ближайшем checkpoint'е. 404 если прогона нет; 409 (через ApiExceptionHandler) если он
+     * уже терминальный.
+     */
+    @Override
+    public ResponseEntity<CollectionRun> cancelCollectionRun(UUID id) {
+        return cancelCollection.cancel(id)
+                .map(collectionRunMapper::toDto)
+                .map(dto -> ResponseEntity.status(HttpStatus.ACCEPTED).body(dto))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @Override

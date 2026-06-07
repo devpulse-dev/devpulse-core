@@ -1,6 +1,7 @@
 package ru.x5.devpulse.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
@@ -26,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import ru.x5.devpulse.application.port.in.CancellationSignal;
 import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.GitGateway;
@@ -74,7 +76,7 @@ class CollectGitStatsServiceTest {
         when(commitRepository.findExistingHashes(anyCollection()))
                 .thenReturn(Set.of(new CommitHash(SHA_DUP)));
 
-        Set<Email> affected = service.collect(SINCE, UNTIL);
+        Set<Email> affected = service.collect(SINCE, UNTIL, CancellationSignal.NEVER);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Commit>> savedCommits = ArgumentCaptor.forClass(List.class);
@@ -98,7 +100,7 @@ class CollectGitStatsServiceTest {
         stubStreamCommits(List.of(commit(SHA_NEW)));
         when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
 
-        service.collect(SINCE, UNTIL);
+        service.collect(SINCE, UNTIL, CancellationSignal.NEVER);
 
         // Какие именно строки — зомби, решает БД по collected_at; здесь проверяем сам вызов sweep'а.
         verify(commitRepository).deleteZombies(eq(REPO), any(), any());
@@ -112,7 +114,7 @@ class CollectGitStatsServiceTest {
         when(commitRepository.findExistingHashes(anyCollection()))
                 .thenReturn(Set.of(new CommitHash(SHA_DUP)));
 
-        service.collect(SINCE, UNTIL);
+        service.collect(SINCE, UNTIL, CancellationSignal.NEVER);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Collection<CommitHash>> seen = ArgumentCaptor.forClass(Collection.class);
@@ -127,7 +129,7 @@ class CollectGitStatsServiceTest {
         doAnswer(inv -> null)
                 .when(gitGateway).streamCommits(eq(REPO), any(), any(), any());
 
-        Set<Email> affected = service.collect(SINCE, UNTIL);
+        Set<Email> affected = service.collect(SINCE, UNTIL, CancellationSignal.NEVER);
 
         assertAll("без коммитов: recompute пропущен, sweep выполнен (БД решит что чистить)",
                 () -> assertThat(affected).isEmpty(),
@@ -150,7 +152,7 @@ class CollectGitStatsServiceTest {
         }).when(gitGateway).streamCommits(any(), any(), any(), any());
         when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
 
-        service.collect(SINCE, UNTIL);
+        service.collect(SINCE, UNTIL, CancellationSignal.NEVER);
 
         assertAll("single recompute, per-repo sweep",
                 // recompute ровно один раз с объединением затронутых авторов (без O(K²))
@@ -160,6 +162,21 @@ class CollectGitStatsServiceTest {
                 () -> verify(commitRepository, times(2)).deleteZombies(any(), any(), any()),
                 // recompute обёрнут ровно в одну tx на прогон
                 () -> verify(transactionRunner, times(1)).inTransaction(any(Supplier.class)));
+    }
+
+    @Test
+    @DisplayName("Отмена перед репозиторием → CollectionCancelledException, sweep/recompute не зовутся")
+    void cancelledBeforeRepoStops() {
+        when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
+        CancellationSignal alreadyCancelled = () -> true;
+
+        assertThatThrownBy(() -> service.collect(SINCE, UNTIL, alreadyCancelled))
+                .isInstanceOf(CollectionCancelledException.class);
+
+        assertAll("отмена до обработки репозитория",
+                () -> verify(gitGateway, never()).streamCommits(any(), any(), any(), any()),
+                () -> verify(commitRepository, never()).deleteZombies(any(), any(), any()),
+                () -> verify(dailyStatsRepository, never()).recomputeFromCommits(any(), any()));
     }
 
     /* ------------ helpers ------------ */

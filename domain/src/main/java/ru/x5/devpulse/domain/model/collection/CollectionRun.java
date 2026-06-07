@@ -53,6 +53,12 @@ public record CollectionRun(
                 CollectionStatus.FAILED, error);
     }
 
+    /** Перевод в {@link CollectionStatus#CANCELLED} (отмена оператором). */
+    public CollectionRun cancelled(String reason) {
+        return new CollectionRun(id, startedAt, LocalDateTime.now(), sinceDate, untilDate,
+                CollectionStatus.CANCELLED, reason);
+    }
+
     public Optional<String> error() {
         return Optional.ofNullable(errorMessage);
     }

@@ -64,7 +64,7 @@ class CollectDailyStatsServiceTest {
     @Test
     @DisplayName("Happy path: lock → STARTED → git + kaiten → SUCCESS")
     void happyPath() {
-        when(collectGitStats.collect(any(), any())).thenReturn(Set.of(new Email("boris@x5.ru")));
+        when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of(new Email("boris@x5.ru")));
 
         CollectionRun result = service.run(SINCE);
 
@@ -72,7 +72,7 @@ class CollectDailyStatsServiceTest {
         verify(collectionRunRepository, times(2)).save(runs.capture());
         assertAll("orchestration",
                 () -> assertThat(result.status()).isEqualTo(CollectionStatus.SUCCESS),
-                () -> verify(collectGitStats).collect(any(), any()),
+                () -> verify(collectGitStats).collect(any(), any(), any()),
                 () -> verify(syncKaitenUsers).syncAll(),
                 () -> verify(lockHandle).close());
     }
@@ -80,7 +80,7 @@ class CollectDailyStatsServiceTest {
     @Test
     @DisplayName("Git упал ⇒ FAILED, Kaiten НЕ зовём")
     void gitFailureMarksFailedAndSkipsKaiten() {
-        when(collectGitStats.collect(any(), any())).thenThrow(new RuntimeException("boom"));
+        when(collectGitStats.collect(any(), any(), any())).thenThrow(new RuntimeException("boom"));
 
         CollectionRun result = service.run(SINCE);
 
@@ -92,9 +92,25 @@ class CollectDailyStatsServiceTest {
     }
 
     @Test
+    @DisplayName("Отмена в git-фазе ⇒ CANCELLED, kaiten/reviews/cache не зовём")
+    void cancellationMarksCancelled() {
+        when(collectGitStats.collect(any(), any(), any()))
+                .thenThrow(new CollectionCancelledException("cancelled by op"));
+
+        CollectionRun result = service.run(SINCE);
+
+        assertAll("отмена",
+                () -> assertThat(result.status()).isEqualTo(CollectionStatus.CANCELLED),
+                () -> assertThat(result.error()).hasValue("cancelled by op"),
+                () -> verify(syncKaitenUsers, never()).syncAll(),
+                () -> verify(kaitenCardsCache, never()).invalidateAll(),
+                () -> verify(collectionRunRepository, times(2)).save(any()));
+    }
+
+    @Test
     @DisplayName("Kaiten упал, git ок ⇒ run = SUCCESS (изоляция фаз)")
     void kaitenFailureIsIsolated() {
-        when(collectGitStats.collect(any(), any())).thenReturn(Set.of());
+        when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
         when(syncKaitenUsers.syncAll()).thenThrow(new RuntimeException("kaiten 429"));
 
         CollectionRun result = service.run(SINCE);
@@ -105,7 +121,7 @@ class CollectDailyStatsServiceTest {
     @Test
     @DisplayName("Happy path зовёт фазу reviews; её падение изолировано ⇒ SUCCESS")
     void reviewsPhaseRunsAndIsIsolated() {
-        when(collectGitStats.collect(any(), any())).thenReturn(Set.of());
+        when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
         doThrow(new RuntimeException("gitlab unreachable")).when(collectReviews).collect(any());
 
         CollectionRun result = service.run(SINCE);
@@ -120,7 +136,7 @@ class CollectDailyStatsServiceTest {
     void resolveSinceFromLastSuccess() {
         LocalDateTime lastUntil = LocalDateTime.of(2026, 5, 20, 10, 0);
         when(collectionRunRepository.findLastSuccessfulUntil()).thenReturn(Optional.of(lastUntil));
-        when(collectGitStats.collect(any(), any())).thenReturn(Set.of());
+        when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
 
         service.run(null);
 
@@ -148,7 +164,7 @@ class CollectDailyStatsServiceTest {
     @Test
     @DisplayName("Lock освобождается после успешного сбора (try-with-resources)")
     void lockReleasedAfterSuccess() {
-        when(collectGitStats.collect(any(), any())).thenReturn(Set.of());
+        when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
 
         service.run(SINCE);
 
@@ -158,7 +174,7 @@ class CollectDailyStatsServiceTest {
     @Test
     @DisplayName("После SUCCESS — кэш Kaiten cards инвалидируется (фронт сразу видит свежие)")
     void cacheInvalidatedAfterSuccess() {
-        when(collectGitStats.collect(any(), any())).thenReturn(Set.of());
+        when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
 
         service.run(SINCE);
 
@@ -168,7 +184,7 @@ class CollectDailyStatsServiceTest {
     @Test
     @DisplayName("При FAILED git — кэш НЕ инвалидируется (зачем тратить если данные не свежее)")
     void cacheNotInvalidatedAfterGitFailure() {
-        when(collectGitStats.collect(any(), any())).thenThrow(new RuntimeException("git boom"));
+        when(collectGitStats.collect(any(), any(), any())).thenThrow(new RuntimeException("git boom"));
 
         service.run(SINCE);
 
@@ -178,7 +194,7 @@ class CollectDailyStatsServiceTest {
     @Test
     @DisplayName("Падение invalidateAll НЕ ломает уже-успешный сбор")
     void cacheInvalidationFailureDoesNotBreakSuccess() {
-        when(collectGitStats.collect(any(), any())).thenReturn(Set.of());
+        when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
         doThrow(new RuntimeException("cache impl boom"))
                 .when(kaitenCardsCache).invalidateAll();
 

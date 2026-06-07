@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import ru.x5.devpulse.application.port.in.CancellationSignal;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
@@ -61,7 +62,7 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
     private final TransactionRunner transactionRunner;
 
     @Override
-    public Set<Email> collect(LocalDateTime since, LocalDateTime until) {
+    public Set<Email> collect(LocalDateTime since, LocalDateTime until, CancellationSignal cancel) {
         List<RepoName> repos = gitGateway.configuredRepos();
         log.info("Сбор по {} репозиториям", repos.size());
 
@@ -69,6 +70,12 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
         Set<Email> allAffected = new HashSet<>();
 
         for (RepoName repo : repos) {
+            // Checkpoint отмены: между репозиториями. Уже собранные репо остаются в commit_details,
+            // recompute не запускается (бросаем cancel-сигнал) — следующий сбор доберёт.
+            if (cancel.cancelled()) {
+                throw new CollectionCancelledException(
+                        "Сбор отменён перед репозиторием " + repo.value());
+            }
             allAffected.addAll(collectOneRepo(repo, since, until, period));
         }
 

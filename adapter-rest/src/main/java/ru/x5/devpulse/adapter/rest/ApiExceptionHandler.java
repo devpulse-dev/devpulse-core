@@ -16,6 +16,7 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException;
+import ru.x5.devpulse.application.port.out.CollectionRunNotCancellableException;
 
 /**
  * Глобальный обработчик ошибок REST API. Формат — RFC 7807 ({@link ProblemDetail}).
@@ -79,6 +80,19 @@ class ApiExceptionHandler {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
         pd.setType(CONFLICT);
         pd.setTitle("Collection already running");
+        return pd;
+    }
+
+    /**
+     * Попытка отменить прогон, который уже в терминальном статусе (SUCCESS/FAILED/CANCELLED).
+     * Конфликт состояния ресурса — 409, как и «сбор уже идёт».
+     */
+    @ExceptionHandler(CollectionRunNotCancellableException.class)
+    ProblemDetail handleNotCancellable(CollectionRunNotCancellableException ex) {
+        log.warn("409: {}", ex.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        pd.setType(CONFLICT);
+        pd.setTitle("Collection run not cancellable");
         return pd;
     }
 

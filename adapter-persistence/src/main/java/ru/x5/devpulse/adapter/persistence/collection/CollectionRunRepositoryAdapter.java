@@ -31,4 +31,15 @@ class CollectionRunRepositoryAdapter implements CollectionRunRepository {
     public Optional<LocalDateTime> findLastSuccessfulUntil() {
         return jpa.findLastSuccessfulUntil();
     }
+
+    @Override
+    @Transactional
+    public void markCancelRequested(UUID id) {
+        jpa.markCancelRequested(id);
+    }
+
+    @Override
+    public boolean isCancelRequested(UUID id) {
+        return jpa.findCancelRequested(id).orElse(false);
+    }
 }

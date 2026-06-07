@@ -35,4 +35,33 @@ class CollectionRunRepositoryAdapterIT extends PostgresContainerSupport {
                 .as("из двух SUCCESS — должен вернуться более поздний untilDate")
                 .contains(UNTIL_LATE);
     }
+
+    @Test
+    @DisplayName("CANCELLED не двигает курсор (findLastSuccessfulUntil его игнорирует, как FAILED)")
+    void cancelledDoesNotAdvanceCursor() {
+        repo.save(CollectionRun.start(SINCE, UNTIL_EARLY).succeeded());
+        // Отменённый прогон с более поздним until не должен стать новой точкой старта.
+        repo.save(CollectionRun.start(SINCE, UNTIL_LATE).cancelled("отменён оператором"));
+
+        assertThat(repo.findLastSuccessfulUntil())
+                .as("CANCELLED игнорируется — курсор остаётся на SUCCESS")
+                .contains(UNTIL_EARLY);
+    }
+
+    @Test
+    @DisplayName("markCancelRequested / isCancelRequested round-trip; неизвестный id → false")
+    void cancelFlagRoundTrip() {
+        CollectionRun run = CollectionRun.start(SINCE, UNTIL_EARLY);
+        repo.save(run);
+
+        assertThat(repo.isCancelRequested(run.id()))
+                .as("свежий прогон — флаг не поднят").isFalse();
+
+        repo.markCancelRequested(run.id());
+
+        assertThat(repo.isCancelRequested(run.id()))
+                .as("после markCancelRequested — поднят").isTrue();
+        assertThat(repo.isCancelRequested(java.util.UUID.randomUUID()))
+                .as("неизвестный id → false (без NPE)").isFalse();
+    }
 }

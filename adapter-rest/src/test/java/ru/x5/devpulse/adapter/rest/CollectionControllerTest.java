@@ -18,9 +18,11 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import ru.x5.devpulse.application.port.in.CancelCollectionUseCase;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
 import ru.x5.devpulse.application.port.out.CollectionAlreadyRunningException;
+import ru.x5.devpulse.application.port.out.CollectionRunNotCancellableException;
 import ru.x5.devpulse.domain.model.collection.CollectionRun;
 import ru.x5.devpulse.domain.model.collection.CollectionStatus;
 
@@ -32,6 +34,7 @@ class CollectionControllerTest {
     @Autowired MockMvc mvc;
 
     @MockitoBean CollectDailyStatsUseCase collectDailyStats;
+    @MockitoBean CancelCollectionUseCase cancelCollection;
     @MockitoBean GetCollectionRunUseCase getCollectionRun;
 
     @Test
@@ -86,5 +89,43 @@ class CollectionControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("urn:devpulse:problem:conflict"))
                 .andExpect(jsonPath("$.title").value("Collection already running"));
+    }
+
+    @Test
+    @DisplayName("POST /{id}/cancel для RUNNING → 202 + run")
+    void cancelRunningReturns202() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(cancelCollection.cancel(id)).thenReturn(Optional.of(new CollectionRun(
+                id, LocalDateTime.now(), null,
+                LocalDateTime.of(2026, 5, 1, 0, 0), LocalDateTime.now(),
+                CollectionStatus.RUNNING, null)));
+
+        mvc.perform(post("/api/v2/collection/runs/" + id + "/cancel"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("RUNNING"))
+                .andExpect(jsonPath("$.id").value(id.toString()));
+    }
+
+    @Test
+    @DisplayName("POST /{id}/cancel для несуществующего → 404")
+    void cancelMissingReturns404() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(cancelCollection.cancel(id)).thenReturn(Optional.empty());
+
+        mvc.perform(post("/api/v2/collection/runs/" + id + "/cancel"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("POST /{id}/cancel для терминального → 409 + RFC 7807 problem")
+    void cancelTerminalReturns409() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(cancelCollection.cancel(id))
+                .thenThrow(new CollectionRunNotCancellableException(id, CollectionStatus.SUCCESS));
+
+        mvc.perform(post("/api/v2/collection/runs/" + id + "/cancel"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("urn:devpulse:problem:conflict"))
+                .andExpect(jsonPath("$.title").value("Collection run not cancellable"));
     }
 }

@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import ru.x5.devpulse.application.port.in.CancellationSignal;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
@@ -72,14 +73,25 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
         collectionRunRepository.save(run);
         log.info("Старт сбора {} ({} → {})", run.id(), effectiveSince, until);
 
+        // Сигнал отмены, backed by флагом в БД (кросс-инстансно). Проверяется git-фазой между
+        // репозиториями и оркестратором между фазами.
+        CancellationSignal cancel = () -> collectionRunRepository.isCancelRequested(run.id());
+
         Set<Email> affected = new HashSet<>();
         try {
-            affected = collectGitStats.collect(effectiveSince, until);
+            affected = collectGitStats.collect(effectiveSince, until, cancel);
+        } catch (CollectionCancelledException ce) {
+            return finishCancelled(run, ce.getMessage());
         } catch (Exception e) {
             log.error("Git-фаза упала — фиксируем FAILED, Kaiten пропускаем", e);
             CollectionRun failed = run.failed(e.getMessage());
             collectionRunRepository.save(failed);
             return failed;
+        }
+
+        // Checkpoint после git: отмена могла прийти, пока git дорабатывал последний репо.
+        if (cancel.cancelled()) {
+            return finishCancelled(run, "Сбор отменён после git-фазы");
         }
 
         // Kaiten — изолированно. Падение не откатывает git stats.
@@ -98,6 +110,13 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
                     e.getMessage(), e);
         }
 
+        // Checkpoint перед фиксацией SUCCESS: если отмену запросили во время kaiten/reviews —
+        // честно помечаем CANCELLED (данные собраны, но оператор просил остановиться; следующий
+        // прогон идемпотентно пересоберёт от того же since).
+        if (cancel.cancelled()) {
+            return finishCancelled(run, "Сбор отменён после git/kaiten/reviews");
+        }
+
         // Сбор успешен → инвалидируем кэш карточек Kaiten, чтобы фронт сразу видел свежие
         // данные на /profile, не ждал истечения TTL (5 минут — слишком долго после явного сбора).
         try {
@@ -111,6 +130,14 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
         collectionRunRepository.save(ok);
         log.info("Сбор {} успешно завершён (затронуто авторов: {})", ok.id(), affected.size());
         return ok;
+    }
+
+    /** Фиксирует прогон как CANCELLED. daily_stats может быть неполным — доберёт следующий сбор. */
+    private CollectionRun finishCancelled(CollectionRun run, String reason) {
+        log.info("Сбор {} отменён: {}", run.id(), reason);
+        CollectionRun cancelled = run.cancelled(reason);
+        collectionRunRepository.save(cancelled);
+        return cancelled;
     }
 
     private LocalDateTime resolveSince(LocalDateTime explicit) {

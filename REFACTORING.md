@@ -217,7 +217,7 @@ devpulse/
 - [ ] Миграция данных из v1 (если разворачиваем v2 поверх существующей БД) — нужно ли что-то перелить, или схема та же и всё подхватится? Проверим в Сессии 7.
 - [ ] Эндпоинт `POST /api/v2/collection/runs` — синхронный (ждёт окончания) или возвращает 202 + id? Решение в Сессии 6.
 - [ ] Авторизация REST — есть в проекте сейчас? Если да — переезжает в Сессии 6, если нет — отдельная задача.
-- [ ] **Отмена прогона сбора через API** (P1-2в). Сейчас `POST /collection/runs` запускается на минуты-часы, держит advisory-лок + connection, и прервать его извне нельзя. Нужна отдельная фича: `DELETE /collection/runs/{id}` или management-эндпоинт → кооперативная отмена (interrupt-aware git/reviews фазы + явное снятие `pg_advisory_unlock`). Не сделано в P1-2 — там закрыт только авто-deadline фазы reviews. Оценить после того, как появится реальная потребность (например зависший прод-прогон).
+- [x] **Отмена прогона сбора через API** (P1-2в) — **Этап 1 сделан** (ADR-12): `POST /collection/runs/{id}/cancel`, DB-backed флаг `cancel_requested`, checkpoints между репозиториями/фазами, статус `CANCELLED`. Advisory-лок снимается сам при развороте (try-with-resources). ⬜ **Этап 2 (опц.)** — interrupt-aware git-фаза для мгновенной реакции (сейчас отмена срабатывает на ближайшем checkpoint'е / по `command-timeout` текущей git-команды). Делать, только если ожидание окажется слишком долгим на практике.
 
 ---
 
@@ -665,5 +665,44 @@ insert логично делать вместе с устранением N+1 в
 **Что НЕ делали.** `unified_user` тоже IDENTITY, но это few-rows-per-run (по новому автору) —
 не hot-path, оставлено на JPA. `hibernate.jdbc.batch_size` оставлен: он ещё помогает остальным
 JPA-операциям (`order_updates` и т.п.).
+
+---
+
+## ADR-12. Отмена прогона сбора — кооперативная, через DB-флаг (P1-2в, Этап 1)
+
+**Контекст.** `POST /collection/runs` запускается на минуты-часы (синхронно), держит advisory-лок
++ connection, прервать извне было нельзя. Нужна отмена без насильного убийства потока и без
+рассинхрона данных.
+
+**Решение (Этап 1).**
+- **Контракт (OAS 2.1.0):** `POST /collection/runs/{id}/cancel` → 202 (run в RUNNING с поднятым
+  флагом; отмена асинхронна, финал наблюдать через GET), 404 (нет прогона), 409 (терминальный).
+  `CollectionRun.status += CANCELLED`.
+- **DB-backed флаг** `collection_run.cancel_requested` (миграция 028). Cancel-эндпоинт ставит флаг
+  на любом инстансе (быстрый UPDATE, лок не нужен) → работает кросс-под без sticky-routing.
+- **Checkpoints:** git-фаза проверяет `CancellationSignal` перед каждым репозиторием; оркестратор —
+  после git и перед фиксацией SUCCESS. При отмене обход прекращается, **recompute пропускается**,
+  бросается внутренний `CollectionCancelledException` → оркестратор помечает `CANCELLED`.
+- **Сигнал:** `CancellationSignal` (port/in, `() -> collectionRunRepository.isCancelRequested(runId)`),
+  прокидывается в git-фазу. Прямой SELECT на checkpoint'е — дёшево (PK-lookup, ≤ числа репо за прогон).
+- **Advisory-лок** снимается сам: отмена доводит поток до `return`, try-with-resources закрывает
+  handle → `pg_advisory_unlock`. Отдельной логики не нужно.
+
+**Консистентность = как у FAILED.** `CANCELLED ≠ SUCCESS` → курсор (`findLastSuccessfulUntil`) его
+игнорирует → следующий сбор стартует с того же `since`, mark-and-sweep + recompute доводят
+`commit_details`/`daily_stats`. Частичная запись и stale daily_stats — то же окно, что у FAILED
+(ADR-10), не новый риск.
+
+**Что осознанно НЕ делали (Этап 2, опц.).** In-memory registry + `Thread.interrupt()` для
+мгновенного прерывания текущей git-команды. Сейчас отмена срабатывает на ближайшем checkpoint'е
+или по `command-timeout` (≤30m) текущей команды. Interrupt-путь добавим, только если ожидание
+окажется болезненным на практике — он требует аккуратности с пулом connection'ов при interrupt
+во время JDBC, поэтому не в Этапе 1.
+
+**Гексагональность.** Cancel-исключение для 409 — в `port.out` (прецедент:
+`CollectionAlreadyRunningException`). `CancellationSignal`/`CancelCollectionUseCase` — `port.in`
+(интерфейсы, ArchUnit-чисто). `CollectionCancelledException` — внутренний control-flow в
+`application.service` (final, не покидает слой). Флаг `cancel_requested` — не часть доменного
+`CollectionRun` (run-control сигнал), маппером не трогается (`@Mapping(ignore)`).
 
 
