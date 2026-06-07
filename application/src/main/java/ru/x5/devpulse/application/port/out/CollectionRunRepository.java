@@ -15,6 +15,12 @@ public interface CollectionRunRepository {
     Optional<CollectionRun> findById(UUID id);
 
     /**
+     * Самый свежий прогон по {@code startedAt} (идущий, если есть — он же и самый свежий,
+     * т.к. сбор single-flight). {@link Optional#empty()} если прогонов ещё не было.
+     */
+    Optional<CollectionRun> findLatest();
+
+    /**
      * Момент конца последнего успешного сбора — точка старта для следующего.
      */
     Optional<LocalDateTime> findLastSuccessfulUntil();

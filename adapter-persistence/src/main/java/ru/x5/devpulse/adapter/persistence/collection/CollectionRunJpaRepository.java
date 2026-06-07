@@ -17,6 +17,9 @@ interface CollectionRunJpaRepository extends JpaRepository<CollectionRunEntity, 
             """)
     Optional<LocalDateTime> findLastSuccessfulUntil();
 
+    /** Самый свежий прогон по startedAt (идущий = самый свежий, т.к. сбор single-flight). */
+    Optional<CollectionRunEntity> findFirstByOrderByStartedAtDesc();
+
     /** Ставит флаг отмены (cancel-эндпоинт). */
     @Modifying
     @Query("update CollectionRunEntity r set r.cancelRequested = true where r.id = :id")

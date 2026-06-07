@@ -81,6 +81,30 @@ class CollectionControllerTest {
     }
 
     @Test
+    @DisplayName("GET /runs/latest → 200 + run (и роутится сюда, а не в /{id})")
+    void latestReturns200() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(getCollectionRun.findLatest()).thenReturn(Optional.of(new CollectionRun(
+                id, LocalDateTime.now(), null,
+                LocalDateTime.of(2026, 5, 1, 0, 0), LocalDateTime.now(),
+                CollectionStatus.RUNNING, null)));
+
+        mvc.perform(get("/api/v2/collection/runs/latest"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RUNNING"))
+                .andExpect(jsonPath("$.id").value(id.toString()));
+    }
+
+    @Test
+    @DisplayName("GET /runs/latest когда прогонов не было → 404")
+    void latestReturns404() throws Exception {
+        when(getCollectionRun.findLatest()).thenReturn(Optional.empty());
+
+        mvc.perform(get("/api/v2/collection/runs/latest"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("POST когда сбор уже идёт → 409 Conflict + RFC 7807 problem")
     void startWhenAlreadyRunning() throws Exception {
         when(collectDailyStats.run(any())).thenThrow(new CollectionAlreadyRunningException());

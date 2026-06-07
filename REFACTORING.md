@@ -693,6 +693,14 @@ JPA-операциям (`order_updates` и т.п.).
 `commit_details`/`daily_stats`. Частичная запись и stale daily_stats — то же окно, что у FAILED
 (ADR-10), не новый риск.
 
+**Companion-эндпоинт `GET /collection/runs/latest` (OAS 2.2.0).** Без него cancel из UI
+бесполезен: `POST /collection/runs` синхронный и отдаёт id только в конце, а refresh/другая
+вкладка/другой юзер этот id теряют. `/latest` возвращает самый свежий прогон по `startedAt`
+(идущий = самый свежий, т.к. single-flight) — фронт на загрузке экрана узнаёт «идёт ли сбор +
+его id» (для poll и cancel) либо последний результат. `CollectionRunRepository.findLatest`
+(`findFirstByOrderByStartedAtDesc`) + `GetCollectionRunUseCase.findLatest` + controller. Литерал
+`/runs/latest` Spring роутит раньше шаблона `/runs/{id}` (тест это проверяет).
+
 **Что осознанно НЕ делали (Этап 2, опц.).** In-memory registry + `Thread.interrupt()` для
 мгновенного прерывания текущей git-команды. Сейчас отмена срабатывает на ближайшем checkpoint'е
 или по `command-timeout` (≤30m) текущей команды. Interrupt-путь добавим, только если ожидание

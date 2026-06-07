@@ -57,4 +57,16 @@ class CollectionController implements CollectionApi {
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
+
+    /**
+     * Самый свежий / идущий прогон — источник правды для фронта по id живого сбора.
+     * 200 + run; 404 если прогонов ещё не было.
+     */
+    @Override
+    public ResponseEntity<CollectionRun> getLatestCollectionRun() {
+        return getCollectionRun.findLatest()
+                .map(collectionRunMapper::toDto)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
 }

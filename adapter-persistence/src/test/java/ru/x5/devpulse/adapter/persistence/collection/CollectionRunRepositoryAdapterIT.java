@@ -3,6 +3,7 @@ package ru.x5.devpulse.adapter.persistence.collection;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import ru.x5.devpulse.adapter.persistence.shared.PostgresContainerSupport;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
 import ru.x5.devpulse.domain.model.collection.CollectionRun;
+import ru.x5.devpulse.domain.model.collection.CollectionStatus;
 
 @SpringBootTest
 @DisplayName("CollectionRunRepositoryAdapter (журнал запусков сбора)")
@@ -46,6 +48,23 @@ class CollectionRunRepositoryAdapterIT extends PostgresContainerSupport {
         assertThat(repo.findLastSuccessfulUntil())
                 .as("CANCELLED игнорируется — курсор остаётся на SUCCESS")
                 .contains(UNTIL_EARLY);
+    }
+
+    @Test
+    @DisplayName("findLatest = самый свежий по startedAt; идущий (RUNNING) — поверх терминальных")
+    void findLatestReturnsMostRecentRunning() {
+        // Явно future-dated startedAt — гарантированно «самый свежий» в общей БД (другие тесты
+        // вставляют прогоны с now()). RUNNING не влияет на findLastSuccessfulUntil (только SUCCESS).
+        LocalDateTime future = LocalDateTime.of(2099, 1, 1, 0, 0);
+        CollectionRun running = new CollectionRun(
+                UUID.randomUUID(), future, null, SINCE, UNTIL_LATE,
+                CollectionStatus.RUNNING, null);
+        repo.save(running);
+
+        assertThat(repo.findLatest())
+                .as("самый свежий по startedAt — наш RUNNING")
+                .map(CollectionRun::id)
+                .contains(running.id());
     }
 
     @Test

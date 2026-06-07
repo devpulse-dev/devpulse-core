@@ -28,6 +28,11 @@ class CollectionRunRepositoryAdapter implements CollectionRunRepository {
     }
 
     @Override
+    public Optional<CollectionRun> findLatest() {
+        return jpa.findFirstByOrderByStartedAtDesc().map(mapper::toDomain);
+    }
+
+    @Override
     public Optional<LocalDateTime> findLastSuccessfulUntil() {
         return jpa.findLastSuccessfulUntil();
     }
