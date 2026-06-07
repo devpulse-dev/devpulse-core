@@ -534,7 +534,8 @@ nullable FK). ✓
 
 ## Architecture review #2 — новый backlog (после reviews-фичи)
 
-> **Статус:** план составлен, идём сверху вниз. Каждый пункт — отдельный коммит.
+> **Статус:** backlog закрыт ✅. Все P0/P1/P2 сделаны; P2-4/P2-5 — осознанные won't-fix/watch,
+> P1-2в (отмена прогона через API) — открытый вопрос (см. раздел «Открытые вопросы»).
 > Легенда: ✅ done · 🟡 in progress · ⬜ todo
 
 Второе principal-level review (уже **после** Фичи reviews/GitLab и всех 20 фиксов выше)
@@ -573,7 +574,7 @@ nullable FK). ✓
 |---|---|---|---|---|
 | P2-1 | `KaitenRateLimiter` парсит `Retry-After` только как integer-секунды, игнорит HTTP-date форму | ✅ Сделано: `retryAfterMillis` парсит обе формы RFC 7231 (delta-seconds + RFC 1123 HTTP-date, кламп в прошлом → 0); fallback на exp-backoff если ни то, ни другое. Метод стал package-private static, прямой юнит-тест `parsesRetryAfterForms`. | `KaitenRateLimiter` (+ тест) | ✅ |
 | P2-2 | Нет видимости stale-окна daily_stats (краш между батчем и recompute) | ✅ Сделано: (а) Micrometer gauge `devpulse.collection.staleness.seconds` (секунд с `until` последнего успешного сбора, NaN если не было) — `ObservabilityConfig` в bootstrap, видно в `/actuator/metrics`. (б) счётчик закрытых карточек без `closedAt` в perf-review логируется (`PerformanceReviewAssembler.closedCardsMissingClosedAt` + INFO в сервисе). | `ObservabilityConfig`, `PerformanceReviewAssembler`, `PerformanceReviewService` | ✅ |
-| P2-3 | Нагрузочных тестов под scaling-заявки нет | IT с большим набором хешей (проверка, что cleanup не держит всё в heap) + benchmark batch insert после P0-1 | `*IT` в adapter-persistence | ⬜ |
+| P2-3 | Нагрузочных тестов под scaling-заявки нет | ✅ Сделано: correctness-at-scale IT `scaleInsertAndSweep` (3000 коммитов одним `saveAll` → native batch insert; markSeen 2000 + sweep → ровно 1000 зомби удалено). Память O(batch) гарантирована дизайном (нет материализации хешей в `Set`) — это валидируется аргументом, а не замером heap (надёжно heap в JUnit не измерить). Микро-benchmark insert не делаем — флаки в CI. | `CommitRepositoryAdapterIT` | ✅ |
 | P2-4 | Query-side ceremony: 18 интерфейс+сервис+@Bean для pass-through чтений | **Won't-fix сейчас.** Зафиксировать как осознанный trade-off (как #16 с модулями). Свернём, только если станет тормозить разработку | (none) | ⬜ |
 | P2-5 | `git.repositories` связывает adapter-git и adapter-reviews через общий property | **Watch.** Развязать, только когда появится не-GitLab git-хостинг | (none) | ⬜ |
 

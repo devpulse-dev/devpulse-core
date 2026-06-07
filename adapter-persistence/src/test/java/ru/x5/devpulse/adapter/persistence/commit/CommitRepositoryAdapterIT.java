@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -131,6 +132,50 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                 () -> assertThat(repo.findExistingHashes(List.of(zombie, survivor)))
                         .as("zombie удалён, survivor (markSeen) остался")
                         .containsExactly(survivor));
+    }
+
+    @Test
+    @DisplayName("Scale (P2-3): native batch insert + mark-and-sweep на 3000 коммитах — корректно на объёме")
+    void scaleInsertAndSweep() {
+        // Размер, на котором старый zombie-cleanup материализовал бы все хеши в heap. Здесь память
+        // O(batch): insert идёт чанками по 500 (native batchUpdate), sweep — set-разность в БД.
+        RepoName scaleRepo = new RepoName("scale-test");
+        LocalDateTime when = LocalDateTime.of(2026, 4, 15, 9, 0);
+        Period april = new Period(LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30));
+        int n = 3000;
+        int seenCount = 2000; // первые 2000 «увидены», последние 1000 — зомби
+
+        // 1. Один saveAll на 3000 коммитов → native batch insert (P0-1).
+        List<Commit> commits = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            commits.add(commitInRepo(hashOf(i), when, scaleRepo));
+        }
+        repo.saveAll(commits, Map.of());
+        assertThat(repo.findExistingHashes(hashes(0, n)))
+                .as("все 3000 записаны batch-insert'ом").hasSize(n);
+
+        // 2. Помечаем первые 2000 увиденными в текущем сборе, затем sweep (P0-2).
+        LocalDateTime runMark = LocalDateTime.now();
+        repo.markSeen(hashes(0, seenCount), runMark);
+        int deleted = repo.deleteZombies(scaleRepo, april, runMark);
+
+        assertAll("mark-and-sweep на объёме",
+                () -> assertThat(deleted).as("снесены ровно непомеченные 1000").isEqualTo(n - seenCount),
+                () -> assertThat(repo.findExistingHashes(hashes(0, n)))
+                        .as("остались только 2000 помеченных").hasSize(seenCount));
+    }
+
+    /** 40-символьный hex-хеш из индекса — уникальный и валидный для CommitHash. */
+    private static String hashOf(int i) {
+        return String.format("%040x", i);
+    }
+
+    private static List<CommitHash> hashes(int fromInclusive, int toExclusive) {
+        List<CommitHash> list = new ArrayList<>(toExclusive - fromInclusive);
+        for (int i = fromInclusive; i < toExclusive; i++) {
+            list.add(new CommitHash(hashOf(i)));
+        }
+        return list;
     }
 
     private static HourlyBucket cell(List<HourlyBucket> cells, int weekday, int hour) {
