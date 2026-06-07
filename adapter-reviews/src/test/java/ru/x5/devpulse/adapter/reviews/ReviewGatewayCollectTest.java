@@ -91,10 +91,39 @@ class ReviewGatewayCollectTest {
                         .as("1 не-системный коммент (системный отсеян)").isEqualTo(1));
     }
 
+    @Test
+    @DisplayName("Падение одного MR не роняет остальные — собранные сохраняются, потеря не валит фазу (P1-2)")
+    void oneFailingMrDoesNotDropOthers() {
+        when(rateLimiter.execute(any(), any()))
+                .thenAnswer(inv -> ((Supplier<?>) inv.getArgument(1)).get());
+        when(http.getUsers(1, 100, true)).thenReturn(List.of(ALICE_FULL));
+
+        OffsetDateTime created = OffsetDateTime.of(2026, 5, 10, 10, 0, 0, 0, ZoneOffset.UTC);
+        GitlabMrDto good = new GitlabMrDto(1000L, 7L, 42L, "ok", "opened",
+                "https://scm/mr/7", created, null, ALICE_SIMPLE);
+        GitlabMrDto bad = new GitlabMrDto(1000L, 8L, 42L, "boom", "opened",
+                "https://scm/mr/8", created, null, ALICE_SIMPLE);
+        when(http.getMergeRequests(eq("grp/repo"), anyString(), eq(1), eq(100), eq("all"), eq("all")))
+                .thenReturn(List.of(good, bad));
+
+        // good — пустые approvals/notes: collected (без ревьюеров, но MR валиден)
+        when(http.getApprovals("grp/repo", 7L)).thenReturn(new GitlabApprovalsDto(List.of()));
+        when(http.getNotes("grp/repo", 7L, 1, 100)).thenReturn(List.of());
+        // bad — approvals бросает: toCollected падает, MR теряется, но good остаётся
+        when(http.getApprovals("grp/repo", 8L)).thenThrow(new RuntimeException("GitLab 500"));
+
+        List<CollectedMergeRequest> result =
+                adapter().fetchMergeRequests(LocalDateTime.of(2026, 5, 1, 0, 0));
+
+        assertAll("частичный сбор устойчив к падению одного MR",
+                () -> assertThat(result).as("good собран, bad потерян — не весь батч").hasSize(1),
+                () -> assertThat(result.getFirst().gitlabMrIid()).isEqualTo(7L));
+    }
+
     private ReviewGatewayAdapter adapter() {
         GitlabProperties props = new GitlabProperties(
                 "https://scm/api/v4", "tok", List.of("grp/repo"), "x5.ru",
-                true, 3650, 1, 0, 1, 0, 100, false, null, null);
+                true, 3650, 1, 0, 1, 0, 100, false, null, null, null);
         return new ReviewGatewayAdapter(http, rateLimiter, props, new GitRepoProperties(List.of()));
     }
 }

@@ -217,6 +217,7 @@ devpulse/
 - [ ] Миграция данных из v1 (если разворачиваем v2 поверх существующей БД) — нужно ли что-то перелить, или схема та же и всё подхватится? Проверим в Сессии 7.
 - [ ] Эндпоинт `POST /api/v2/collection/runs` — синхронный (ждёт окончания) или возвращает 202 + id? Решение в Сессии 6.
 - [ ] Авторизация REST — есть в проекте сейчас? Если да — переезжает в Сессии 6, если нет — отдельная задача.
+- [ ] **Отмена прогона сбора через API** (P1-2в). Сейчас `POST /collection/runs` запускается на минуты-часы, держит advisory-лок + connection, и прервать его извне нельзя. Нужна отдельная фича: `DELETE /collection/runs/{id}` или management-эндпоинт → кооперативная отмена (interrupt-aware git/reviews фазы + явное снятие `pg_advisory_unlock`). Не сделано в P1-2 — там закрыт только авто-deadline фазы reviews. Оценить после того, как появится реальная потребность (например зависший прод-прогон).
 
 ---
 
@@ -563,7 +564,7 @@ nullable FK). ✓
 | # | Проблема | Почему важно | План фикса | Файлы | Статус |
 |---|---|---|---|---|---|
 | P1-1 | **Дубль `findOrCreateAll` + leak оркестрации в адаптер** | `CollectGitStatsService.persistCommitBatch` зовёт `findOrCreateAll`, и `CommitRepositoryAdapter.saveAll` зовёт его **ещё раз**. Двойная работа + адаптер persistence управляет identity (use-case concern). | ✅ Сделано: `saveAll(commits, Map<Email,Long>)` принимает готовый маппинг, адаптер только пишет; `findOrCreateAll` остался единственной точкой в use-case; убрана зависимость `UnifiedUserRepository` из адаптера. | `CommitRepository` (port), `CommitRepositoryAdapter`, `CollectGitStatsService` | ✅ |
-| P1-2 | **Сбор нельзя отменить; reviews-fan-out без общего deadline** | `POST /collection/runs` запускает операцию на часы, держит advisory lock + connection, отмены через API нет. `ReviewGatewayAdapter` `ExecutorService.close()` ждёт все задачи без таймаута; залипший MR в rate-limiter подвешивает фазу. Ошибки отдельных MR молча проглатываются. | (а) Общий deadline на фазу reviews (overall timeout, прерывание оставшихся задач). (б) Счётчик «потеряно N MR» в лог/метрику вместо тихого drop. (в) Отметить отмену сбора как отдельную задачу (нужен ли `DELETE /collection/runs/{id}` — решить). | `ReviewGatewayAdapter`, `GitlabProperties` | ⬜ |
+| P1-2 | **Сбор нельзя отменить; reviews-fan-out без общего deadline** | `POST /collection/runs` запускает операцию на часы, держит advisory lock + connection, отмены через API нет. `ReviewGatewayAdapter` `ExecutorService.close()` ждёт все задачи без таймаута. Ошибки отдельных MR молча проглатываются. <br>**Уточнение по ходу:** одиночный MR НЕ виснет вечно — GitLab HTTP-клиент имеет read timeout 30s, а rate-limiter bounded (max 5 retry, backoff ≤60s). Реальный риск — деградация GitLab × десятки тысяч MR = часы под локом. | ✅ (а)+(б) Сделано: `project-review-timeout` (default 30m, `0s`=без границы) — по истечении недособранные MR отменяются, собранные сохраняются; потери логируются **агрегатным** WARN (`failed`+`dropped`) вместо тихого per-MR drop. <br>⬜ (в) **Открытый вопрос:** отмена прогона через API (`DELETE /collection/runs/{id}`) — отдельная фича (нужен interrupt-aware сбор + снятие advisory-лока), вынесена в «Открытые вопросы». | `ReviewGatewayAdapter`, `GitlabProperties`, `application.yml` | 🟡 |
 | P1-3 | **N+1 в reviews upsert** (+ `mr_review` native insert из P0-1) | `findByGitlabProjectIdAndGitlabMrIid` в цикле по каждому MR — десятки тысяч точечных SELECT на backfill. Плюс `mr_review` на IDENTITY → `reviewJpa.saveAll` без батчинга. | ✅ Сделано: batch-lookup `findByGitlabProjectIdInAndGitlabMrIidIn` (суперсет + фильтр по композитному ключу `MrKey`) вместо N+1; `mr_review` insert → native `JdbcTemplate.batchUpdate` (см. ADR-11). IT `batchLookupDistinguishesSameIidAcrossProjects`. | `MergeRequestJpaRepository`, `ReviewWriteRepositoryAdapter` | ✅ |
 
 ### P2 — hardening / честность документации
@@ -582,7 +583,7 @@ nullable FK). ✓
 2. ✅ **P0-2** (zombie mark-and-sweep) — чинит OOM, локализован в per-repo tx.
 3. ✅ **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
 4. ✅ **P0-1** (native batch insert commit_details + reWriteBatchedInserts). `mr_review` → P1-3.
-5. ✅ **P1-3** (N+1 reviews + mr_review native insert). ⬜ **P1-2** (deadline reviews) — adapter-reviews.
+5. ✅ **P1-3** (N+1 reviews + mr_review native insert). 🟡 **P1-2** (deadline reviews сделан; отмена прогона — открытый вопрос).
 6. **P2-1** (Retry-After), затем P2-2/P2-3 по мере сил.
 
 > ⚠️ **Build-замечание:** полный `mvn verify` требует доступа к GitHub Packages (OAS-контракты)
