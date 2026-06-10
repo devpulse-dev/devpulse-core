@@ -168,6 +168,22 @@ public final class PerformanceReviewAssembler {
         return !card.isClosed() && card.columnStatus() == KaitenColumnStatus.IN_PROGRESS;
     }
 
+    /**
+     * Сколько закрытых карточек НЕ имеют {@code closedAt} — для таких период закрытия
+     * определяется по {@code updatedAt} (приближение, см. {@link #closedInPeriod}). Тихое
+     * искажение метрик: карточка, обновлённая в периоде, но закрытая раньше, попадёт в «done».
+     * Сервис логирует этот счётчик, чтобы перекос был виден (P2-2).
+     */
+    public static int closedCardsMissingClosedAt(List<KaitenCard> cards) {
+        int n = 0;
+        for (KaitenCard c : cards) {
+            if (c.isClosed() && c.closedAt() == null) {
+                n++;
+            }
+        }
+        return n;
+    }
+
     // ───── Развёрнутая аналитика по карточкам Kaiten (дефекты/разработка/cycle-time/баланс) ─────
 
     /**

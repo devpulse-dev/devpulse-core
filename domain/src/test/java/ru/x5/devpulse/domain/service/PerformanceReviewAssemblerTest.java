@@ -168,6 +168,34 @@ class PerformanceReviewAssemblerTest {
         }
     }
 
+    @Nested
+    @DisplayName("closedCardsMissingClosedAt: видимость тихого искажения (P2-2)")
+    class DataQuality {
+
+        @Test
+        @DisplayName("Считает только закрытые карточки без closedAt")
+        void countsClosedWithoutClosedAt() {
+            LocalDateTime when = LocalDateTime.of(2026, 2, 10, 12, 0);
+            List<KaitenCard> cards = List.of(
+                    card(1, TYPE_DEFECT, COL_DONE, null, "closed, no closedAt"),    // считается
+                    card(2, TYPE_DEFECT, COL_DONE, when, "closed, has closedAt"),   // не считается
+                    card(3, TYPE_DEFECT, COL_IN_PROGRESS, null, "in progress"));    // не закрыта
+
+            assertThat(PerformanceReviewAssembler.closedCardsMissingClosedAt(cards)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Пустой список / все с closedAt → 0")
+        void zeroWhenAllHaveClosedAt() {
+            LocalDateTime when = LocalDateTime.of(2026, 2, 10, 12, 0);
+            assertAll(
+                    () -> assertThat(PerformanceReviewAssembler.closedCardsMissingClosedAt(List.of()))
+                            .isEqualTo(0),
+                    () -> assertThat(PerformanceReviewAssembler.closedCardsMissingClosedAt(
+                            List.of(card(1, TYPE_DEFECT, COL_DONE, when, "ok")))).isEqualTo(0));
+        }
+    }
+
     private static KaitenCard card(long id, int typeId, int columnType,
                                    LocalDateTime closedAt, String title) {
         return buildCard(id, typeId, columnType, closedAt, title, "https://kaiten.x5.ru/" + id);

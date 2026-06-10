@@ -2,6 +2,7 @@ package ru.x5.devpulse.application.port.out;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import ru.x5.devpulse.domain.common.PageRequest;
@@ -20,23 +21,43 @@ public interface CommitRepository {
     /** Какие хеши уже есть в БД — для пропуска дубликатов при batch-вставке. */
     Set<CommitHash> findExistingHashes(Collection<CommitHash> hashes);
 
-    /** Batch-вставка новых коммитов. */
-    void saveAll(Collection<Commit> commits);
+    /**
+     * Batch-вставка новых коммитов.
+     *
+     * <p>Маппинг {@code email → user_id} разрешается <b>в use case</b> (через
+     * {@link UnifiedUserRepository#findOrCreateAll}) и передаётся готовым: адаптер
+     * только пишет, не управляет identity. Для коммита без email или автора, которого
+     * нет в карте, {@code user_id} остаётся {@code null} (FK nullable).</p>
+     *
+     * @param commits     новые коммиты (уже отдедуплены по хешу в use case)
+     * @param userByEmail предразрешённые user_id по email автора
+     */
+    void saveAll(Collection<Commit> commits, Map<Email, Long> userByEmail);
 
     /** Список коммитов пользователя за период с пагинацией. */
     List<Commit> findByAuthor(Email email, Period period, PageRequest page);
 
     /**
-     * Все хеши коммитов в указанном репозитории за период.
+     * Помечает уже существующие коммиты как «увидены в текущем сборе» (обновляет
+     * {@code collected_at}). Часть mark-and-sweep rebase-cleanup: коммиты, всё ещё
+     * присутствующие в git, защищаются от удаления в {@link #deleteZombies}.
      *
-     * <p>Используется для rebase-cleanup: сравниваем со списком хешей, фактически пришедших
-     * из {@code git log} в этом сборе. Хеши которые в БД есть, а в git'е нет — «зомби»
-     * после force-push, их удаляем через {@link #deleteByHashes}.</p>
+     * @param hashes хеши existing-коммитов из текущего батча
+     * @param seenAt метка сбора (одинаковая на весь прогон репозитория)
      */
-    Set<CommitHash> findHashesByRepoAndPeriod(RepoName repo, Period period);
+    void markSeen(Collection<CommitHash> hashes, java.time.LocalDateTime seenAt);
 
-    /** Bulk-удаление коммитов по хешам. Используется для rebase-cleanup. */
-    void deleteByHashes(Collection<CommitHash> hashes);
+    /**
+     * Удаляет rebase/force-push «зомби» — коммиты репозитория за период, которые НЕ были
+     * увидены в текущем сборе ({@code collected_at < seenBefore}).
+     *
+     * <p>Set-разность считается в БД (а не загрузкой всех хешей репозитория в heap) — память
+     * O(1) от размера репозитория. См. P0-2 в REFACTORING.md.</p>
+     *
+     * @param seenBefore метка начала сбора репозитория; всё, что старше — зомби
+     * @return сколько строк удалено
+     */
+    int deleteZombies(RepoName repo, Period period, java.time.LocalDateTime seenBefore);
 
     /**
      * Почасовая агрегация не-мердж коммитов за период по ключу (день недели × час).

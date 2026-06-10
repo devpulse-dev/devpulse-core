@@ -3,12 +3,14 @@ package ru.x5.devpulse.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.x5.devpulse.adapter.kaiten.KaitenProperties;
+import ru.x5.devpulse.application.port.in.CancelCollectionUseCase;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
 import ru.x5.devpulse.application.port.in.SetTeamLeadUseCase;
 import ru.x5.devpulse.application.port.in.SetUserTeamUseCase;
 import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
+import ru.x5.devpulse.application.port.out.BackgroundRunner;
 import ru.x5.devpulse.application.port.out.CollectionLock;
 import ru.x5.devpulse.application.port.out.CollectionRunRepository;
 import ru.x5.devpulse.application.port.out.CommitRepository;
@@ -20,9 +22,11 @@ import ru.x5.devpulse.application.port.out.ReviewGateway;
 import ru.x5.devpulse.application.port.out.ReviewWriteRepository;
 import ru.x5.devpulse.application.port.out.TransactionRunner;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
+import ru.x5.devpulse.application.service.CancelCollectionService;
 import ru.x5.devpulse.application.service.CollectDailyStatsService;
 import ru.x5.devpulse.application.service.CollectGitStatsService;
 import ru.x5.devpulse.application.service.CollectReviewsService;
+import ru.x5.devpulse.application.service.StartupReconciliationService;
 import ru.x5.devpulse.application.service.SetTeamLeadService;
 import ru.x5.devpulse.application.service.SetUserTeamService;
 import ru.x5.devpulse.application.service.SyncKaitenUsersService;
@@ -48,10 +52,28 @@ class CommandUseCaseConfig {
             CollectReviewsUseCase collectReviews,
             CollectionRunRepository collectionRunRepository,
             CollectionLock collectionLock,
-            KaitenCardsCache kaitenCardsCache) {
+            KaitenCardsCache kaitenCardsCache,
+            BackgroundRunner backgroundRunner) {
         return new CollectDailyStatsService(
                 collectGitStats, syncKaitenUsers, collectReviews, collectionRunRepository,
-                collectionLock, kaitenCardsCache);
+                collectionLock, kaitenCardsCache, backgroundRunner);
+    }
+
+    /** Отмена идущего прогона — ставит флаг, сбор остановится на ближайшем checkpoint'е. */
+    @Bean
+    CancelCollectionUseCase cancelCollectionUseCase(CollectionRunRepository collectionRunRepository) {
+        return new CancelCollectionService(collectionRunRepository);
+    }
+
+    /**
+     * Политика startup-реконсиляции осиротевших RUNNING (lock-based). Триггерит её
+     * {@code StartupReconciliationTrigger} на {@code ApplicationReadyEvent}.
+     */
+    @Bean
+    StartupReconciliationService startupReconciliationService(
+            CollectionLock collectionLock,
+            CollectionRunRepository collectionRunRepository) {
+        return new StartupReconciliationService(collectionLock, collectionRunRepository);
     }
 
     /** Worker — фаза сбора ревью-метрик из GitLab (MR/approvals/notes → merge_request/mr_review). */

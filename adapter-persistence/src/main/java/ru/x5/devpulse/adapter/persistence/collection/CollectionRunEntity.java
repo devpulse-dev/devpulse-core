@@ -45,4 +45,12 @@ public class CollectionRunEntity {
 
     @Column(name = "error_message", length = 2000)
     private String errorMessage;
+
+    /**
+     * Флаг кооперативной отмены. Ставится cancel-эндпоинтом, читается бегущим сбором на
+     * checkpoint'ах. Не часть доменного {@code CollectionRun} — это run-control сигнал,
+     * управляется отдельными запросами (markCancelRequested / isCancelRequested), а не маппером.
+     */
+    @Column(name = "cancel_requested", nullable = false)
+    private boolean cancelRequested;
 }

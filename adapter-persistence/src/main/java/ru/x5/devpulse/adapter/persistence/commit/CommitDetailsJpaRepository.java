@@ -26,22 +26,40 @@ interface CommitDetailsJpaRepository extends JpaRepository<CommitDetailsEntity, 
             @Param("to") LocalDateTime to,
             Pageable pageable);
 
-    /** Все хеши коммитов репозитория за период — для rebase-cleanup. */
+    /**
+     * Помечает существующие коммиты как «увидены в текущем сборе» (bump {@code collected_at}).
+     *
+     * <p>Часть mark-and-sweep: коммиты, всё ещё присутствующие в git, получают свежий
+     * {@code collected_at}, чтобы последующий {@link #deleteZombies} их не снёс. Bulk-update
+     * по уникальному индексу {@code commit_hash} — без подъёма строк в память.</p>
+     */
+    @org.springframework.data.jpa.repository.Modifying
     @Query("""
-            select c.commitHash
-              from CommitDetailsEntity c
+            update CommitDetailsEntity c
+               set c.collectedAt = :seenAt
+             where c.commitHash in :hashes
+            """)
+    int markSeen(@Param("hashes") Collection<String> hashes, @Param("seenAt") LocalDateTime seenAt);
+
+    /**
+     * Sweep rebase/force-push зомби: удаляет коммиты репозитория за период, которые НЕ были
+     * «увидены» в текущем сборе ({@code collected_at < :seenBefore} либо {@code NULL}).
+     *
+     * <p>Set-разность считается в БД — heap не зависит от размера репозитория (в отличие от
+     * старого подхода с загрузкой всех хешей в {@code Set}). См. P0-2 в REFACTORING.md.</p>
+     */
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("""
+            delete from CommitDetailsEntity c
              where c.repositoryName = :repo
                and c.commitDate between :from and :to
+               and (c.collectedAt is null or c.collectedAt < :seenBefore)
             """)
-    List<String> findHashesByRepoAndPeriod(
+    int deleteZombies(
             @Param("repo") String repo,
             @Param("from") LocalDateTime from,
-            @Param("to") LocalDateTime to);
-
-    /** Bulk delete по списку хешей. */
-    @org.springframework.data.jpa.repository.Modifying
-    @Query("delete from CommitDetailsEntity c where c.commitHash in :hashes")
-    int deleteByCommitHashes(@Param("hashes") Collection<String> hashes);
+            @Param("to") LocalDateTime to,
+            @Param("seenBefore") LocalDateTime seenBefore);
 
     /**
      * Почасовая агрегация не-мердж коммитов: GROUP BY (день недели, час) из {@code commit_date}.

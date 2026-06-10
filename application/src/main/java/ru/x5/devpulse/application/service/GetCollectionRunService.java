@@ -17,4 +17,9 @@ public final class GetCollectionRunService implements GetCollectionRunUseCase {
     public Optional<CollectionRun> findById(UUID id) {
         return collectionRunRepository.findById(id);
     }
+
+    @Override
+    public Optional<CollectionRun> findLatest() {
+        return collectionRunRepository.findLatest();
+    }
 }

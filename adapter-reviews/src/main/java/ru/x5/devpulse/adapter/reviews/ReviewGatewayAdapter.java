@@ -1,6 +1,7 @@
 package ru.x5.devpulse.adapter.reviews;
 
 import java.net.URI;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -10,10 +11,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -178,6 +182,13 @@ class ReviewGatewayAdapter implements ReviewGateway {
      * Сбор ревью по списку MR параллельно. {@code concurrency} ограничивает число одновременных
      * запросов к GitLab (Semaphore), virtual threads дёшевы. {@link #toCollected} и {@link #resolve}
      * не имеют общего изменяемого состояния — читают только immutable map/properties.
+     *
+     * <p><b>Deadline (P1-2).</b> На сбор одного проекта стоит верхняя граница
+     * {@code gitlab.api.project-review-timeout} (по умолчанию 30m, {@code 0s} — без границы).
+     * По её истечении недособранные MR отменяются, а уже собранные — сохраняются. Это страхует от
+     * деградации GitLab, когда даже при bounded retry per-call десятки тысяч MR держали бы
+     * advisory-лок часами. Потерянные MR (ошибки + отменённые) логируются <b>агрегатно</b>, а не
+     * молча проглатываются по одному.</p>
      */
     private List<CollectedMergeRequest> fetchReviewsConcurrently(
             String project, List<GitlabMrDto> mrs, Map<Long, String> publicEmailById) {
@@ -186,8 +197,15 @@ class ReviewGatewayAdapter implements ReviewGateway {
         AtomicInteger done = new AtomicInteger();
         int total = mrs.size();
         List<Future<CollectedMergeRequest>> futures = new ArrayList<>(total);
+        List<CollectedMergeRequest> result = new ArrayList<>(total);
 
-        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        Duration timeout = properties.projectReviewTimeout();
+        boolean bounded = timeout != null && !timeout.isZero() && !timeout.isNegative();
+
+        int failed = 0;
+        int dropped = 0;
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
             for (GitlabMrDto mr : mrs) {
                 futures.add(executor.submit(() -> {
                     gate.acquire();
@@ -202,16 +220,42 @@ class ReviewGatewayAdapter implements ReviewGateway {
                     }
                 }));
             }
-        } // close() ждёт завершения всех задач (shutdown + awaitTermination)
 
-        List<CollectedMergeRequest> result = new ArrayList<>(total);
-        for (Future<CollectedMergeRequest> f : futures) {
-            try {
-                CollectedMergeRequest c = f.get();
-                if (c != null) result.add(c);
-            } catch (Exception e) {
-                log.warn("GitLab: {} — ревью одного MR не собрано: {}", project, e.getMessage());
+            long deadlineNanos = System.nanoTime() + (bounded ? timeout.toNanos() : 0L);
+            for (Future<CollectedMergeRequest> f : futures) {
+                try {
+                    // bounded: ждём не дольше остатка дедлайна; get(0) после дедлайна = неблокирующий
+                    // опрос (уже-готовые добираем, ещё-бегущие → TimeoutException → отмена в finally).
+                    CollectedMergeRequest c = bounded
+                            ? f.get(Math.max(0L, deadlineNanos - System.nanoTime()), TimeUnit.NANOSECONDS)
+                            : f.get();
+                    if (c != null) result.add(c);
+                } catch (TimeoutException te) {
+                    // дедлайн исчерпан — этот MR не дождались; остальные так же отвалятся по 0-таймауту
+                } catch (ExecutionException ee) {
+                    failed++;
+                    Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
+                    log.debug("GitLab: {} — ревью одного MR не собрано: {}", project, cause.getMessage());
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
+        } finally {
+            // Отменяем всё, что не успело (дедлайн/прерывание), и гасим executor немедленно.
+            for (Future<CollectedMergeRequest> f : futures) {
+                if (!f.isDone() && f.cancel(true)) {
+                    dropped++;
+                }
+            }
+            executor.shutdownNow();
+        }
+
+        int lost = failed + dropped;
+        if (lost > 0) {
+            log.warn("GitLab: {} — НЕ собрано {} из {} MR (ошибки: {}, дедлайн/отмена: {}). "
+                            + "Ревью-метрики по этим MR в текущем прогоне неполные — починятся следующим сбором.",
+                    project, lost, total, failed, dropped);
         }
         return result;
     }

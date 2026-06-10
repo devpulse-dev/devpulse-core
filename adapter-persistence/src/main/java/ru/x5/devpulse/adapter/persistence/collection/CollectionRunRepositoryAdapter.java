@@ -28,7 +28,31 @@ class CollectionRunRepositoryAdapter implements CollectionRunRepository {
     }
 
     @Override
+    public Optional<CollectionRun> findLatest() {
+        return jpa.findFirstByOrderByStartedAtDesc().map(mapper::toDomain);
+    }
+
+    @Override
     public Optional<LocalDateTime> findLastSuccessfulUntil() {
         return jpa.findLastSuccessfulUntil();
+    }
+
+    @Override
+    @Transactional
+    public int failOrphanedRunning() {
+        return jpa.failOrphanedRunning(
+                LocalDateTime.now(),
+                "Прерван рестартом приложения (orphaned RUNNING при старте)");
+    }
+
+    @Override
+    @Transactional
+    public void markCancelRequested(UUID id) {
+        jpa.markCancelRequested(id);
+    }
+
+    @Override
+    public boolean isCancelRequested(UUID id) {
+        return jpa.findCancelRequested(id).orElse(false);
     }
 }

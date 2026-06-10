@@ -5,9 +5,16 @@ import java.util.UUID;
 import ru.x5.devpulse.domain.model.collection.CollectionRun;
 
 /**
- * Возвращает запись прогона сбора по {@code id} для опроса статуса.
- * Обслуживает {@code GET /api/v2/collection/runs/{id}}.
+ * Чтение записей прогона сбора (опрос статуса).
+ * Обслуживает {@code GET /api/v2/collection/runs/{id}} и {@code .../runs/latest}.
  */
 public interface GetCollectionRunUseCase {
+
     Optional<CollectionRun> findById(UUID id);
+
+    /**
+     * Самый свежий прогон (идущий, если есть). Источник правды для фронта по id живого
+     * прогона. Обслуживает {@code GET /api/v2/collection/runs/latest}.
+     */
+    Optional<CollectionRun> findLatest();
 }

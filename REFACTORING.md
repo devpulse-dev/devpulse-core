@@ -215,8 +215,9 @@ devpulse/
 
 - [ ] Расписание сбора: оставляем cron `0 0 1 * * ?` (как в v1) или переводим на `@Scheduled` в `bootstrap` с явным конфигом из yaml? Решим в Сессии 6/7.
 - [ ] Миграция данных из v1 (если разворачиваем v2 поверх существующей БД) — нужно ли что-то перелить, или схема та же и всё подхватится? Проверим в Сессии 7.
-- [ ] Эндпоинт `POST /api/v2/collection/runs` — синхронный (ждёт окончания) или возвращает 202 + id? Решение в Сессии 6.
+- [x] Эндпоинт `POST /api/v2/collection/runs` — синхронный или 202+id? **Решено: async 202 + RUNNING** (ADR-14, контракт 3.0.0). Синхронный держал multi-минутный запрос → хрупко к прокси/браузер-таймаутам.
 - [ ] Авторизация REST — есть в проекте сейчас? Если да — переезжает в Сессии 6, если нет — отдельная задача.
+- [x] **Отмена прогона сбора через API** (P1-2в) — **Этап 1 сделан** (ADR-12): `POST /collection/runs/{id}/cancel`, DB-backed флаг `cancel_requested`, checkpoints между репозиториями/фазами, статус `CANCELLED`. Advisory-лок снимается сам при развороте (try-with-resources). ⬜ **Этап 2 (опц.)** — interrupt-aware git-фаза для мгновенной реакции (сейчас отмена срабатывает на ближайшем checkpoint'е / по `command-timeout` текущей git-команды). Делать, только если ожидание окажется слишком долгим на практике.
 
 ---
 
@@ -527,5 +528,251 @@ nullable FK). ✓
 - ArchUnit правил: 3 → 14.
 - Зависимостей у самого большого service'а: 8 → 4 (orchestrator).
 - Новых тестов: ~40 (включая 7 для ApiExceptionHandler, 5 для GitGatewayAdapter, 5 для CollectGitStatsService, 6 для CollectDailyStatsService, 4 для KaitenCardsCacheIT, 4 для GitCommandFailedException).
+
+
+---
+
+## Architecture review #2 — новый backlog (после reviews-фичи)
+
+> **Статус:** backlog закрыт ✅. Все P0/P1/P2 сделаны; P2-4/P2-5 — осознанные won't-fix/watch,
+> P1-2в (отмена прогона через API) — открытый вопрос (см. раздел «Открытые вопросы»).
+> Легенда: ✅ done · 🟡 in progress · ⬜ todo
+
+Второе principal-level review (уже **после** Фичи reviews/GitLab и всех 20 фиксов выше)
+нашло расхождения между гарантиями в javadoc/README и фактическим кодом. Главное: часть
+обещаний про scaling («миллионы коммитов без OOM», «batch insert») в текущем коде **не
+выполняется**. Ниже — приоритизированный backlog. P0 — то, что ломается в проде первым.
+
+### Контекст: что уже хорошо и НЕ трогаем
+
+- Per-phase изоляция сбора (git/kaiten/reviews в разных try/catch) — оставляем.
+- `pg_try_advisory_lock` single-writer + 409 — оставляем.
+- Functional-индексы под `LOWER(email)`/`CAST(date)` + `FunctionalIndexesIT` — оставляем.
+- Set-based `RECOMPUTE_SQL` (`GROUP BY`) вместо построчного upsert — оставляем.
+- `KaitenRateLimiter` reserve-slot lock-free — оставляем (кроме мелочи в P2-1).
+- ArchUnit-правила — оставляем.
+
+### P0 — ломается первым в проде (противоречит заявленным гарантиям)
+
+| # | Проблема | Почему критично | План фикса | Файлы | Статус |
+|---|---|---|---|---|---|
+| P0-1 | **`GenerationType.IDENTITY` убивает JDBC batch inserts** | `hibernate.jdbc.batch_size=100 / order_inserts=true` в `application.yml` — **мёртвая конфигурация**: при IDENTITY Hibernate не может батчить INSERT (обязан вернуть id после каждой строки). `saveAll(500)` = 500 round-trip'ов. На «миллионах коммитов» (заявка в javadoc `GitCliClient`/`GitGatewayAdapter`) это бутылочное горло записи. | ✅ Сделано для `commit_details` (hot-path): `saveAll` → native `JdbcTemplate.batchUpdate` (обходит IDENTITY), `reWriteBatchedInserts=true` через Hikari data-source-properties, удалён мёртвый `toEntity`. **ADR-11.** `mr_review` native insert вынесен в P1-3 (тот же адаптер). | `CommitRepositoryAdapter`, `CommitEntityMapper`, `application.yml` | ✅ |
+| P0-2 | **Zombie-detection грузит ВСЕ хеши репо в heap** — противоречит O(1)-памяти | `findHashesByRepoAndPeriod` тянул все хеши репо за период в `HashSet<CommitHash>`; плюс `seenInGit` копил все хеши прогона. Финальная cleanup-tx материализовала миллионы строк → OOM. | ✅ Сделано: **mark-and-sweep по `collected_at`** (лучше, чем черновой temp-table/`unnest`). Existing-коммиты помечаются `markSeen(runMark)`, sweep `deleteZombies(repo, period, runMark)` считает set-разность в БД. `seenInGit` удалён → heap O(batch). Индекс `idx_commit_details_repo_date` (миграция 027). IT `markAndSweepZombies`. | `CommitRepository`, `CommitDetailsJpaRepository`, `CommitRepositoryAdapter`, `CollectGitStatsService`, migration 027 | ✅ |
+| P0-3 | **Per-repo recompute → O(K²) write amplification** | `recomputeFromCommits` делает `DELETE ... WHERE email=ANY(...)` **без фильтра по репо** и зовётся в цикле per-repo. Автор, активный в K репо, переписывает свои daily-строки по всем K репо — K раз за прогон. При 1000 репо и тимлидах-в-десятках-репо это заметно. | ✅ Сделано: `recompute` вынесен из per-repo цикла в `collect()` — один вызов над `allAffected` в конце прогона. Sweep остаётся per-repo. Trade-off (потеря per-repo атомарности recompute) зафиксирован в **ADR-10**. Тест `singleRecomputeForWholeRun`. | `CollectGitStatsService` | ✅ |
+
+### P1 — корректность / операционные риски
+
+| # | Проблема | Почему важно | План фикса | Файлы | Статус |
+|---|---|---|---|---|---|
+| P1-1 | **Дубль `findOrCreateAll` + leak оркестрации в адаптер** | `CollectGitStatsService.persistCommitBatch` зовёт `findOrCreateAll`, и `CommitRepositoryAdapter.saveAll` зовёт его **ещё раз**. Двойная работа + адаптер persistence управляет identity (use-case concern). | ✅ Сделано: `saveAll(commits, Map<Email,Long>)` принимает готовый маппинг, адаптер только пишет; `findOrCreateAll` остался единственной точкой в use-case; убрана зависимость `UnifiedUserRepository` из адаптера. | `CommitRepository` (port), `CommitRepositoryAdapter`, `CollectGitStatsService` | ✅ |
+| P1-2 | **Сбор нельзя отменить; reviews-fan-out без общего deadline** | `POST /collection/runs` запускает операцию на часы, держит advisory lock + connection, отмены через API нет. `ReviewGatewayAdapter` `ExecutorService.close()` ждёт все задачи без таймаута. Ошибки отдельных MR молча проглатываются. <br>**Уточнение по ходу:** одиночный MR НЕ виснет вечно — GitLab HTTP-клиент имеет read timeout 30s, а rate-limiter bounded (max 5 retry, backoff ≤60s). Реальный риск — деградация GitLab × десятки тысяч MR = часы под локом. | ✅ (а)+(б) Сделано: `project-review-timeout` (default 30m, `0s`=без границы) — по истечении недособранные MR отменяются, собранные сохраняются; потери логируются **агрегатным** WARN (`failed`+`dropped`) вместо тихого per-MR drop. <br>⬜ (в) **Открытый вопрос:** отмена прогона через API (`DELETE /collection/runs/{id}`) — отдельная фича (нужен interrupt-aware сбор + снятие advisory-лока), вынесена в «Открытые вопросы». | `ReviewGatewayAdapter`, `GitlabProperties`, `application.yml` | 🟡 |
+| P1-3 | **N+1 в reviews upsert** (+ `mr_review` native insert из P0-1) | `findByGitlabProjectIdAndGitlabMrIid` в цикле по каждому MR — десятки тысяч точечных SELECT на backfill. Плюс `mr_review` на IDENTITY → `reviewJpa.saveAll` без батчинга. | ✅ Сделано: batch-lookup `findByGitlabProjectIdInAndGitlabMrIidIn` (суперсет + фильтр по композитному ключу `MrKey`) вместо N+1; `mr_review` insert → native `JdbcTemplate.batchUpdate` (см. ADR-11). IT `batchLookupDistinguishesSameIidAcrossProjects`. | `MergeRequestJpaRepository`, `ReviewWriteRepositoryAdapter` | ✅ |
+
+### P2 — hardening / честность документации
+
+| # | Проблема | План фикса | Файлы | Статус |
+|---|---|---|---|---|
+| P2-1 | `KaitenRateLimiter` парсит `Retry-After` только как integer-секунды, игнорит HTTP-date форму | ✅ Сделано: `retryAfterMillis` парсит обе формы RFC 7231 (delta-seconds + RFC 1123 HTTP-date, кламп в прошлом → 0); fallback на exp-backoff если ни то, ни другое. Метод стал package-private static, прямой юнит-тест `parsesRetryAfterForms`. | `KaitenRateLimiter` (+ тест) | ✅ |
+| P2-2 | Нет видимости stale-окна daily_stats (краш между батчем и recompute) | ✅ Сделано: (а) Micrometer gauge `devpulse.collection.staleness.seconds` (секунд с `until` последнего успешного сбора, NaN если не было) — `ObservabilityConfig` в bootstrap, видно в `/actuator/metrics`. (б) счётчик закрытых карточек без `closedAt` в perf-review логируется (`PerformanceReviewAssembler.closedCardsMissingClosedAt` + INFO в сервисе). | `ObservabilityConfig`, `PerformanceReviewAssembler`, `PerformanceReviewService` | ✅ |
+| P2-3 | Нагрузочных тестов под scaling-заявки нет | ✅ Сделано: correctness-at-scale IT `scaleInsertAndSweep` (3000 коммитов одним `saveAll` → native batch insert; markSeen 2000 + sweep → ровно 1000 зомби удалено). Память O(batch) гарантирована дизайном (нет материализации хешей в `Set`) — это валидируется аргументом, а не замером heap (надёжно heap в JUnit не измерить). Микро-benchmark insert не делаем — флаки в CI. | `CommitRepositoryAdapterIT` | ✅ |
+| P2-4 | Query-side ceremony: 18 интерфейс+сервис+@Bean для pass-through чтений | **Won't-fix сейчас.** Зафиксировать как осознанный trade-off (как #16 с модулями). Свернём, только если станет тормозить разработку | (none) | ⬜ |
+| P2-5 | `git.repositories` связывает adapter-git и adapter-reviews через общий property | **Watch.** Развязать, только когда появится не-GitLab git-хостинг | (none) | ⬜ |
+
+### Порядок исполнения
+
+1. ✅ **P1-1** (дубль `findOrCreateAll`) — самый дешёвый и безопасный, разогрев.
+2. ✅ **P0-2** (zombie mark-and-sweep) — чинит OOM, локализован в per-repo tx.
+3. ✅ **P0-3** (single recompute) — трогает тот же `CollectGitStatsService`, логично сразу после P0-2.
+4. ✅ **P0-1** (native batch insert commit_details + reWriteBatchedInserts). `mr_review` → P1-3.
+5. ✅ **P1-3** (N+1 reviews + mr_review native insert). 🟡 **P1-2** (deadline reviews сделан; отмена прогона — открытый вопрос).
+6. ✅ **P2-1** (Retry-After HTTP-date). ✅ **P2-2** (observability: staleness gauge + closedAt-счётчик). ⬜ P2-3 (нагрузочный IT) — по мере сил.
+
+> ⚠️ **Build-замечание:** полный `mvn verify` требует доступа к GitHub Packages (OAS-контракты)
+> + Docker (Testcontainers). Если локально нет — каждый шаг проверяем точечно (`mvn -pl <module> -am test`)
+> и финально гоняем CI. Коммиты атомарные, чтобы откат любого шага был дешёвым.
+
+---
+
+## ADR-10. Один recompute на прогон вместо per-repo (P0-3)
+
+**Контекст.** `DailyStatsRepositoryAdapter.recomputeFromCommits` пересобирает `daily_author_stats`
+для набора email через `DELETE ... WHERE LOWER(email)=ANY(?) AND date BETWEEN ?` + `INSERT ...
+SELECT FROM commit_details`. Важно: **DELETE не фильтрует по репозиторию** — он сносит daily-строки
+автора по ВСЕМ его репозиториям в периоде, затем `INSERT` восстанавливает их из `commit_details`
+(`GROUP BY email, date, repo`).
+
+Раньше `recompute` звался **внутри per-repo цикла** (`CollectGitStatsService.collectOneRepo`).
+Следствие: автор, активный в K репозиториях, при сборе получал K полных delete+reinsert своих
+daily-строк по всем K репо — **O(K²) записи** для cross-repo-активных людей (тимлиды, коммитящие
+в десятки репо). При 1000 репозиториев это заметная write amplification.
+
+**Решение.** `recompute` вынесен из цикла: per-repo остаётся только sweep зомби
+(`deleteZombies`, scoped по репо), а `recomputeFromCommits(allAffected, period)` вызывается
+**один раз** после обработки всех репозиториев — над объединением затронутых авторов. Каждый автор
+пересобирается ровно один раз → линейно от числа строк, без O(K²).
+
+**Trade-off (осознанный).** Теряем per-repo атомарность пересчёта. Раньше каждый репо был
+«всё-или-ничего» по своему recompute; теперь recompute — последний шаг прогона:
+- Если прогон падает на репо N, `commit_details` уже частично обновлён (репо 1..N), но
+  `daily_author_stats` ещё НЕ пересобран — он останется **stale до retry**.
+- Это компенсируется существующей семантикой: курсор двигает только `SUCCESS`, упавший прогон
+  фиксируется `FAILED`, следующий прогон стартует с того же `since`, пересобирает `commit_details`
+  (дубли отсекает `findExistingHashes`) и делает recompute заново. Идемпотентно.
+
+Окно неконсистентности `daily_stats` (между падением и retry) — то же, что уже задокументировано
+в P2-2 (наблюдаемость stale-окна — отдельный пункт). Для аналитического сервиса, где сбор ручной
+и повторяемый, это приемлемо; цена O(K²) при 1000 репо — нет.
+
+**Почему не оставили per-repo recompute с фильтром по репо.** Можно было бы добавить
+`AND repository_name = ?` в DELETE и пересобирать только текущий репо. Но `recompute` логически
+работает по ключу `(email, date)` агрегата, и фильтр по репо усложнил бы инвариант «daily_stats —
+чистое derived state из commit_details» (Фича 4). Один проход в конце — проще и быстрее.
+
+---
+
+## ADR-11. Native batch insert для commit_details вместо JPA saveAll (P0-1)
+
+**Контекст.** `CommitDetailsEntity` (как и большинство сущностей) использует
+`@GeneratedValue(strategy = IDENTITY)`. При IDENTITY Hibernate **не может** батчить INSERT: ему
+нужно вернуть сгенерированный id после каждой строки, поэтому `saveAll(500)` шёл 500 отдельными
+round-trip'ами. При этом в `application.yml` стоят `hibernate.jdbc.batch_size=100 /
+order_inserts=true` — для `commit_details` это была **мёртвая конфигурация**. На «миллионах
+коммитов» (заявка в javadoc стрима) запись становилась узким местом.
+
+**Решение.** `commit_details` пишется append-only, сгенерированный id обратно не нужен. Поэтому
+`CommitRepositoryAdapter.saveAll` переведён на native `JdbcTemplate.batchUpdate` с явным
+`INSERT ... VALUES (?,…)` (14 колонок), `batchSize=500`. Это:
+- обходит IDENTITY-ограничение Hibernate (батчинг реально работает);
+- убирает dirty-checking и построение persistence-context на hot-path;
+- держится принципа ADR-6 («bulk через JdbcTemplate, не Hibernate»).
+
+Дополнительно в JDBC включён **`reWriteBatchedInserts=true`** (через
+`spring.datasource.hikari.data-source-properties`) — pgjdbc переписывает серию single-row INSERT
+в один multi-row INSERT. Без него даже `batchUpdate` шлёт по строке за раз. Заданием через
+data-source-properties (а не в URL) гарантируем, что флаг применится независимо от того, как
+задан `DB_URL` в проде.
+
+Мёртвый `CommitEntityMapper.toEntity` удалён — маппер остался только для чтения (`toDomain`).
+Сама `CommitDetailsEntity` и её IDENTITY-id оставлены: для **чтения** (JPA-проекции, `findByAuthor`)
+это корректно и менять схему незачем.
+
+**Не входит в P0-1 (вынесено в P1-3).** `mr_review` тоже на IDENTITY и пишется
+`reviewJpa.saveAll`, а `merge_request` требует возврата id для связки ревью. Их перевод на native
+insert логично делать вместе с устранением N+1 в `ReviewWriteRepositoryAdapter` (P1-3) — это один
+и тот же адаптер и одна транзакционная логика. Здесь не трогаем, чтобы коммит был сфокусирован на
+самом горячем пути (commit_details = миллионы строк против десятков тысяч у reviews).
+
+**Что НЕ делали.** `unified_user` тоже IDENTITY, но это few-rows-per-run (по новому автору) —
+не hot-path, оставлено на JPA. `hibernate.jdbc.batch_size` оставлен: он ещё помогает остальным
+JPA-операциям (`order_updates` и т.п.).
+
+---
+
+## ADR-12. Отмена прогона сбора — кооперативная, через DB-флаг (P1-2в, Этап 1)
+
+**Контекст.** `POST /collection/runs` запускается на минуты-часы (синхронно), держит advisory-лок
++ connection, прервать извне было нельзя. Нужна отмена без насильного убийства потока и без
+рассинхрона данных.
+
+**Решение (Этап 1).**
+- **Контракт (OAS 2.1.0):** `POST /collection/runs/{id}/cancel` → 202 (run в RUNNING с поднятым
+  флагом; отмена асинхронна, финал наблюдать через GET), 404 (нет прогона), 409 (терминальный).
+  `CollectionRun.status += CANCELLED`.
+- **DB-backed флаг** `collection_run.cancel_requested` (миграция 028). Cancel-эндпоинт ставит флаг
+  на любом инстансе (быстрый UPDATE, лок не нужен) → работает кросс-под без sticky-routing.
+- **Checkpoints:** git-фаза проверяет `CancellationSignal` перед каждым репозиторием; оркестратор —
+  после git и перед фиксацией SUCCESS. При отмене обход прекращается, **recompute пропускается**,
+  бросается внутренний `CollectionCancelledException` → оркестратор помечает `CANCELLED`.
+- **Сигнал:** `CancellationSignal` (port/in, `() -> collectionRunRepository.isCancelRequested(runId)`),
+  прокидывается в git-фазу. Прямой SELECT на checkpoint'е — дёшево (PK-lookup, ≤ числа репо за прогон).
+- **Advisory-лок** снимается сам: отмена доводит поток до `return`, try-with-resources закрывает
+  handle → `pg_advisory_unlock`. Отдельной логики не нужно.
+
+**Консистентность = как у FAILED.** `CANCELLED ≠ SUCCESS` → курсор (`findLastSuccessfulUntil`) его
+игнорирует → следующий сбор стартует с того же `since`, mark-and-sweep + recompute доводят
+`commit_details`/`daily_stats`. Частичная запись и stale daily_stats — то же окно, что у FAILED
+(ADR-10), не новый риск.
+
+**Companion-эндпоинт `GET /collection/runs/latest` (OAS 2.2.0).** Без него cancel из UI
+бесполезен: `POST /collection/runs` синхронный и отдаёт id только в конце, а refresh/другая
+вкладка/другой юзер этот id теряют. `/latest` возвращает самый свежий прогон по `startedAt`
+(идущий = самый свежий, т.к. single-flight) — фронт на загрузке экрана узнаёт «идёт ли сбор +
+его id» (для poll и cancel) либо последний результат. `CollectionRunRepository.findLatest`
+(`findFirstByOrderByStartedAtDesc`) + `GetCollectionRunUseCase.findLatest` + controller. Литерал
+`/runs/latest` Spring роутит раньше шаблона `/runs/{id}` (тест это проверяет).
+
+**Что осознанно НЕ делали (Этап 2, опц.).** In-memory registry + `Thread.interrupt()` для
+мгновенного прерывания текущей git-команды. Сейчас отмена срабатывает на ближайшем checkpoint'е
+или по `command-timeout` (≤30m) текущей команды. Interrupt-путь добавим, только если ожидание
+окажется болезненным на практике — он требует аккуратности с пулом connection'ов при interrupt
+во время JDBC, поэтому не в Этапе 1.
+
+**Гексагональность.** Cancel-исключение для 409 — в `port.out` (прецедент:
+`CollectionAlreadyRunningException`). `CancellationSignal`/`CancelCollectionUseCase` — `port.in`
+(интерфейсы, ArchUnit-чисто). `CollectionCancelledException` — внутренний control-flow в
+`application.service` (final, не покидает слой). Флаг `cancel_requested` — не часть доменного
+`CollectionRun` (run-control сигнал), маппером не трогается (`@Mapping(ignore)`).
+
+---
+
+## ADR-13. Startup-реконсиляция осиротевших RUNNING-прогонов (review #2)
+
+**Контекст.** Процесс упал/убит mid-run (OOM, `kill -9`, деплой) → запись `collection_run`
+остаётся в `RUNNING` навсегда (некому перевести в терминал). Advisory-lock Postgres отпускается
+(смерть сессии), новый сбор стартует, но `GET /collection/runs/latest` отдаёт фантом как «сбор
+идёт» бесконечно, а cancel по нему мёртв (некому прочитать флаг). Review #2 показало: пока поллинг
+на фронте был выпилен — пробел был невидим; `/latest` сделал его вредным для UI.
+
+**Решение (multi-instance-safe).** Политика — в `StartupReconciliationService` (application.service,
+Spring-free, Lombok); Spring-триггер `StartupReconciliationTrigger` (bootstrap,
+`@EventListener(ApplicationReadyEvent)`) только дёргает её. Разделение принципиальное: bootstrap —
+composition root без бизнес-логики и без Lombok; политика жизненного цикла collection-run живёт в
+application (рядом с оркестратором, который так же использует `CollectionLock`). Сервис
+берёт advisory-lock через тот же `CollectionLock`.
+- Лок **свободен** → ни один сбор не идёт нигде (single-flight) → любой `RUNNING` это фантом →
+  `failOrphanedRunning()` (bulk UPDATE `RUNNING → FAILED`).
+- Лок **занят** → реальный сбор идёт на другом инстансе → `RUNNING` НЕ трогаем (его допишет
+  ведущий). Ловим `CollectionAlreadyRunningException`, пропускаем.
+
+Лок берётся на миллисекунды (один bulk-UPDATE) и сразу отпускается (try-with-resources) — не мешает
+реальному сбору стартовать следом. Это корректно и для single-, и для multi-instance: не нужен ни
+порог по времени (который оставлял бы фантом висеть часами), ни риск снести живой прогон.
+
+**Почему не «fail all RUNNING на старте без лока».** При rolling-деплое pod B стартовал бы во время
+живого сбора на pod A и снёс бы его `RUNNING` → `FAILED` (self-heal'ится при финальном save, но окно
+вранья в UI). Лок-гейт это исключает.
+
+Тесты: `StartupReconciliationServiceTest` (лок свободен → reconcile + release; занят → skip),
+`CollectionRunRepositoryAdapterIT.failOrphanedRunningMarksRunningAsFailed`.
+
+---
+
+## ADR-14. Async POST /collection/runs — 202 + RUNNING (review #2, контракт 3.0.0)
+
+**Контекст.** `POST /collection/runs` был синхронным: блокировал request-поток на весь сбор
+(минуты-часы) и отдавал терминальный run. Прокси/балансировщик/браузер прибивали такой запрос по
+idle-таймауту → выглядело как «сбор упал», хотя он шёл. После фичи отмены и `/latest` синхронный
+POST стал центральным смелл'ом (FE стрелял POST и игнорировал его, поллил `/latest`).
+
+**Решение (BREAKING, major 3.0.0).** POST отдаёт **202 + прогон в RUNNING** (с id) синхронно, сам
+сбор уходит в фон. Семантика `CollectDailyStatsService.run()` сменилась: «прогнать до конца» →
+«стартовать, вернуть RUNNING». FE дальше поллит `/{id}` / `/latest`, может отменить.
+
+- **Lock hand-off:** advisory-lock берётся **синхронно** (ради мгновенного 409) и НЕ через
+  try-with-resources — `Handle` живёт до конца фоновой работы и закрывается в её `finally`. Если
+  диспатч не состоялся (пустой период / исключение в прологе) — лок отпускается синхронно. `Handle`
+  это JDBC-connection с session-lock'ом, не thread-confined → передаётся в фон-поток безопасно
+  (используется не конкурентно; per-batch tx берут другие connection'ы из пула).
+- **Фон:** порт `BackgroundRunner` (out, как `TransactionRunner`) поверх
+  `Executors.newVirtualThreadPerTaskExecutor()` в bootstrap. **НЕ Spring-managed lifecycle** — иначе
+  graceful shutdown ждал бы многочасовой сбор. На остановке JVM фон-поток умирает → прогон остаётся
+  RUNNING → подхватывает startup-реконсиляция (ADR-13). Синергия двух решений.
+- **Отказоустойчивость:** top-level `catch (Throwable)` в фоновом теле → FAILED (ничего не утекает в
+  вечный RUNNING сверх крэша процесса, который покрыт ADR-13).
+- **Single-flight** сохранён: лок берётся в прологе, второй POST → 409 синхронно как раньше.
+
+**Тесты.** Оркестратор-тесты переведены на inline-`BackgroundRunner` + ассерты на **сохранённый**
+терминальный run (возвращаемый теперь всегда RUNNING). Новые: `dispatchesToBackgroundAndReturnsRunning`,
+`emptyPeriodShortCircuits` (короткое замыкание + release лока без диспатча). Controller-тест → 202.
 
 

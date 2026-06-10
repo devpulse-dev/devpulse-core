@@ -1,5 +1,10 @@
 package ru.x5.devpulse.adapter.kaiten;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -157,15 +162,37 @@ class KaitenRateLimiter {
         return false;
     }
 
-    /** Парсит заголовок {@code Retry-After} (только число в секундах, без HTTP-date). */
-    private static Optional<Long> retryAfterMillis(HttpHeaders headers) {
+    /**
+     * Парсит заголовок {@code Retry-After} (RFC 7231). Две формы:
+     * <ul>
+     *   <li><b>delta-seconds</b> — целое число секунд ({@code "120"});</li>
+     *   <li><b>HTTP-date</b> — RFC 1123, напр. {@code "Wed, 21 Oct 2025 07:28:00 GMT"} —
+     *       переводится в задержку от {@code now}, клампится в неотрицательное (дата в прошлом → 0).</li>
+     * </ul>
+     * Не распарсилось ни как число, ни как дата → {@link Optional#empty()} (вызывающий упадёт
+     * на exp-backoff). Package-private static — для прямого юнит-теста парсинга.
+     */
+    static Optional<Long> retryAfterMillis(HttpHeaders headers) {
         if (headers == null) return Optional.empty();
         String value = headers.getFirst(HttpHeaders.RETRY_AFTER);
         if (value == null || value.isBlank()) return Optional.empty();
+        String trimmed = value.trim();
+
+        // Форма 1: delta-seconds.
         try {
-            long seconds = Long.parseLong(value.trim());
-            return Optional.of(seconds * 1000L);
-        } catch (NumberFormatException ignore) {
+            long seconds = Long.parseLong(trimmed);
+            return Optional.of(Math.max(0L, seconds * 1000L));
+        } catch (NumberFormatException notSeconds) {
+            // не число — пробуем HTTP-date ниже
+        }
+
+        // Форма 2: HTTP-date (RFC 1123).
+        try {
+            ZonedDateTime when = ZonedDateTime.parse(trimmed, DateTimeFormatter.RFC_1123_DATE_TIME);
+            long millis = Duration.between(Instant.now(), when.toInstant()).toMillis();
+            return Optional.of(Math.max(0L, millis));
+        } catch (DateTimeParseException notDate) {
+            log.debug("Kaiten: Retry-After '{}' — ни delta-seconds, ни HTTP-date, игнорируем", trimmed);
             return Optional.empty();
         }
     }

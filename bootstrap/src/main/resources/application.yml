@@ -14,6 +14,12 @@ spring:
     password: ${DB_PASSWORD:postgres}
     hikari:
       maximum-pool-size: 20
+      data-source-properties:
+        # pgjdbc переписывает серию single-row INSERT в один multi-row INSERT при batchUpdate.
+        # Критично для native batch insert commit_details (P0-1): без этого даже JdbcTemplate.batchUpdate
+        # шлёт по одному round-trip'у на строку. Задаём через data-source-properties, чтобы работало
+        # независимо от того, как задан DB_URL в проде.
+        reWriteBatchedInserts: true
 
   jpa:
     open-in-view: false
@@ -108,6 +114,11 @@ gitlab:
     max-retries: 5
     retry-backoff-ms: 2000
     page-size: 100
+    # Верхняя граница на сбор ревью ОДНОГО проекта (fan-out по MR). Под деградацией GitLab даже
+    # bounded retry per-call мог бы держать advisory-лок часами. По истечении недособранные MR
+    # отменяются, прогон продолжается (агрегатный WARN о потерянных), курсор не двигается → следующий
+    # сбор доберёт. 0s — без границы (старое поведение). Формат Duration (30m / 1h / 0s).
+    project-review-timeout: ${GITLAB_PROJECT_REVIEW_TIMEOUT:30m}
     # scm.x5.ru за внутренним X5 CA — как и Kaiten, в dev можно отключить проверку SSL.
     insecure-ssl: ${GITLAB_INSECURE_SSL:false}
 

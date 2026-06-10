@@ -1,0 +1,28 @@
+# Composite index под mark-and-sweep rebase-cleanup (P0-2).
+#
+# CollectGitStatsService после стрима коммитов делает sweep зомби:
+#   DELETE FROM commit_details
+#    WHERE repository_name = ? AND commit_date BETWEEN ? AND ?
+#      AND (collected_at IS NULL OR collected_at < ?)
+#
+# Раньше zombie-cleanup грузил все хеши репозитория в heap и считал set-разность в Java
+# (риск OOM на больших репо). Теперь разность считается в БД. Чтобы DELETE был repo-scoped,
+# а не сканировал весь commit_details по одному idx_commit_details_date, нужен composite
+# index по (repository_name, commit_date). Он же ускоряет любые per-repo выборки за период.
+#
+# CONCURRENTLY (runInTransaction: false) — не блокируем writes на возможно большой таблице.
+# IF NOT EXISTS — идемпотентность, если индекс уже создан вручную.
+databaseChangeLog:
+  - changeSet:
+      id: 027-add-repo-date-index-for-zombie-sweep
+      author: devpulse
+      runInTransaction: false
+      changes:
+        - sql:
+            comment: "composite index под repo-scoped sweep zombie-коммитов"
+            sql: |
+              CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_commit_details_repo_date
+              ON commit_details (repository_name, commit_date);
+      rollback:
+        - sql:
+            sql: DROP INDEX IF EXISTS idx_commit_details_repo_date;

@@ -28,6 +28,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param insecureSsl   trust-all SSL (только dev; scm.x5.ru за внутренним CA)
  * @param connectTimeout таймаут соединения
  * @param readTimeout   таймаут чтения
+ * @param projectReviewTimeout верхняя граница на сбор ревью одного проекта (fan-out по MR).
+ *                      Защита от деградации GitLab: даже при bounded retry per-call десятки тысяч
+ *                      MR могут тянуться часами под advisory-локом. По истечении недособранные MR
+ *                      отменяются, прогон продолжается (с агрегатным WARN о потерянных). Default
+ *                      {@code 30m}; {@code 0s} — без ограничения (старое поведение).
  */
 @ConfigurationProperties(prefix = "gitlab.api")
 public record GitlabProperties(
@@ -44,7 +49,8 @@ public record GitlabProperties(
         int pageSize,
         boolean insecureSsl,
         Duration connectTimeout,
-        Duration readTimeout
+        Duration readTimeout,
+        Duration projectReviewTimeout
 ) {
     public GitlabProperties {
         projects = projects == null ? List.of() : List.copyOf(projects);
@@ -57,5 +63,7 @@ public record GitlabProperties(
         if (pageSize <= 0) pageSize = 100;
         if (connectTimeout == null) connectTimeout = Duration.ofSeconds(5);
         if (readTimeout == null) readTimeout = Duration.ofSeconds(30);
+        // null → дефолтная граница 30m. Явный 0s/отрицательное → без границы (проверяется в адаптере).
+        if (projectReviewTimeout == null) projectReviewTimeout = Duration.ofMinutes(30);
     }
 }
