@@ -129,10 +129,11 @@ class CommitRepositoryAdapter implements CommitRepository {
     }
 
     @Override
-    public List<HourlyBucket> aggregateHourly(Period period, Optional<Email> author) {
+    public List<HourlyBucket> aggregateHourly(Period period, Optional<Email> author, Optional<String> team) {
         String email = author.map(Email::value).orElse(null);
+        String teamName = team.orElse(null);
         List<Object[]> rows = jpa.aggregateHourly(
-                period.fromAtStartOfDay(), period.toAtEndOfDay(), email);
+                period.fromAtStartOfDay(), period.toAtEndOfDay(), email, teamName);
 
         List<HourlyBucket> buckets = new ArrayList<>(rows.size());
         for (Object[] r : rows) {

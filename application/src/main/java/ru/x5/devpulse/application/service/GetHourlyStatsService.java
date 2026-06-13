@@ -9,9 +9,9 @@ import ru.x5.devpulse.domain.model.stats.HourlyStats;
 import ru.x5.devpulse.domain.model.user.Email;
 
 /**
- * Почасовая статистика. Агрегацию (GROUP BY день/час) делает БД через
- * {@link CommitRepository#aggregateHourly} — не поднимаем коммиты в память.
- * Enrichment не нужен: матрица анонимна (счётчики, без авторов).
+ * Почасовая статистика. Агрегацию (GROUP BY день/час) с опциональными фильтрами
+ * автора/команды делает БД через {@link CommitRepository#aggregateHourly} — не
+ * поднимаем коммиты в память. Enrichment не нужен: матрица анонимна (счётчики, без авторов).
  */
 @RequiredArgsConstructor
 public final class GetHourlyStatsService implements GetHourlyStatsUseCase {
@@ -19,7 +19,7 @@ public final class GetHourlyStatsService implements GetHourlyStatsUseCase {
     private final CommitRepository commitRepository;
 
     @Override
-    public HourlyStats get(Period period, Optional<Email> author) {
-        return new HourlyStats(period, commitRepository.aggregateHourly(period, author));
+    public HourlyStats get(Period period, Optional<Email> author, Optional<String> team) {
+        return new HourlyStats(period, commitRepository.aggregateHourly(period, author, team));
     }
 }

@@ -3,6 +3,8 @@ package ru.x5.devpulse.adapter.rest;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -116,7 +118,7 @@ class StatsControllerTest {
     @Test
     @DisplayName("GET /hourly → 200, from/to + ячейки weekday×hour")
     void hourlyReturnsMatrix() throws Exception {
-        when(getHourlyStats.get(any(), any())).thenReturn(new HourlyStats(
+        when(getHourlyStats.get(any(), any(), any())).thenReturn(new HourlyStats(
                 new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)),
                 List.of(new HourlyBucket(2, 14, 7, 320))));
 
@@ -129,6 +131,20 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.cells[0].hour").value(14))
                 .andExpect(jsonPath("$.cells[0].commits").value(7))
                 .andExpect(jsonPath("$.cells[0].addedLines").value(320));
+    }
+
+    @Test
+    @DisplayName("GET /hourly?team=Platform → фильтр команды прокинут в use case (email пуст)")
+    void hourlyForwardsTeamFilter() throws Exception {
+        when(getHourlyStats.get(any(), any(), any())).thenReturn(new HourlyStats(
+                new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)), List.of()));
+
+        mvc.perform(get("/api/v2/stats/hourly")
+                        .param("from", "2026-05-01").param("to", "2026-05-31")
+                        .param("team", "Platform"))
+                .andExpect(status().isOk());
+
+        verify(getHourlyStats).get(any(), eq(Optional.empty()), eq(Optional.of("Platform")));
     }
 
     @Test

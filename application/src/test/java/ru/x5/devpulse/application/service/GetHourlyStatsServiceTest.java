@@ -27,14 +27,15 @@ class GetHourlyStatsServiceTest {
     @Mock CommitRepository commitRepository;
 
     @Test
-    @DisplayName("Командный режим: прокидывает Optional.empty() в репозиторий, оборачивает ячейки в HourlyStats(period)")
-    void teamWide() {
+    @DisplayName("Без фильтров: прокидывает Optional.empty()/empty() в репозиторий, оборачивает ячейки в HourlyStats(period)")
+    void unfiltered() {
         var cells = List.of(new HourlyBucket(2, 14, 7, 320));
-        when(commitRepository.aggregateHourly(PERIOD, Optional.empty())).thenReturn(cells);
+        when(commitRepository.aggregateHourly(PERIOD, Optional.empty(), Optional.empty())).thenReturn(cells);
 
-        var result = new GetHourlyStatsService(commitRepository).get(PERIOD, Optional.empty());
+        var result = new GetHourlyStatsService(commitRepository)
+                .get(PERIOD, Optional.empty(), Optional.empty());
 
-        assertAll("команда",
+        assertAll("без фильтров",
                 () -> assertThat(result.period()).isEqualTo(PERIOD),
                 () -> assertThat(result.cells()).isEqualTo(cells));
     }
@@ -42,10 +43,25 @@ class GetHourlyStatsServiceTest {
     @Test
     @DisplayName("Режим одного автора: прокидывает Optional.of(email) в репозиторий 1-в-1")
     void singleAuthor() {
-        when(commitRepository.aggregateHourly(PERIOD, Optional.of(EMAIL))).thenReturn(List.of());
+        when(commitRepository.aggregateHourly(PERIOD, Optional.of(EMAIL), Optional.empty()))
+                .thenReturn(List.of());
 
-        var result = new GetHourlyStatsService(commitRepository).get(PERIOD, Optional.of(EMAIL));
+        var result = new GetHourlyStatsService(commitRepository)
+                .get(PERIOD, Optional.of(EMAIL), Optional.empty());
 
         assertThat(result.cells()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Режим команды: прокидывает Optional.of(team) в репозиторий 1-в-1")
+    void teamFilter() {
+        var cells = List.of(new HourlyBucket(0, 10, 3, 90));
+        when(commitRepository.aggregateHourly(PERIOD, Optional.empty(), Optional.of("Platform")))
+                .thenReturn(cells);
+
+        var result = new GetHourlyStatsService(commitRepository)
+                .get(PERIOD, Optional.empty(), Optional.of("Platform"));
+
+        assertThat(result.cells()).isEqualTo(cells);
     }
 }

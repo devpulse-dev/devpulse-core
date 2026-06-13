@@ -65,8 +65,13 @@ public interface CommitRepository {
      * <p>Считается в БД (GROUP BY по дню недели и часу из {@code commit_date}), без
      * подъёма коммитов в память. {@code weekday}: 0=Пн … 6=Вс (ISO).</p>
      *
-     * @param author пусто — агрегат по всей команде; задан — только этот автор
+     * <p>{@code author} и {@code team} — независимые опциональные фильтры. {@code team}
+     * ограничивает выборку участниками команды (членство по {@code unified_user.team}):
+     * авторы без сопоставленного пользователя или из другой команды не учитываются.</p>
+     *
+     * @param author пусто — без фильтра по автору; задан — только этот автор
+     * @param team   пусто — без фильтра по команде; задан — только участники команды
      * @return непустые ячейки (commits &gt; 0); порядок не гарантируется
      */
-    List<HourlyBucket> aggregateHourly(Period period, Optional<Email> author);
+    List<HourlyBucket> aggregateHourly(Period period, Optional<Email> author, Optional<String> team);
 }

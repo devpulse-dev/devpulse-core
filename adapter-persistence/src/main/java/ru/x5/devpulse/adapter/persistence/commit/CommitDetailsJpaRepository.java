@@ -73,8 +73,12 @@ interface CommitDetailsJpaRepository extends JpaRepository<CommitDetailsEntity, 
      * тогда {@code extract(...)} из SELECT оказались бы не сгруппированы. Поэтому группируем по
      * тем же выражениям, что в SELECT.</p>
      *
-     * <p>{@code :email} — опциональный фильтр (null → вся команда; {@code cast(:email as text)}
-     * нужен Postgres, иначе bind-параметр null имеет неопределённый тип). Возвращает строки
+     * <p>{@code :email} / {@code :team} — независимые опциональные фильтры (null → без
+     * ограничения; {@code cast(:param as text)} нужен Postgres, иначе bind-параметр null имеет
+     * неопределённый тип). {@code :team} фильтрует по членству в команде через подзапрос на
+     * {@code unified_user} (join по email, оба нормализованы к lower-case): коммиты авторов без
+     * записи в {@code unified_user} либо в другой команде в выборку не входят. Несуществующая
+     * команда → пустой подзапрос → пустой результат. Возвращает строки
      * {@code [weekday:int, hour:int, commits:long, addedLines:long]}.</p>
      */
     @Query(value = """
@@ -86,11 +90,14 @@ interface CommitDetailsJpaRepository extends JpaRepository<CommitDetailsEntity, 
              where commit_date between :from and :to
                and is_merge = false
                and (cast(:email as text) is null or email = :email)
+               and (cast(:team as text) is null
+                    or email in (select u.email from unified_user u where u.team = :team))
              group by extract(isodow from commit_date)::int - 1,
                       extract(hour from commit_date)::int
             """, nativeQuery = true)
     List<Object[]> aggregateHourly(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to,
-            @Param("email") String email);
+            @Param("email") String email,
+            @Param("team") String team);
 }
