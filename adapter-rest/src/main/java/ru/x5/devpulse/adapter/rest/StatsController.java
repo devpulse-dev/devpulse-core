@@ -71,13 +71,17 @@ class StatsController implements StatsApi {
     }
 
     @Override
-    public ResponseEntity<HourlyStats> getHourlyStats(LocalDate from, LocalDate to, String email) {
-        // email опционален: пусто/blank → агрегат по всей команде.
+    public ResponseEntity<HourlyStats> getHourlyStats(LocalDate from, LocalDate to, String email,
+                                                      String team) {
+        // email/team опциональны и независимы: пусто/blank → без соответствующего фильтра.
         Optional<Email> author = (email == null || email.isBlank())
                 ? Optional.empty()
                 : Optional.of(new Email(email));
+        Optional<String> teamFilter = (team == null || team.isBlank())
+                ? Optional.empty()
+                : Optional.of(team);
         return ResponseEntity.ok(hourlyStatsMapper.toDto(
-                getHourlyStats.get(new Period(from, to), author)));
+                getHourlyStats.get(new Period(from, to), author, teamFilter)));
     }
 
     @Override

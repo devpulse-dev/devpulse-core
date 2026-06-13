@@ -1,6 +1,7 @@
 package ru.x5.devpulse.adapter.persistence.commit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
 import java.time.LocalDate;
@@ -16,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import ru.x5.devpulse.adapter.persistence.shared.PostgresContainerSupport;
 import ru.x5.devpulse.application.port.out.CommitRepository;
+import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.PageRequest;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.Commit;
@@ -37,6 +39,9 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
 
     @Autowired
     CommitRepository repo;
+
+    @Autowired
+    UnifiedUserRepository userRepo;
 
     @Test
     @DisplayName("saveAll сохраняет коммиты, findByAuthor возвращает их за период")
@@ -93,7 +98,7 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
         ), Map.of());
 
         Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
-        List<HourlyBucket> cells = repo.aggregateHourly(may, Optional.empty());
+        List<HourlyBucket> cells = repo.aggregateHourly(may, Optional.empty(), Optional.empty());
 
         HourlyBucket mon10 = cell(cells, 0, 10);
         HourlyBucket tue = cell(cells, 1, 14);
@@ -103,8 +108,40 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                 () -> assertThat(tue.commits()).isEqualTo(1),
                 () -> assertThat(cells.stream().mapToLong(HourlyBucket::commits).sum())
                         .as("всего 3 — мердж исключён").isEqualTo(3),
-                () -> assertThat(repo.aggregateHourly(may, Optional.of(new Email("nobody@x5.ru"))))
+                () -> assertThat(repo.aggregateHourly(may, Optional.of(new Email("nobody@x5.ru")), Optional.empty()))
                         .as("фильтр по чужому email → пусто").isEmpty());
+    }
+
+    @Test
+    @DisplayName("aggregateHourly: фильтр team ограничивает участниками команды (членство по unified_user.team)")
+    void aggregateHourlyFiltersByTeam() {
+        Email platformDev = new Email("platform-dev@x5.ru");
+        Email coreDev = new Email("core-dev@x5.ru");
+        // unified_user join-ключ — email; членство берётся из колонки team.
+        userRepo.findOrCreateAll(List.of(platformDev, coreDev));
+        userRepo.updateTeam(platformDev, "Platform");
+        userRepo.updateTeam(coreDev, "Core");
+
+        LocalDateTime mon10 = LocalDateTime.of(2026, 5, 4, 10, 0);
+        LocalDateTime tue14 = LocalDateTime.of(2026, 5, 5, 14, 0);
+        repo.saveAll(List.of(
+                newCommit("a1".repeat(20), platformDev, mon10),   // Platform → (0,10)
+                newCommit("b2".repeat(20), coreDev, tue14)        // Core → (1,14)
+        ), Map.of());
+
+        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
+
+        assertAll("фильтр по команде",
+                () -> assertThat(repo.aggregateHourly(may, Optional.empty(), Optional.of("Platform")))
+                        .as("только коммит участника Platform")
+                        .extracting(HourlyBucket::weekday, HourlyBucket::hour)
+                        .containsExactly(tuple(0, 10)),
+                () -> assertThat(repo.aggregateHourly(may, Optional.empty(), Optional.of("Core")))
+                        .as("только коммит участника Core")
+                        .extracting(HourlyBucket::weekday, HourlyBucket::hour)
+                        .containsExactly(tuple(1, 14)),
+                () -> assertThat(repo.aggregateHourly(may, Optional.empty(), Optional.of("Ghost")))
+                        .as("несуществующая команда → пусто").isEmpty());
     }
 
     @Test
