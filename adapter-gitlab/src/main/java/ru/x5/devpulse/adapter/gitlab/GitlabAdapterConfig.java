@@ -58,6 +58,28 @@ class GitlabAdapterConfig {
                 .build();
     }
 
+    /**
+     * RestClient БЕЗ дефолтного токена — для запросов от имени пользователя ({@code GET /user}
+     * его PAT/OAuth-токеном). Токен передаётся per-call в {@code adapter-identity}. SSL/таймауты/
+     * кодирование URI — как у сервисного клиента.
+     */
+    @Bean
+    RestClient gitlabUserRestClient(GitlabProperties properties) {
+        ClientHttpRequestFactory factory = properties.insecureSsl()
+                ? insecureSslRequestFactory(properties)
+                : secureRequestFactory(properties);
+
+        DefaultUriBuilderFactory uriFactory = new DefaultUriBuilderFactory(
+                properties.baseUrl() == null ? "" : properties.baseUrl());
+        uriFactory.setEncodingMode(DefaultUriBuilderFactory.EncodingMode.VALUES_ONLY);
+
+        return RestClient.builder()
+                .uriBuilderFactory(uriFactory)
+                .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE)
+                .requestFactory(factory)
+                .build();
+    }
+
     @Bean
     GitlabHttpClient gitlabHttpClient(RestClient gitlabRestClient) {
         return HttpServiceProxyFactory

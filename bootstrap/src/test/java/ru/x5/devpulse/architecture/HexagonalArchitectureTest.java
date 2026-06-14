@@ -39,6 +39,7 @@ class HexagonalArchitectureTest {
     private static final String ADAPTER_GIT = ROOT + ".adapter.git..";
     private static final String ADAPTER_KAITEN = ROOT + ".adapter.kaiten..";
     private static final String ADAPTER_REVIEWS = ROOT + ".adapter.reviews..";
+    private static final String ADAPTER_IDENTITY = ROOT + ".adapter.identity..";
 
     /**
      * Composition root: {@code @SpringBootApplication} в корневом пакете + {@code .config..}
@@ -87,6 +88,7 @@ class HexagonalArchitectureTest {
                 .layer("adapter-git").definedBy(ADAPTER_GIT)
                 .layer("adapter-kaiten").definedBy(ADAPTER_KAITEN)
                 .layer("adapter-reviews").definedBy(ADAPTER_REVIEWS)
+                .layer("adapter-identity").definedBy(ADAPTER_IDENTITY)
                 .layer("bootstrap").definedBy(BOOTSTRAP)
 
                 .whereLayer("bootstrap").mayNotBeAccessedByAnyLayer()
@@ -95,16 +97,19 @@ class HexagonalArchitectureTest {
                 .whereLayer("adapter-git").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-kaiten").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-reviews").mayOnlyBeAccessedByLayers("bootstrap")
+                .whereLayer("adapter-identity").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("application")
                         .mayOnlyBeAccessedByLayers(
                                 "bootstrap",
                                 "adapter-rest", "adapter-persistence",
-                                "adapter-git", "adapter-kaiten", "adapter-reviews")
+                                "adapter-git", "adapter-kaiten", "adapter-reviews",
+                                "adapter-identity")
                 .whereLayer("domain")
                         .mayOnlyBeAccessedByLayers(
                                 "bootstrap", "application",
                                 "adapter-rest", "adapter-persistence",
-                                "adapter-git", "adapter-kaiten", "adapter-reviews");
+                                "adapter-git", "adapter-kaiten", "adapter-reviews",
+                                "adapter-identity");
 
         rule.check(CLASSES);
     }

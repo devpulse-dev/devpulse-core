@@ -28,6 +28,7 @@
         <module>adapter-kaiten</module>
         <module>adapter-gitlab</module>
         <module>adapter-reviews</module>
+        <module>adapter-identity</module>
         <module>bootstrap</module>
     </modules>
 
@@ -93,6 +94,11 @@
             <dependency>
                 <groupId>ru.x5.devpulse</groupId>
                 <artifactId>adapter-reviews</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ru.x5.devpulse</groupId>
+                <artifactId>adapter-identity</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

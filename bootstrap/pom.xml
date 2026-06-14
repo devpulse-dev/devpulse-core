@@ -36,6 +36,10 @@
             <groupId>ru.x5.devpulse</groupId>
             <artifactId>adapter-reviews</artifactId>
         </dependency>
+        <dependency>
+            <groupId>ru.x5.devpulse</groupId>
+            <artifactId>adapter-identity</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

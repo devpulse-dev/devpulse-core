@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
 import ru.x5.devpulse.adapter.gitlab.dto.GitlabApprovalsDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabMemberDto;
 import ru.x5.devpulse.adapter.gitlab.dto.GitlabMrDto;
 import ru.x5.devpulse.adapter.gitlab.dto.GitlabNoteDto;
 import ru.x5.devpulse.adapter.gitlab.dto.GitlabUserDto;
@@ -53,4 +54,14 @@ public interface GitlabHttpClient {
             @PathVariable("iid") long iid,
             @RequestParam("page") int page,
             @RequestParam("per_page") int perPage);
+
+    /**
+     * {@code GET /projects/{project}/members/all/{userId}} — членство пользователя в проекте,
+     * включая наследованное от группы. {@code 404}, если пользователь не участник. Сервисным
+     * токеном (для проверки доступа при логине, см. ADR-13).
+     */
+    @GetExchange("/projects/{project}/members/all/{userId}")
+    GitlabMemberDto getProjectMember(
+            @PathVariable("project") String project,
+            @PathVariable("userId") long userId);
 }
