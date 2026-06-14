@@ -128,6 +128,13 @@ scoring:
   # Для других периодов масштабируется линейно (за 15 дней ожидание = 25, и т.д.).
   expected-commits-per-30-days: ${SCORING_EXPECTED_COMMITS_PER_30D:50}
 
+# === Auth (ADR-13) ===
+auth:
+  # Email администраторов (роль ADMIN). Источник истины для ADMIN — этот список (роль
+  # derivable, без колонки в БД). Comma-separated env → список. Матчатся в lower-case.
+  # Админы обходят проверку доступа к GitLab-проектам (см. ADR-13).
+  admins: ${AUTH_ADMINS:}
+
 server:
   port: 8080
 
