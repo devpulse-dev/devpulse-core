@@ -1,5 +1,7 @@
 package ru.x5.devpulse.adapter.persistence.stats;
 
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.Collection;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -9,6 +11,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.domain.common.Period;
+import ru.x5.devpulse.domain.model.cohort.MonthlyAuthorActivity;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.user.Email;
 
@@ -123,6 +126,46 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
         });
         log.info("Пересобрали daily_stats для {} авторов в [{}..{}]: -{} +{}",
                 values.length, period.from(), period.to(), deleted, inserted);
+    }
+
+    /**
+     * Помесячный агрегат активности по автору за окно (GROUP BY в БД — не тянем сырой daily в heap).
+     *
+     * <p>Email в {@code daily_author_stats} уже lowercase (миграция 020); {@code LOWER()} —
+     * defence in depth. Team-фильтр через подзапрос на {@code unified_user} (членство по email);
+     * {@code CAST(? AS text) IS NULL} → null-team = без фильтра. Месяц — {@code to_char(date,'YYYY-MM')},
+     * парсится в {@link YearMonth} (ISO {@code uuuu-MM}).</p>
+     */
+    private static final String MONTHLY_SQL = """
+            SELECT LOWER(s.email)             AS email,
+                   to_char(s.date, 'YYYY-MM') AS ym,
+                   SUM(s.commits)             AS commits,
+                   SUM(s.merge_commits)       AS merge_commits,
+                   SUM(s.added_lines)         AS added_lines,
+                   SUM(s.deleted_lines)       AS deleted_lines
+              FROM daily_author_stats s
+             WHERE s.date BETWEEN ? AND ?
+               AND (CAST(? AS text) IS NULL
+                    OR LOWER(s.email) IN (SELECT u.email FROM unified_user u WHERE u.team = ?))
+             GROUP BY LOWER(s.email), to_char(s.date, 'YYYY-MM')
+            """;
+
+    @Override
+    public List<MonthlyAuthorActivity> monthlyAuthorActivity(LocalDate from, LocalDate to, String team) {
+        return jdbcTemplate.query(MONTHLY_SQL,
+                ps -> {
+                    ps.setObject(1, from);
+                    ps.setObject(2, to);
+                    ps.setString(3, team); // null → CAST(null AS text) IS NULL → фильтр отключён
+                    ps.setString(4, team);
+                },
+                (rs, rowNum) -> new MonthlyAuthorActivity(
+                        new Email(rs.getString("email")),
+                        YearMonth.parse(rs.getString("ym")),
+                        rs.getLong("commits"),
+                        rs.getLong("merge_commits"),
+                        rs.getLong("added_lines"),
+                        rs.getLong("deleted_lines")));
     }
 
     @Override

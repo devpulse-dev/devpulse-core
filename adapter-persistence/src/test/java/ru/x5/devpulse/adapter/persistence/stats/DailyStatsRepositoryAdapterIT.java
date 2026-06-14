@@ -16,6 +16,7 @@ import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.Period;
+import ru.x5.devpulse.domain.model.cohort.MonthlyAuthorActivity;
 import ru.x5.devpulse.domain.common.TaskNumber;
 import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.CommitHash;
@@ -89,6 +90,59 @@ class DailyStatsRepositoryAdapterIT extends PostgresContainerSupport {
                         .extracting(r -> r.get("user_id"))
                         .as("bob -> bobId")
                         .isEqualTo(bobId));
+    }
+
+    @Test
+    @DisplayName("monthlyAuthorActivity: GROUP BY (email, месяц) суммирует коммиты по месяцам")
+    void monthlyAggregatesByMonth() {
+        Email dev = new Email("monthly@x5.ru");
+        unifiedUserRepository.findOrCreateAll(List.of(dev));
+        RepoName repoX = new RepoName("monthly-test");
+        // Jan: 2 коммита (10, 11 янв), Feb: 1 коммит
+        commitRepository.saveAll(List.of(
+                commit("e1".repeat(20), dev, LocalDate.of(2026, 1, 10), repoX),
+                commit("e2".repeat(20), dev, LocalDate.of(2026, 1, 11), repoX),
+                commit("e3".repeat(20), dev, LocalDate.of(2026, 2, 5), repoX)), Map.of());
+        repo.recomputeFromCommits(List.of(dev),
+                new Period(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 2, 28)));
+
+        List<MonthlyAuthorActivity> mine = repo.monthlyAuthorActivity(
+                        LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), null).stream()
+                .filter(a -> a.email().value().equals("monthly@x5.ru")).toList();
+
+        assertAll("помесячная агрегация",
+                () -> assertThat(mine).extracting(a -> a.month().toString())
+                        .containsExactlyInAnyOrder("2026-01", "2026-02"),
+                () -> assertThat(byMonth(mine, "2026-01").nonMergeCommits()).as("Jan = 2").isEqualTo(2L),
+                () -> assertThat(byMonth(mine, "2026-02").nonMergeCommits()).as("Feb = 1").isEqualTo(1L));
+    }
+
+    @Test
+    @DisplayName("monthlyAuthorActivity: team-фильтр через подзапрос на unified_user")
+    void monthlyTeamFilter() {
+        Email dev = new Email("teamed@x5.ru");
+        unifiedUserRepository.findOrCreateAll(List.of(dev));
+        unifiedUserRepository.updateTeam(dev, "alpha");
+        RepoName repoX = new RepoName("team-test");
+        commitRepository.saveAll(List.of(
+                commit("fa".repeat(20), dev, LocalDate.of(2026, 4, 5), repoX)), Map.of());
+        repo.recomputeFromCommits(List.of(dev),
+                new Period(LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30)));
+
+        var apr = new Object() {
+            boolean has(String team) {
+                return repo.monthlyAuthorActivity(LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30), team)
+                        .stream().anyMatch(a -> a.email().value().equals("teamed@x5.ru"));
+            }
+        };
+
+        assertAll("team-фильтр",
+                () -> assertThat(apr.has("alpha")).as("своя команда — есть").isTrue(),
+                () -> assertThat(apr.has("beta")).as("чужая команда — нет").isFalse());
+    }
+
+    private static MonthlyAuthorActivity byMonth(List<MonthlyAuthorActivity> list, String ym) {
+        return list.stream().filter(a -> a.month().toString().equals(ym)).findFirst().orElseThrow();
     }
 
     private static Commit commit(String hash, Email author, LocalDate date, RepoName repo) {

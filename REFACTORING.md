@@ -353,6 +353,22 @@ dailyStatsRepo.recomputeFromCommits(affectedAuthors, period)
 
 **Тесты обновлены:** `CollectDailyStatsServiceTest` — happy path с проверкой recompute, отдельные сценарии cleanup zombies (есть/нет), git failure → нет recompute, kaiten failure изолирован, нет коммитов → нет recompute.
 
+### Фича 5 — Cohorts / Retention (лонгитюд) ✅
+
+**Зачем:** «история про всех разработчиков сразу» — когорты по месяцу первой активности, retention-треугольник, матрица «разработчик × месяц», переходы тиров. Контракт `Cohorts` в `stats-contract` (OAS 3.2.0): `/cohorts/retention`, `/cohorts/activity-matrix`, `/cohorts/tier-transitions`.
+
+**Почему легло идеально (в отличие от Flow, который отложили):** всё строится на **иммутабельной истории коммитов** (`daily_author_stats`), которая уже персистится. Ноль Kaiten, ноль live-fetch, ноль синка состава/архива. «Сложная» часть (история уровня активности для tier-transitions) у нас НЕ сложная: `ActivityScorer` — чистая функция от месячных агрегатов → score за любой прошлый месяц **пересчитывается** из истории. **Снапшот-стор не нужен** (контраст с Flow-CFD, где статус карточки — наблюдаемое мутабельное состояние).
+
+**Слои:**
+- domain: модели `domain.model.cohort.*` (`MonthlyAuthorActivity`, `CohortRetention`, `CohortActivityMatrix`/`DeveloperActivity`, `TierTransitions`) + чистый `CohortAssembler` (как `StatsSummarizer`). Reuse `ActivityScorer` для тиров.
+- application: `GetCohortsUseCase` + `GetCohortsService` (резолв окна, делегация ассемблеру, enrichment матрицы одним `findByEmails`).
+- persistence: **SQL GROUP BY (email, месяц)** — `DailyStatsRepository.monthlyAuthorActivity(from,to,team)` через `JdbcTemplate` (не тянем сырой daily в heap), team-фильтр подзапросом на `unified_user`.
+- rest: `CohortsController` + ручной `CohortResponseMapper` (вложенные `*Inner`/enum'ы — MapStruct избыточен).
+
+**Решения (дефолты):** `minCommits=1` (порог «активен», population для всех трёх вью); ось месяцев — contiguous `[minMonth..maxMonth]` из данных; tier-transitions — траектория от первого активного месяца до конца оси (ловит churn → INACTIVE-хвост); `team` = **текущая** команда; окно по умолчанию — вся история.
+
+**Тесты:** `CohortAssemblerTest` (треугольник/матрица/churn-переходы на синтетике — основной вес), `DailyStatsRepositoryAdapterIT` (помесячная агрегация + team-фильтр на Postgres), `CohortsControllerTest` (200 + маппинг).
+
 ---
 
 ## ADR-9. Честная переоценка после architecture review

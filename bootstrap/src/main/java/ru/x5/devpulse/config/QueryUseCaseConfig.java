@@ -3,6 +3,7 @@ package ru.x5.devpulse.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import ru.x5.devpulse.application.port.in.GetCohortsUseCase;
 import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
 import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetDashboardUseCase;
@@ -21,6 +22,7 @@ import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
 import ru.x5.devpulse.application.port.out.ReviewStatsRepository;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
+import ru.x5.devpulse.application.service.GetCohortsService;
 import ru.x5.devpulse.application.service.GetCollectionRunService;
 import ru.x5.devpulse.application.service.GetDailyStatsService;
 import ru.x5.devpulse.application.service.GetDashboardService;
@@ -123,6 +125,16 @@ class QueryUseCaseConfig {
             UnifiedUserRepository unifiedUserRepository,
             @Value("${scoring.expected-commits-per-30-days:50}") double expectedCommitsPer30Days) {
         return new GetDashboardService(dailyStatsRepository, unifiedUserRepository,
+                expectedCommitsPer30Days);
+    }
+
+    /** Когорты/retention — лонгитюд по истории коммитов (tier-transitions через тот же scoring). */
+    @Bean
+    GetCohortsUseCase getCohortsUseCase(
+            DailyStatsRepository dailyStatsRepository,
+            UnifiedUserRepository unifiedUserRepository,
+            @Value("${scoring.expected-commits-per-30-days:50}") double expectedCommitsPer30Days) {
+        return new GetCohortsService(dailyStatsRepository, unifiedUserRepository,
                 expectedCommitsPer30Days);
     }
 }
