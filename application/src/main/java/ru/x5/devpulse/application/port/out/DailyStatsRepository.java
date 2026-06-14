@@ -1,8 +1,10 @@
 package ru.x5.devpulse.application.port.out;
 
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import ru.x5.devpulse.domain.common.Period;
+import ru.x5.devpulse.domain.model.cohort.MonthlyAuthorActivity;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.user.Email;
 
@@ -30,4 +32,14 @@ public interface DailyStatsRepository {
     List<DailyAuthorStats> findByPeriod(Period period);
 
     List<DailyAuthorStats> findByAuthorAndPeriod(Email email, Period period);
+
+    /**
+     * SQL-агрегат активности по {@code (email, месяц)} за окно — основа когортных вью.
+     * GROUP BY в БД, по строке на месяц с активностью (не тянем сырой daily в heap).
+     *
+     * @param from начало окна (включительно)
+     * @param to   конец окна (включительно)
+     * @param team фильтр по текущей команде ({@code unified_user.team}); {@code null} — без фильтра
+     */
+    List<MonthlyAuthorActivity> monthlyAuthorActivity(LocalDate from, LocalDate to, String team);
 }
