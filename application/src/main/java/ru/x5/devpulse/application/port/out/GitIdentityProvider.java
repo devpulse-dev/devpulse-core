@@ -4,8 +4,8 @@ import ru.x5.devpulse.domain.model.user.GitIdentity;
 import ru.x5.devpulse.domain.model.user.GitTokenType;
 
 /**
- * Port out: идентичность и доступы пользователя в GitLab. Реализация — {@code adapter-reviews}
- * поверх {@code GitlabHttpClient} (см. ADR-13).
+ * Port out: идентичность и доступы пользователя в GitLab. Реализация — {@code adapter-identity}
+ * поверх общего {@code GitlabHttpClient} из {@code adapter-gitlab} (см. ADR-13).
  */
 public interface GitIdentityProvider {
 

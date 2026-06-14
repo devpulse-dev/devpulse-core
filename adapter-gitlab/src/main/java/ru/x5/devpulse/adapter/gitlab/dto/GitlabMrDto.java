@@ -1,4 +1,4 @@
-package ru.x5.devpulse.adapter.reviews.dto;
+package ru.x5.devpulse.adapter.gitlab.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;

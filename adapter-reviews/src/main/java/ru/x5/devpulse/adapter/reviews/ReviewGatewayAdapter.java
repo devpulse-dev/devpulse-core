@@ -1,6 +1,5 @@
 package ru.x5.devpulse.adapter.reviews;
 
-import java.net.URI;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -23,10 +22,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabApprovalsDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabMrDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabNoteDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabUserDto;
+import ru.x5.devpulse.adapter.gitlab.GitRepoProperties;
+import ru.x5.devpulse.adapter.gitlab.GitlabHttpClient;
+import ru.x5.devpulse.adapter.gitlab.GitlabProjectPaths;
+import ru.x5.devpulse.adapter.gitlab.GitlabProperties;
+import ru.x5.devpulse.adapter.gitlab.GitlabRateLimiter;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabApprovalsDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabMrDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabNoteDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabUserDto;
 import ru.x5.devpulse.application.port.out.ReviewGateway;
 import ru.x5.devpulse.domain.model.review.CollectedMergeRequest;
 import ru.x5.devpulse.domain.model.review.MrReview;
@@ -57,7 +61,7 @@ class ReviewGatewayAdapter implements ReviewGateway {
 
     @Override
     public List<CollectedMergeRequest> fetchMergeRequests(LocalDateTime updatedAfter) {
-        List<String> projects = resolveProjectPaths();
+        List<String> projects = GitlabProjectPaths.resolve(properties, gitRepos);
         if (projects.isEmpty()) {
             log.warn("GitLab: не настроены проекты (gitlab.api.projects / git.repositories) — сбор ревью пропущен");
             return List.of();
@@ -93,32 +97,6 @@ class ReviewGatewayAdapter implements ReviewGateway {
         }
         log.info("GitLab: собрано {} MR с ревью по {} проектам", result.size(), projects.size());
         return result;
-    }
-
-    /* ----------------------------- проекты ----------------------------- */
-
-    private List<String> resolveProjectPaths() {
-        if (!properties.projects().isEmpty()) return properties.projects();
-        List<String> derived = new ArrayList<>();
-        for (String url : gitRepos.repositories()) {
-            String path = toProjectPath(url);
-            if (path != null) derived.add(path);
-        }
-        return derived;
-    }
-
-    /** {@code https://scm.x5.ru/gkr/xrg-core.git} → {@code gkr/xrg-core}. */
-    static String toProjectPath(String cloneUrl) {
-        if (cloneUrl == null || cloneUrl.isBlank()) return null;
-        try {
-            String path = URI.create(cloneUrl.trim()).getPath(); // /gkr/xrg-core.git
-            if (path == null) return null;
-            path = path.replaceFirst("^/", "").replaceFirst("\\.git$", "");
-            return path.isBlank() ? null : path;
-        } catch (Exception e) {
-            log.warn("GitLab: не распарсил repo URL '{}': {}", cloneUrl, e.getMessage());
-            return null;
-        }
     }
 
     /* ----------------------------- users ----------------------------- */

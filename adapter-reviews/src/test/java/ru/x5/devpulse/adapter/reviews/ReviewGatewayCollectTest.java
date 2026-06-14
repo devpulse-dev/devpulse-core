@@ -17,10 +17,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabApprovalsDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabMrDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabNoteDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabUserDto;
+import ru.x5.devpulse.adapter.gitlab.GitRepoProperties;
+import ru.x5.devpulse.adapter.gitlab.GitlabHttpClient;
+import ru.x5.devpulse.adapter.gitlab.GitlabProperties;
+import ru.x5.devpulse.adapter.gitlab.GitlabRateLimiter;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabApprovalsDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabMrDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabNoteDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabUserDto;
 import ru.x5.devpulse.domain.model.review.CollectedMergeRequest;
 import ru.x5.devpulse.domain.model.review.MrReview;
 

@@ -1,4 +1,4 @@
-package ru.x5.devpulse.adapter.reviews;
+package ru.x5.devpulse.adapter.gitlab;
 
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
@@ -20,7 +20,7 @@ import org.springframework.web.client.HttpServerErrorException;
 @Component
 @Log4j2
 @RequiredArgsConstructor
-class GitlabRateLimiter {
+public class GitlabRateLimiter {
 
     private final GitlabProperties properties;
 

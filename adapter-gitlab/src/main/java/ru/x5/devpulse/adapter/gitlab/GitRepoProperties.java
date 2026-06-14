@@ -1,4 +1,4 @@
-package ru.x5.devpulse.adapter.reviews;
+package ru.x5.devpulse.adapter.gitlab;
 
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;

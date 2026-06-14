@@ -1,14 +1,14 @@
-package ru.x5.devpulse.adapter.reviews;
+package ru.x5.devpulse.adapter.gitlab;
 
 import java.util.List;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabApprovalsDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabMrDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabNoteDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabUserDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabApprovalsDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabMrDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabNoteDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabUserDto;
 
 /**
  * Декларативный HTTP-клиент GitLab API v4 ({@code @HttpExchange}).

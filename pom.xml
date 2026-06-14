@@ -26,6 +26,7 @@
         <module>adapter-persistence</module>
         <module>adapter-git</module>
         <module>adapter-kaiten</module>
+        <module>adapter-gitlab</module>
         <module>adapter-reviews</module>
         <module>bootstrap</module>
     </modules>
@@ -82,6 +83,11 @@
             <dependency>
                 <groupId>ru.x5.devpulse</groupId>
                 <artifactId>adapter-kaiten</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ru.x5.devpulse</groupId>
+                <artifactId>adapter-gitlab</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
