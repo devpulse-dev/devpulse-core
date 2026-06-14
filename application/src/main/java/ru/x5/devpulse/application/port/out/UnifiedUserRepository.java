@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import ru.x5.devpulse.domain.model.user.Email;
+import ru.x5.devpulse.domain.model.user.GitIdentity;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
 
@@ -23,6 +24,16 @@ public interface UnifiedUserRepository {
      * к списку авторов в дашборде.</p>
      */
     List<UnifiedUser> findByEmails(Collection<Email> emails);
+
+    /**
+     * Провижининг при логине (см. ADR-13): upsert по email. Новому пользователю проставляет
+     * identity из GitLab ({@code username/gitlabId/name/avatar}); существующему — только линкует
+     * {@code gitlabId} (если был null), не трогая {@code name/avatar} — их ведёт Kaiten-sync.
+     * Идемпотентно; конкурентный первый логин разрешается перечитыванием.
+     *
+     * @return актуальная (после upsert) запись пользователя
+     */
+    UnifiedUser provision(GitIdentity identity);
 
     /**
      * Batch find-or-create по списку email.
