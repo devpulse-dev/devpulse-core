@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import ru.x5.devpulse.adapter.gitlab.GitRepoProperties;
 import ru.x5.devpulse.adapter.gitlab.GitlabHttpClient;
@@ -13,6 +15,7 @@ import ru.x5.devpulse.adapter.gitlab.GitlabProperties;
 import ru.x5.devpulse.adapter.gitlab.dto.GitlabCurrentUserDto;
 import ru.x5.devpulse.adapter.gitlab.dto.GitlabMemberDto;
 import ru.x5.devpulse.application.port.out.GitIdentityProvider;
+import ru.x5.devpulse.application.port.out.GitUnavailableException;
 import ru.x5.devpulse.application.port.out.InvalidGitTokenException;
 import ru.x5.devpulse.domain.model.user.Email;
 import ru.x5.devpulse.domain.model.user.GitIdentity;
@@ -51,6 +54,9 @@ class GitlabIdentityAdapter implements GitIdentityProvider {
                     .body(GitlabCurrentUserDto.class);
         } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
             throw new InvalidGitTokenException("GitLab отклонил токен: " + e.getStatusCode(), e);
+        } catch (ResourceAccessException | HttpServerErrorException e) {
+            // Сетевой сбой / 5xx — токен проверить не удалось (≠ невалидный токен).
+            throw new GitUnavailableException("GitLab недоступен — не удалось проверить токен", e);
         }
         if (dto == null || dto.id() == null) {
             throw new InvalidGitTokenException("GitLab /user вернул пустой ответ");

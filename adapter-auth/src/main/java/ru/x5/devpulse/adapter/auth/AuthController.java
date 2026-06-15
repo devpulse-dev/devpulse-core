@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ru.x5.devpulse.adapter.auth.dto.AuthMeResponse;
 import ru.x5.devpulse.adapter.auth.dto.LoginRequest;
 import ru.x5.devpulse.application.port.in.AuthenticateUseCase;
+import ru.x5.devpulse.application.port.out.GitUnavailableException;
 import ru.x5.devpulse.application.port.out.InvalidGitTokenException;
 import ru.x5.devpulse.application.port.out.ProjectAccessDeniedException;
 import ru.x5.devpulse.domain.model.user.AuthenticatedUser;
@@ -79,5 +80,10 @@ class AuthController {
     @ExceptionHandler(ProjectAccessDeniedException.class)
     ProblemDetail handleAccessDenied(ProjectAccessDeniedException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    @ExceptionHandler(GitUnavailableException.class)
+    ProblemDetail handleGitUnavailable(GitUnavailableException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 }
