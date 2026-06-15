@@ -1,12 +1,19 @@
 package ru.x5.devpulse.adapter.auth;
 
+import java.util.function.Supplier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
@@ -33,8 +40,16 @@ class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/login").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // RBAC (ADR-13). Контроллеры adapter-rest под префиксом /api/v2
+                        // (WebMvcConfig); auth-эндпоинты — нет (другой пакет). Гейтим только
+                        // аналитические разделы; операционное (collection) — любому аутентиф.
+                        .requestMatchers("/api/v2/cohorts/**").hasAnyRole("ADMIN", "TEAMLEAD")
+                        .requestMatchers("/api/v2/teams", "/api/v2/teams/**").hasAnyRole("ADMIN", "TEAMLEAD")
+                        .requestMatchers("/api/v2/users/*/team").hasAnyRole("ADMIN", "TEAMLEAD")
+                        .requestMatchers(HttpMethod.GET, "/api/v2/performance/review")
+                                .access(this::perfReviewSelfOrElevated)
                         .anyRequest().authenticated())
-                .csrf(csrf -> csrf.disable())
+                .csrf(AbstractHttpConfigurer::disable)
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .logout(logout -> logout
@@ -51,5 +66,27 @@ class SecurityConfig {
     @Bean
     SecurityContextRepository securityContextRepository() {
         return new HttpSessionSecurityContextRepository();
+    }
+
+    /**
+     * Perf-review: ADMIN/TEAMLEAD — по любому разработчику; MEMBER — только по себе
+     * ({@code ?email} == email из principal). См. ADR-13.
+     */
+    private AuthorizationDecision perfReviewSelfOrElevated(
+            Supplier<? extends Authentication> authentication, RequestAuthorizationContext context) {
+        Authentication auth = authentication.get();
+        if (auth == null || !auth.isAuthenticated()) {
+            return new AuthorizationDecision(false);
+        }
+        boolean elevated = auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(a -> a.equals("ROLE_ADMIN") || a.equals("ROLE_TEAMLEAD"));
+        if (elevated) {
+            return new AuthorizationDecision(true);
+        }
+        String requested = context.getRequest().getParameter("email");
+        String self = (auth.getPrincipal() instanceof DevpulsePrincipal p) ? p.email() : null;
+        boolean ownData = requested != null && self != null && requested.equalsIgnoreCase(self);
+        return new AuthorizationDecision(ownData);
     }
 }
