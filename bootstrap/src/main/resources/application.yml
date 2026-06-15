@@ -52,6 +52,15 @@ spring:
     default-schema: public
     liquibase-schema: public
 
+  # === Сессия (Spring Session JDBC, ADR-13) ===
+  session:
+    store-type: jdbc
+    # Rolling idle-timeout: 8ч без активности → сессия истекает.
+    timeout: 8h
+    jdbc:
+      # Схему ведёт Liquibase (миграция 029), не автогенератор Spring.
+      initialize-schema: never
+
 # === Git collection ===
 # repositories и token — задаются через env-переменные / профиль application-local.yml.
 # В этом файле НИКОГДА не должно быть реальных токенов или внутренних URL'ов:
@@ -137,6 +146,13 @@ auth:
 
 server:
   port: 8080
+  servlet:
+    session:
+      # SameSite=Lax — базовая CSRF-защита (кросс-сайтовый POST/fetch не несёт cookie).
+      # secure выставляется автоматически на https. CSRF-токены выключены (см. SecurityConfig).
+      cookie:
+        http-only: true
+        same-site: lax
 
 management:
   endpoints:

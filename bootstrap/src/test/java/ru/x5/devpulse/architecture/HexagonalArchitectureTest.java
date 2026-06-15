@@ -40,6 +40,7 @@ class HexagonalArchitectureTest {
     private static final String ADAPTER_KAITEN = ROOT + ".adapter.kaiten..";
     private static final String ADAPTER_REVIEWS = ROOT + ".adapter.reviews..";
     private static final String ADAPTER_IDENTITY = ROOT + ".adapter.identity..";
+    private static final String ADAPTER_AUTH = ROOT + ".adapter.auth..";
 
     /**
      * Composition root: {@code @SpringBootApplication} в корневом пакете + {@code .config..}
@@ -89,6 +90,7 @@ class HexagonalArchitectureTest {
                 .layer("adapter-kaiten").definedBy(ADAPTER_KAITEN)
                 .layer("adapter-reviews").definedBy(ADAPTER_REVIEWS)
                 .layer("adapter-identity").definedBy(ADAPTER_IDENTITY)
+                .layer("adapter-auth").definedBy(ADAPTER_AUTH)
                 .layer("bootstrap").definedBy(BOOTSTRAP)
 
                 .whereLayer("bootstrap").mayNotBeAccessedByAnyLayer()
@@ -98,18 +100,19 @@ class HexagonalArchitectureTest {
                 .whereLayer("adapter-kaiten").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-reviews").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-identity").mayOnlyBeAccessedByLayers("bootstrap")
+                .whereLayer("adapter-auth").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("application")
                         .mayOnlyBeAccessedByLayers(
                                 "bootstrap",
                                 "adapter-rest", "adapter-persistence",
                                 "adapter-git", "adapter-kaiten", "adapter-reviews",
-                                "adapter-identity")
+                                "adapter-identity", "adapter-auth")
                 .whereLayer("domain")
                         .mayOnlyBeAccessedByLayers(
                                 "bootstrap", "application",
                                 "adapter-rest", "adapter-persistence",
                                 "adapter-git", "adapter-kaiten", "adapter-reviews",
-                                "adapter-identity");
+                                "adapter-identity", "adapter-auth");
 
         rule.check(CLASSES);
     }
@@ -229,11 +232,11 @@ class HexagonalArchitectureTest {
     }
 
     @Test
-    @DisplayName("@RestController — только в adapter.rest")
+    @DisplayName("@RestController — только в adapter.rest или adapter.auth (auth-web вынесен отдельно)")
     void restControllersOnlyInRestAdapter() {
         classes()
                 .that().areAnnotatedWith("org.springframework.web.bind.annotation.RestController")
-                .should().resideInAPackage(ADAPTER_REST)
+                .should().resideInAnyPackage(ADAPTER_REST, ADAPTER_AUTH)
                 .allowEmptyShould(true)
                 .check(CLASSES);
     }

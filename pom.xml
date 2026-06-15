@@ -29,6 +29,7 @@
         <module>adapter-gitlab</module>
         <module>adapter-reviews</module>
         <module>adapter-identity</module>
+        <module>adapter-auth</module>
         <module>bootstrap</module>
     </modules>
 
@@ -99,6 +100,11 @@
             <dependency>
                 <groupId>ru.x5.devpulse</groupId>
                 <artifactId>adapter-identity</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ru.x5.devpulse</groupId>
+                <artifactId>adapter-auth</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
