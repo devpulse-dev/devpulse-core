@@ -32,7 +32,7 @@ import ru.x5.devpulse.domain.model.user.GitTokenType;
  * ({@link SecurityConfig}). OAuth2-вход — отдельным чанком.
  */
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/api/v2/auth")
 @RequiredArgsConstructor
 class AuthController {
 

@@ -40,7 +40,7 @@ class AuthControllerTest {
         when(authenticate.authenticate(eq("tok"), eq(GitTokenType.PAT))).thenReturn(
                 new AuthenticatedUser(new Email("boris@x5.ru"), Role.MEMBER, "Boris", null, "Platform"));
 
-        mvc.perform(post("/auth/login")
+        mvc.perform(post("/api/v2/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"tok\"}"))
                 .andExpect(status().isOk())
@@ -55,7 +55,7 @@ class AuthControllerTest {
         when(authenticate.authenticate(any(), any()))
                 .thenThrow(new InvalidGitTokenException("bad token"));
 
-        mvc.perform(post("/auth/login")
+        mvc.perform(post("/api/v2/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"bad\"}"))
                 .andExpect(status().isUnauthorized());
@@ -67,7 +67,7 @@ class AuthControllerTest {
         when(authenticate.authenticate(any(), any()))
                 .thenThrow(new ProjectAccessDeniedException("no access"));
 
-        mvc.perform(post("/auth/login")
+        mvc.perform(post("/api/v2/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"x\"}"))
                 .andExpect(status().isForbidden());
@@ -76,7 +76,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("GET /auth/me без сессии → 401")
     void meUnauthenticated() throws Exception {
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/auth/me"))
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v2/auth/me"))
                 .andExpect(status().isUnauthorized());
     }
 }
