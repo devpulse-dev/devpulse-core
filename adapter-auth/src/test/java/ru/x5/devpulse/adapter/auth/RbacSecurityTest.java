@@ -3,6 +3,7 @@ package ru.x5.devpulse.adapter.auth;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
@@ -44,11 +45,15 @@ class RbacSecurityTest {
     }
 
     @Test
-    @DisplayName("MEMBER → /teams → 403; TEAMLEAD → проходит")
-    void teamsElevatedOnly() throws Exception {
+    @DisplayName("GET /teams — список всем (глобальный фильтр); запись (PUT /teams/lead) — elevated")
+    void teamsListOpenWritesGated() throws Exception {
+        // Список команд нужен и мемберу для топбар-фильтра → authz пройден (404 без handler).
         mvc.perform(get("/api/v2/teams").with(user("m").roles("MEMBER")))
+                .andExpect(status().isNotFound());
+        // Назначение лида — только ADMIN/TEAMLEAD (CSRF выключен → без токена).
+        mvc.perform(put("/api/v2/teams/lead").with(user("m").roles("MEMBER")))
                 .andExpect(status().isForbidden());
-        mvc.perform(get("/api/v2/teams").with(user("l").roles("TEAMLEAD")))
+        mvc.perform(put("/api/v2/teams/lead").with(user("l").roles("TEAMLEAD")))
                 .andExpect(status().isNotFound());
     }
 

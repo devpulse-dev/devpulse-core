@@ -44,7 +44,12 @@ class SecurityConfig {
                         // (WebMvcConfig); auth-эндпоинты — нет (другой пакет). Гейтим только
                         // аналитические разделы; операционное (collection) — любому аутентиф.
                         .requestMatchers("/api/v2/cohorts/**").hasAnyRole("ADMIN", "TEAMLEAD")
-                        .requestMatchers("/api/v2/teams", "/api/v2/teams/**").hasAnyRole("ADMIN", "TEAMLEAD")
+                        // GET /teams — список команд для ГЛОБАЛЬНОГО фильтра в топбаре —
+                        // доступен всем аутентифицированным (фильтр на открытых страницах).
+                        // Управление (назначение лида/команды) — только elevated.
+                        .requestMatchers(HttpMethod.PUT, "/api/v2/teams/**").hasAnyRole("ADMIN", "TEAMLEAD")
+                        .requestMatchers(HttpMethod.POST, "/api/v2/teams/**").hasAnyRole("ADMIN", "TEAMLEAD")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v2/teams/**").hasAnyRole("ADMIN", "TEAMLEAD")
                         .requestMatchers("/api/v2/users/*/team").hasAnyRole("ADMIN", "TEAMLEAD")
                         .requestMatchers(HttpMethod.GET, "/api/v2/performance/review")
                                 .access(this::perfReviewSelfOrElevated)
