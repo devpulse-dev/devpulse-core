@@ -1,5 +1,6 @@
 package ru.x5.devpulse.adapter.auth;
 
+import java.io.Serializable;
 import java.security.Principal;
 import java.util.Collection;
 import java.util.List;
@@ -21,7 +22,7 @@ public record DevpulsePrincipal(
         String name,
         String avatarUrl,
         String team
-) implements Principal, OAuth2User {
+) implements Principal, OAuth2User, Serializable {
 
     @Override
     public String getName() {

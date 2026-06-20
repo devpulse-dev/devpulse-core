@@ -17,8 +17,6 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
-import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
-import org.springframework.security.web.context.SecurityContextRepository;
 
 /**
  * Security-цепочка аутентификации (ADR-13).
@@ -40,7 +38,7 @@ class SecurityConfig {
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             ObjectProvider<ClientRegistrationRepository> clientRegistrations,
-            GitlabOAuth2UserService oauth2UserService) throws Exception {
+            ObjectProvider<GitlabOAuth2UserService> oauth2UserService) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v2/auth/login", "/api/v2/auth/config").permitAll()
@@ -63,13 +61,10 @@ class SecurityConfig {
                                 .access(this::perfReviewSelfOrElevated)
                         .anyRequest().authenticated())
                 .csrf(AbstractHttpConfigurer::disable)
+                // logout обрабатывает AuthController (контракт AuthApi) — дефолтный фильтр не нужен.
+                .logout(AbstractHttpConfigurer::disable)
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
-                .logout(logout -> logout
-                        .logoutUrl("/api/v2/auth/logout")
-                        .logoutSuccessHandler((request, response, authentication) ->
-                                response.setStatus(HttpStatus.NO_CONTENT.value()))
-                        .deleteCookies("SESSION"))
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED));
 
@@ -78,18 +73,12 @@ class SecurityConfig {
         // а /auth/config отдаёт oauthEnabled=false (фронт не покажет кнопку).
         if (clientRegistrations.getIfAvailable() != null) {
             http.oauth2Login(oauth -> oauth
-                    .userInfoEndpoint(userInfo -> userInfo.userService(oauth2UserService))
+                    .userInfoEndpoint(userInfo -> userInfo.userService(oauth2UserService.getObject()))
                     // На SPA: после входа/ошибки — относительные пути приложения.
                     .defaultSuccessUrl("/", true)
                     .failureUrl("/login?error=oauth"));
         }
         return http.build();
-    }
-
-    /** Явный репозиторий контекста — {@code AuthController} вручную сохраняет сессию после PAT-логина. */
-    @Bean
-    SecurityContextRepository securityContextRepository() {
-        return new HttpSessionSecurityContextRepository();
     }
 
     /**

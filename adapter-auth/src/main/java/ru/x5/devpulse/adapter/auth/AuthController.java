@@ -1,26 +1,26 @@
 package ru.x5.devpulse.adapter.auth;
 
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
-import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import ru.x5.devpulse.adapter.auth.dto.AuthConfigResponse;
-import ru.x5.devpulse.adapter.auth.dto.AuthMeResponse;
-import ru.x5.devpulse.adapter.auth.dto.LoginRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import ru.x5.devpulse.adapter.auth.api.AuthApi;
+import ru.x5.devpulse.adapter.auth.api.model.AuthConfigResponse;
+import ru.x5.devpulse.adapter.auth.api.model.AuthMeResponse;
+import ru.x5.devpulse.adapter.auth.api.model.LoginRequest;
+import ru.x5.devpulse.adapter.auth.api.model.Role;
 import ru.x5.devpulse.application.port.in.AuthenticateUseCase;
 import ru.x5.devpulse.application.port.out.GitUnavailableException;
 import ru.x5.devpulse.application.port.out.InvalidGitTokenException;
@@ -29,54 +29,87 @@ import ru.x5.devpulse.domain.model.user.AuthenticatedUser;
 import ru.x5.devpulse.domain.model.user.GitTokenType;
 
 /**
- * Эндпоинты аутентификации (ADR-13). PAT-вход: валидирует токен, провижинит, поднимает
- * SecurityContext и сохраняет его в сессию. {@code /auth/logout} обрабатывает security-цепочка
- * ({@link SecurityConfig}). OAuth2-вход — отдельным чанком.
+ * Аутентификация (ADR-13). Реализует сгенерированный из {@code auth-api.yaml} {@link AuthApi}
+ * (контракт — источник истины). Пути {@code /auth/*} получают префикс {@code /api/v2} от
+ * {@code WebMvcConfig} (предикат расширен на пакет {@code adapter.auth}).
+ *
+ * <p>Сессию поднимаем сами: интерфейс {@code AuthApi} не даёт {@code HttpServletResponse},
+ * поэтому пишем {@code SecurityContext} прямо в HTTP-сессию тем же ключом, что читает
+ * {@link HttpSessionSecurityContextRepository} на последующих запросах. OAuth2-вход — через
+ * {@code GitlabOAuth2UserService} (см. SecurityConfig).</p>
  */
 @RestController
-@RequestMapping("/api/v2/auth")
 @RequiredArgsConstructor
-class AuthController {
+class AuthController implements AuthApi {
 
     private final AuthenticateUseCase authenticate;
-    private final SecurityContextRepository securityContextRepository;
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrations;
 
-    @GetMapping("/config")
-    AuthConfigResponse config() {
-        // OAuth доступен, если настроена регистрация клиента (см. SecurityConfig).
-        return new AuthConfigResponse(clientRegistrations.getIfAvailable() != null);
-    }
-
-    @PostMapping("/login")
-    AuthMeResponse login(@RequestBody LoginRequest body,
-                         HttpServletRequest request, HttpServletResponse response) {
-        if (body == null || body.token() == null || body.token().isBlank()) {
+    @Override
+    public ResponseEntity<AuthMeResponse> loginWithToken(LoginRequest loginRequest) {
+        if (loginRequest == null || loginRequest.getToken() == null || loginRequest.getToken().isBlank()) {
             throw new IllegalArgumentException("token обязателен");
         }
-        AuthenticatedUser user = authenticate.authenticate(body.token().trim(), GitTokenType.PAT);
-        establishSession(user, request, response);
-        return AuthMeResponse.from(user);
+        AuthenticatedUser user = authenticate.authenticate(loginRequest.getToken().trim(), GitTokenType.PAT);
+        establishSession(user);
+        return ResponseEntity.ok(toDto(user));
     }
 
-    @GetMapping("/me")
-    AuthMeResponse me(@AuthenticationPrincipal DevpulsePrincipal principal) {
-        return new AuthMeResponse(principal.email(), principal.role().name(),
-                principal.name(), principal.avatarUrl(), principal.team());
+    @Override
+    public ResponseEntity<AuthMeResponse> getAuthMe() {
+        DevpulsePrincipal principal = currentPrincipal();
+        return ResponseEntity.ok(new AuthMeResponse()
+                .email(principal.email())
+                .role(Role.fromValue(principal.role().name()))
+                .name(principal.name())
+                .avatarUrl(principal.avatarUrl())
+                .team(principal.team()));
     }
 
-    /** Поднимаем SecurityContext по результату логина и сохраняем в сессию (Spring Session JDBC). */
-    private void establishSession(AuthenticatedUser user,
-                                  HttpServletRequest request, HttpServletResponse response) {
+    @Override
+    public ResponseEntity<Void> logout() {
+        HttpSession session = currentRequest().getSession(false);
+        if (session != null) {
+            session.invalidate();
+        }
+        SecurityContextHolder.clearContext();
+        return ResponseEntity.noContent().build();
+    }
+
+    @Override
+    public ResponseEntity<AuthConfigResponse> getAuthConfig() {
+        // OAuth доступен, если настроена регистрация клиента (см. SecurityConfig).
+        return ResponseEntity.ok(
+                new AuthConfigResponse().oauthEnabled(clientRegistrations.getIfAvailable() != null));
+    }
+
+    private static AuthMeResponse toDto(AuthenticatedUser user) {
+        return new AuthMeResponse()
+                .email(user.email().value())
+                .role(Role.fromValue(user.role().name()))
+                .name(user.name())
+                .avatarUrl(user.avatarUrl())
+                .team(user.team());
+    }
+
+    private void establishSession(AuthenticatedUser user) {
         var principal = new DevpulsePrincipal(
                 user.email().value(), user.role(), user.name(), user.avatarUrl(), user.team());
         var authentication = UsernamePasswordAuthenticationToken.authenticated(
                 principal, null, principal.getAuthorities());
-
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(authentication);
         SecurityContextHolder.setContext(context);
-        securityContextRepository.saveContext(context, request, response);
+        currentRequest().getSession(true).setAttribute(
+                HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
+    }
+
+    private static DevpulsePrincipal currentPrincipal() {
+        return (DevpulsePrincipal) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+    }
+
+    private static HttpServletRequest currentRequest() {
+        return ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
     }
 
     @ExceptionHandler(InvalidGitTokenException.class)

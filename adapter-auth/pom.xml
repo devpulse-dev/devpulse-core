@@ -13,11 +13,31 @@
     <artifactId>adapter-auth</artifactId>
     <name>DevPulse — Auth in-adapter</name>
     <description>
-        Inbound web/security слой аутентификации (ADR-13): SecurityFilterChain + AuthController
-        (/auth/login PAT, /auth/me, /auth/logout). Выделен отдельно от adapter-rest, чтобы
-        security-autoconfiguration не закрывала @WebMvcTest-слайсы контроллеров. Сессия
-        (Spring Session JDBC) подключается в bootstrap.
+        Inbound web/security слой аутентификации (ADR-13): SecurityFilterChain + AuthController,
+        реализующий сгенерированный из auth-api.yaml AuthApi (контракт — источник истины).
+        Выделен отдельно от adapter-rest, чтобы security-autoconfiguration не закрывала
+        @WebMvcTest-слайсы контроллеров. Сессия (Spring Session JDBC) подключается в bootstrap.
     </description>
+
+    <properties>
+        <!-- В lockstep с остальным бэком; auth-contract существует с OAS 3.3.0. -->
+        <devpulse-oas.version>3.3.0</devpulse-oas.version>
+        <openapi-generator.version>7.10.0</openapi-generator.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/devpulse-dev/devpulse-oas</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
 
     <dependencies>
         <dependency>
@@ -28,6 +48,10 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -42,6 +66,27 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <!-- Required by openapi-generator output: io.swagger.v3.oas.annotations.* -->
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations</artifactId>
+            <version>2.2.25</version>
+        </dependency>
+
+        <!-- Контракты (provided): yaml распаковывается и из него генерится AuthApi + DTO. -->
+        <dependency>
+            <groupId>com.devpulse</groupId>
+            <artifactId>shared-contract</artifactId>
+            <version>${devpulse-oas.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.devpulse</groupId>
+            <artifactId>auth-contract</artifactId>
+            <version>${devpulse-oas.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>
@@ -66,6 +111,92 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+
+            <!-- target/generated-sources/openapi/... как source root (одинаково для всех IDE). -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>add-openapi-generated-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals><goal>add-source</goal></goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/openapi/src/main/java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Распаковываем shared.yaml + auth-api.yaml в одну папку — чтобы $ref на shared резолвился. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>unpack-openapi-specs</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>unpack-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeGroupIds>com.devpulse</includeGroupIds>
+                            <includeArtifactIds>shared-contract,auth-contract</includeArtifactIds>
+                            <includes>*.yaml</includes>
+                            <outputDirectory>${project.build.directory}/openapi-spec</outputDirectory>
+                            <overWriteSnapshots>true</overWriteSnapshots>
+                            <overWriteReleases>true</overWriteReleases>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Генерим AuthApi + DTO (referenced shared-модели генерятся в тот же modelPackage). -->
+            <plugin>
+                <groupId>org.openapitools</groupId>
+                <artifactId>openapi-generator-maven-plugin</artifactId>
+                <version>${openapi-generator.version}</version>
+                <executions>
+                    <execution>
+                        <id>generate-auth-api</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <inputSpec>${project.build.directory}/openapi-spec/auth-api.yaml</inputSpec>
+                        </configuration>
+                    </execution>
+                </executions>
+
+                <configuration>
+                    <generatorName>spring</generatorName>
+                    <library>spring-boot</library>
+                    <apiPackage>ru.x5.devpulse.adapter.auth.api</apiPackage>
+                    <modelPackage>ru.x5.devpulse.adapter.auth.api.model</modelPackage>
+                    <invokerPackage>ru.x5.devpulse.adapter.auth.api</invokerPackage>
+                    <generateApiTests>false</generateApiTests>
+                    <generateApiDocumentation>false</generateApiDocumentation>
+                    <generateModelTests>false</generateModelTests>
+                    <generateModelDocumentation>false</generateModelDocumentation>
+                    <generateSupportingFiles>false</generateSupportingFiles>
+                    <configOptions>
+                        <interfaceOnly>true</interfaceOnly>
+                        <useSpringBoot3>true</useSpringBoot3>
+                        <useJakartaEe>true</useJakartaEe>
+                        <useTags>true</useTags>
+                        <useResponseEntity>true</useResponseEntity>
+                        <dateLibrary>java8-localdatetime</dateLibrary>
+                        <openApiNullable>false</openApiNullable>
+                        <serializationLibrary>jackson</serializationLibrary>
+                        <skipDefaultInterface>true</skipDefaultInterface>
+                        <useBeanValidation>true</useBeanValidation>
+                    </configOptions>
+                </configuration>
             </plugin>
         </plugins>
     </build>

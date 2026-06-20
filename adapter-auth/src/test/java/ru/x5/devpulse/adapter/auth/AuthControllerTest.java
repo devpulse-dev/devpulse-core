@@ -24,7 +24,7 @@ import ru.x5.devpulse.domain.model.user.GitTokenType;
 import ru.x5.devpulse.domain.model.user.Role;
 
 @WebMvcTest(AuthController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, AuthApiPrefixTestConfig.class})
 @DisplayName("AuthController — PAT-логин")
 class AuthControllerTest {
 
