@@ -41,3 +41,18 @@ gitlab:
     email-domain: x5.ru
     # scm.x5.ru за внутренним X5 CA — как и Kaiten.
     insecure-ssl: true
+
+# === OAuth2-вход через GitLab (ADR-13) ===
+# Раскомментируй и подставь реальные client-id/secret из OAuth-приложения GitLab
+# (scm.x5.ru → Settings → Applications; Redirect URI:
+# http://localhost:8080/login/oauth2/code/gitlab, scope: read_user). Этот блок
+# переопределит дефолтные "default" из application.yml (которые нужны лишь чтобы
+# не ронять старт в CI без env).
+#spring:
+#  security:
+#    oauth2:
+#      client:
+#        registration:
+#          gitlab:
+#            client-id: PASTE_OAUTH_CLIENT_ID_HERE
+#            client-secret: PASTE_OAUTH_CLIENT_SECRET_HERE

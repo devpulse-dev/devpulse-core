@@ -61,20 +61,22 @@ spring:
       # Схему ведёт Liquibase (миграция 029), не автогенератор Spring.
       initialize-schema: never
 
-  # === OAuth2-вход через GitLab (ADR-13, опционально) ===
-  # Активируется ТОЛЬКО когда задан client-id (Spring ClientsConfiguredCondition игнорирует
-  # пустой). Без него контекст грузится в PAT-only режиме, а /auth/config отдаёт
-  # oauthEnabled=false → фронт не показывает кнопку «Войти через GitLab».
+  # === OAuth2-вход через GitLab (ADR-13) ===
+  # Реальные client-id/secret — в application-local.yml (профиль local, gitignore), как
+  # git/kaiten-токены. Дефолт "default" (НЕ пустой) — намеренно: пустой client-id ронял бы
+  # OAuth2ClientProperties.validate() на старте (CI/тесты без env). С дефолтом контекст грузится.
+  # Примечание: при дефолте регистрация формально активна → /auth/config: oauthEnabled=true,
+  # кнопка OAuth видна, но вход сработает только с реальным client-id из application-local.yml.
   security:
     oauth2:
       client:
         registration:
           gitlab:
             provider: gitlab
-            client-id: ${GITLAB_OAUTH_CLIENT_ID:}
-            client-secret: ${GITLAB_OAUTH_CLIENT_SECRET:}
+            client-id: ${GITLAB_OAUTH_CLIENT_ID:default}
+            client-secret: ${GITLAB_OAUTH_CLIENT_SECRET:default}
             authorization-grant-type: authorization_code
-            # read_user достаточно для GET /user; членство в проектах проверяется сервисным токеном.
+            # read_user достаточно для GET /user; членство в проектах — сервисным токеном.
             scope: read_user
             redirect-uri: "{baseUrl}/login/oauth2/code/gitlab"
             client-name: GitLab
