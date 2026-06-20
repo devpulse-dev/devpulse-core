@@ -2,15 +2,15 @@ package ru.x5.devpulse.adapter.auth;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import ru.x5.devpulse.adapter.auth.dto.AuthConfigResponse;
 import ru.x5.devpulse.adapter.auth.dto.AuthMeResponse;
 import ru.x5.devpulse.adapter.auth.dto.LoginRequest;
 import ru.x5.devpulse.application.port.in.AuthenticateUseCase;
@@ -39,6 +40,13 @@ class AuthController {
 
     private final AuthenticateUseCase authenticate;
     private final SecurityContextRepository securityContextRepository;
+    private final ObjectProvider<ClientRegistrationRepository> clientRegistrations;
+
+    @GetMapping("/config")
+    AuthConfigResponse config() {
+        // OAuth доступен, если настроена регистрация клиента (см. SecurityConfig).
+        return new AuthConfigResponse(clientRegistrations.getIfAvailable() != null);
+    }
 
     @PostMapping("/login")
     AuthMeResponse login(@RequestBody LoginRequest body,
@@ -62,9 +70,8 @@ class AuthController {
                                   HttpServletRequest request, HttpServletResponse response) {
         var principal = new DevpulsePrincipal(
                 user.email().value(), user.role(), user.name(), user.avatarUrl(), user.team());
-        var authority = new SimpleGrantedAuthority("ROLE_" + user.role().name());
         var authentication = UsernamePasswordAuthenticationToken.authenticated(
-                principal, null, List.of(authority));
+                principal, null, principal.getAuthorities());
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(authentication);

@@ -61,6 +61,30 @@ spring:
       # Схему ведёт Liquibase (миграция 029), не автогенератор Spring.
       initialize-schema: never
 
+  # === OAuth2-вход через GitLab (ADR-13, опционально) ===
+  # Активируется ТОЛЬКО когда задан client-id (Spring ClientsConfiguredCondition игнорирует
+  # пустой). Без него контекст грузится в PAT-only режиме, а /auth/config отдаёт
+  # oauthEnabled=false → фронт не показывает кнопку «Войти через GitLab».
+  security:
+    oauth2:
+      client:
+        registration:
+          gitlab:
+            provider: gitlab
+            client-id: ${GITLAB_OAUTH_CLIENT_ID:}
+            client-secret: ${GITLAB_OAUTH_CLIENT_SECRET:}
+            authorization-grant-type: authorization_code
+            # read_user достаточно для GET /user; членство в проектах проверяется сервисным токеном.
+            scope: read_user
+            redirect-uri: "{baseUrl}/login/oauth2/code/gitlab"
+            client-name: GitLab
+        provider:
+          gitlab:
+            authorization-uri: ${GITLAB_OAUTH_AUTHORIZE_URI:https://scm.x5.ru/oauth/authorize}
+            token-uri: ${GITLAB_OAUTH_TOKEN_URI:https://scm.x5.ru/oauth/token}
+            user-info-uri: ${GITLAB_OAUTH_USERINFO_URI:https://scm.x5.ru/api/v4/user}
+            user-name-attribute: username
+
 # === Git collection ===
 # repositories и token — задаются через env-переменные / профиль application-local.yml.
 # В этом файле НИКОГДА не должно быть реальных токенов или внутренних URL'ов:
@@ -146,6 +170,9 @@ auth:
 
 server:
   port: 8080
+  # За reverse-proxy/gateway (и vite-proxy в dev с xfwd) — чтобы {baseUrl} в OAuth
+  # redirect-uri резолвился в публичный origin, а не во внутренний host:port.
+  forward-headers-strategy: framework
   servlet:
     session:
       # SameSite=Lax — базовая CSRF-защита (кросс-сайтовый POST/fetch не несёт cookie).

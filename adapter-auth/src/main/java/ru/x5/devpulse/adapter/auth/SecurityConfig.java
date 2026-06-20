@@ -1,6 +1,7 @@
 package ru.x5.devpulse.adapter.auth;
 
 import java.util.function.Supplier;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -12,6 +13,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
@@ -35,10 +37,16 @@ import org.springframework.security.web.context.SecurityContextRepository;
 class SecurityConfig {
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            ObjectProvider<ClientRegistrationRepository> clientRegistrations,
+            GitlabOAuth2UserService oauth2UserService) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v2/auth/login").permitAll()
+                        .requestMatchers("/api/v2/auth/login", "/api/v2/auth/config").permitAll()
+                        // OAuth2-вход: эндпоинты Spring Security (старт авторизации + callback),
+                        // на корне (не /api/v2). Доступны без сессии.
+                        .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // RBAC (ADR-13). Контроллеры adapter-rest под префиксом /api/v2
                         // (WebMvcConfig); auth-эндпоинты — нет (другой пакет). Гейтим только
@@ -64,6 +72,17 @@ class SecurityConfig {
                         .deleteCookies("SESSION"))
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED));
+
+        // OAuth2-вход подключаем ТОЛЬКО если настроена регистрация (GITLAB_OAUTH_CLIENT_ID).
+        // Иначе ClientRegistrationRepository-бина нет → контекст грузится без OAuth (PAT-only),
+        // а /auth/config отдаёт oauthEnabled=false (фронт не покажет кнопку).
+        if (clientRegistrations.getIfAvailable() != null) {
+            http.oauth2Login(oauth -> oauth
+                    .userInfoEndpoint(userInfo -> userInfo.userService(oauth2UserService))
+                    // На SPA: после входа/ошибки — относительные пути приложения.
+                    .defaultSuccessUrl("/", true)
+                    .failureUrl("/login?error=oauth"));
+        }
         return http.build();
     }
 
