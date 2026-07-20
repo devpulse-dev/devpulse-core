@@ -3,6 +3,7 @@ package ru.x5.devpulse.application.service;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import ru.x5.devpulse.application.port.in.CancellationSignal;
 import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
 import ru.x5.devpulse.application.port.out.ReviewGateway;
 import ru.x5.devpulse.application.port.out.ReviewWriteRepository;
@@ -28,10 +29,10 @@ public final class CollectReviewsService implements CollectReviewsUseCase {
     private final ReviewWriteRepository reviewWriteRepository;
 
     @Override
-    public void collect(LocalDateTime since) {
+    public void collect(LocalDateTime since, CancellationSignal cancel) {
         log.info("Старт сбора ревью-метрик из GitLab (updated_after={})", since);
         int[] total = {0};
-        reviewGateway.streamMergeRequests(since, batch -> {
+        reviewGateway.streamMergeRequests(since, cancel::cancelled, batch -> {
             if (batch.isEmpty()) {
                 return;
             }

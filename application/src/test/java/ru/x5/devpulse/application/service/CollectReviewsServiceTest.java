@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import ru.x5.devpulse.application.port.in.CancellationSignal;
 import ru.x5.devpulse.application.port.out.ReviewGateway;
 import ru.x5.devpulse.application.port.out.ReviewWriteRepository;
 import ru.x5.devpulse.domain.model.review.CollectedMergeRequest;
@@ -35,14 +36,15 @@ class CollectReviewsServiceTest {
         var mr = new CollectedMergeRequest(
                 42L, 7L, new Email("boris@x5.ru"), "fix", "https://scm/mr/7", "merged",
                 SINCE, SINCE.plusHours(4), "dev", List.of());
-        // gateway стримит один project-batch в handler (per-project коллбэк)
+        // gateway стримит один project-batch в handler (handler — 3-й аргумент: since, cancelled, handler)
         doAnswer(inv -> {
-            Consumer<List<CollectedMergeRequest>> handler = inv.getArgument(1);
+            Consumer<List<CollectedMergeRequest>> handler = inv.getArgument(2);
             handler.accept(List.of(mr));
             return null;
-        }).when(reviewGateway).streamMergeRequests(eq(SINCE), any());
+        }).when(reviewGateway).streamMergeRequests(eq(SINCE), any(), any());
 
-        new CollectReviewsService(reviewGateway, reviewWriteRepository).collect(SINCE);
+        new CollectReviewsService(reviewGateway, reviewWriteRepository)
+                .collect(SINCE, CancellationSignal.NEVER);
 
         verify(reviewWriteRepository).upsert(List.of(mr));
     }
@@ -50,14 +52,14 @@ class CollectReviewsServiceTest {
     @Test
     @DisplayName("Пустой батч ⇒ upsert не зовём")
     void emptyBatchSkipsWrite() {
-        // gateway отдаёт пустой batch — писать нечего
         doAnswer(inv -> {
-            Consumer<List<CollectedMergeRequest>> handler = inv.getArgument(1);
+            Consumer<List<CollectedMergeRequest>> handler = inv.getArgument(2);
             handler.accept(List.of());
             return null;
-        }).when(reviewGateway).streamMergeRequests(eq(SINCE), any());
+        }).when(reviewGateway).streamMergeRequests(eq(SINCE), any(), any());
 
-        new CollectReviewsService(reviewGateway, reviewWriteRepository).collect(SINCE);
+        new CollectReviewsService(reviewGateway, reviewWriteRepository)
+                .collect(SINCE, CancellationSignal.NEVER);
 
         verify(reviewWriteRepository, never()).upsert(any());
         verifyNoInteractions(reviewWriteRepository);

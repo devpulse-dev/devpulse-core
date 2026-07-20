@@ -76,7 +76,7 @@ class ReviewGatewayCollectTest {
                 new GitlabNoteDto(3L, ALICE_SIMPLE, true)));
 
         List<CollectedMergeRequest> result = new ArrayList<>();
-        adapter().streamMergeRequests(LocalDateTime.of(2026, 5, 1, 0, 0), result::addAll);
+        adapter().streamMergeRequests(LocalDateTime.of(2026, 5, 1, 0, 0), () -> false, result::addAll);
 
         assertThat(result).hasSize(1);
         CollectedMergeRequest c = result.getFirst();
@@ -119,7 +119,7 @@ class ReviewGatewayCollectTest {
         when(http.getApprovals("grp/repo", 8L)).thenThrow(new RuntimeException("GitLab 500"));
 
         List<CollectedMergeRequest> result = new ArrayList<>();
-        adapter().streamMergeRequests(LocalDateTime.of(2026, 5, 1, 0, 0), result::addAll);
+        adapter().streamMergeRequests(LocalDateTime.of(2026, 5, 1, 0, 0), () -> false, result::addAll);
 
         assertAll("частичный сбор устойчив к падению одного MR",
                 () -> assertThat(result).as("good собран, bad потерян — не весь батч").hasSize(1),

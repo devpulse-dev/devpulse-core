@@ -2,6 +2,7 @@ package ru.x5.devpulse.application.port.out;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import ru.x5.devpulse.domain.model.review.CollectedMergeRequest;
 
@@ -26,6 +27,12 @@ public interface ReviewGateway {
      *
      * <p>Устойчивость к сбоям — на адаптере: падение/дедлайн одного проекта не срывает остальные
      * (потери логируются агрегатно), обработчику отдаётся то, что удалось собрать.</p>
+     *
+     * @param cancelled опрашивается между проектами; при отмене адаптер прекращает опрашивать
+     *                  новые проекты и возвращает управление. {@code BooleanSupplier} (а не
+     *                  {@code CancellationSignal} из port.in), чтобы port.out не зависел от port.in
      */
-    void streamMergeRequests(LocalDateTime updatedAfter, Consumer<List<CollectedMergeRequest>> projectBatchHandler);
+    void streamMergeRequests(LocalDateTime updatedAfter,
+                             BooleanSupplier cancelled,
+                             Consumer<List<CollectedMergeRequest>> projectBatchHandler);
 }

@@ -18,6 +18,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -70,6 +71,7 @@ class ReviewGatewayAdapter implements ReviewGateway {
 
     @Override
     public void streamMergeRequests(LocalDateTime updatedAfter,
+                                    BooleanSupplier cancelled,
                                     Consumer<List<CollectedMergeRequest>> projectBatchHandler) {
         List<String> projects = GitlabProjectPaths.resolve(properties, gitRepos);
         if (projects.isEmpty()) {
@@ -98,6 +100,12 @@ class ReviewGatewayAdapter implements ReviewGateway {
 
         int grandTotal = 0;
         for (String project : projects) {
+            // Checkpoint отмены: между проектами (симметрично git между репо). Прекращаем опрашивать
+            // новые проекты; собранное уже отдано на запись. Оркестратор зафиксирует CANCELLED.
+            if (cancelled.getAsBoolean()) {
+                log.info("GitLab: отмена — прекращаю сбор ревью перед проектом {}", project);
+                break;
+            }
             try {
                 // Стриминг per-project: собрали проект → отдали батч на запись → освободили heap.
                 // Весь корпус MR всех проектов в памяти не копится (бэкфилл за год = OOM-риск).

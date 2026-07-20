@@ -76,7 +76,18 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
                 throw new CollectionCancelledException(
                         "Сбор отменён перед репозиторием " + repo.value());
             }
-            allAffected.addAll(collectOneRepo(repo, since, until, period));
+            try {
+                allAffected.addAll(collectOneRepo(repo, since, until, period, cancel));
+            } catch (RuntimeException e) {
+                // git теперь interrupt-aware: отмена могла убить процесс ВНУТРИ репо. Отличаем нашу
+                // отмену от реального git-сбоя — при cancel это не ошибка (deleteZombies не выполнялся,
+                // частичных данных нет: streamCommits прервался до sweep'а).
+                if (cancel.cancelled()) {
+                    throw new CollectionCancelledException(
+                            "Сбор отменён во время репозитория " + repo.value());
+                }
+                throw e;
+            }
         }
 
         // Один recompute на весь прогон: daily_stats для затронутых авторов пересобираются ровно
@@ -95,7 +106,8 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
     private Set<Email> collectOneRepo(RepoName repo,
                                       LocalDateTime since,
                                       LocalDateTime until,
-                                      Period period) {
+                                      Period period,
+                                      CancellationSignal cancel) {
         log.info("Стримим коммиты из {}", repo.value());
 
         // Метка сбора: всё, что увидено в этом прогоне (insert либо markSeen), получит
@@ -108,7 +120,7 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
                 if (c.authorEmail() != null) repoAffected.add(c.authorEmail());
             }
             persistCommitBatch(batch, runMark);
-        });
+        }, cancel::cancelled);
 
         // Sweep rebase/force-push зомби этого репо. Своя tx (deleteZombies @Transactional).
         // recompute сюда НЕ входит — он вынесен в collect(), один на весь прогон (P0-3 / ADR-10).

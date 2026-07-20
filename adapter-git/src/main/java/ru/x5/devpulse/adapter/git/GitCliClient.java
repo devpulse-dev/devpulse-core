@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -68,6 +69,13 @@ public class GitCliClient {
      */
     private static final long DESTROY_GRACE_SECONDS = 5;
 
+    /**
+     * Интервал опроса статуса git-процесса. На каждом тике проверяется кооперативная отмена —
+     * так git можно убить ВНУТРИ репозитория (не дожидаясь конца команды или {@code commandTimeout}).
+     * {@code cancelled} обычно читает флаг из БД, поэтому интервал не слишком мелкий.
+     */
+    private static final long CANCEL_POLL_MILLIS = 2000;
+
     private final GitProperties properties;
 
     /** Путь к одноразовому askpass-скрипту. {@code null} если токен не задан. */
@@ -86,16 +94,17 @@ public class GitCliClient {
     /**
      * Клонирует репозиторий в кеш либо делает {@code git fetch --all --prune}.
      */
-    public PreparedRepo prepare(String repoUrl) throws IOException, InterruptedException {
+    public PreparedRepo prepare(String repoUrl, BooleanSupplier cancelled)
+            throws IOException, InterruptedException {
         RepoName name = RepoName.fromUrl(repoUrl);
         Path repoPath = properties.cacheDirectory().resolve(name.value());
 
         if (Files.notExists(repoPath)) {
             log.info("Клонирую репозиторий [{}]", name);
-            executeAndCollect(null, "git", "clone", repoUrl, repoPath.toString());
+            executeAndCollect(null, cancelled, "git", "clone", repoUrl, repoPath.toString());
         } else {
             log.info("Обновляю репозиторий [{}]", name);
-            executeAndCollect(repoPath, "git", "fetch", "--all", "--prune");
+            executeAndCollect(repoPath, cancelled, "git", "fetch", "--all", "--prune");
         }
         return new PreparedRepo(name, repoPath);
     }
@@ -109,10 +118,11 @@ public class GitCliClient {
     public void streamLog(Path repoPath,
                           LocalDateTime since,
                           LocalDateTime until,
-                          Consumer<String> lineHandler) throws IOException, InterruptedException {
+                          Consumer<String> lineHandler,
+                          BooleanSupplier cancelled) throws IOException, InterruptedException {
         String[] command = buildLogCommand(since, until);
         long start = System.currentTimeMillis();
-        executeStreaming(repoPath, command, lineHandler);
+        executeStreaming(repoPath, command, lineHandler, cancelled);
         log.debug("git log в [{}] завершён за {} мс", repoPath.getFileName(),
                 System.currentTimeMillis() - start);
     }
@@ -127,7 +137,7 @@ public class GitCliClient {
             throws IOException, InterruptedException {
 
         List<String> result = new ArrayList<>();
-        streamLog(repoPath, since, until, result::add);
+        streamLog(repoPath, since, until, result::add, () -> false);
         return result;
     }
 
@@ -144,10 +154,10 @@ public class GitCliClient {
     }
 
     /** {@code execute} + сбор stdout в список (для prepare и compatibility). */
-    private List<String> executeAndCollect(Path workingDir, String... command)
+    private List<String> executeAndCollect(Path workingDir, BooleanSupplier cancelled, String... command)
             throws IOException, InterruptedException {
         List<String> result = new ArrayList<>();
-        executeStreaming(workingDir, command, result::add);
+        executeStreaming(workingDir, command, result::add, cancelled);
         return result;
     }
 
@@ -163,7 +173,8 @@ public class GitCliClient {
      * <p>Tail последних {@value #TAIL_BUFFER_SIZE} строк сохраняется в ring-buffer и попадает
      * в exception message — для диагностики без удержания всего output в памяти.</p>
      */
-    private void executeStreaming(Path workingDir, String[] command, Consumer<String> lineHandler)
+    private void executeStreaming(Path workingDir, String[] command, Consumer<String> lineHandler,
+                                  BooleanSupplier cancelled)
             throws IOException, InterruptedException {
 
         ProcessBuilder pb = new ProcessBuilder(command).redirectErrorStream(true);
@@ -178,23 +189,34 @@ public class GitCliClient {
                 .start(() -> drainStdout(process, lineHandler, tail));
 
         long timeoutSeconds = properties.commandTimeout().toSeconds();
-        boolean finished;
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        boolean finished = false;
         try {
-            finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+            // Опрашиваем процесс короткими интервалами (не один waitFor на весь timeout): на каждом
+            // тике проверяем кооперативную отмену — так git убивается ВНУТРИ репо, не дожидаясь
+            // конца команды или commandTimeout (гигантский/зависший репо отменяется сразу).
+            while (System.nanoTime() < deadlineNanos) {
+                if (process.waitFor(CANCEL_POLL_MILLIS, TimeUnit.MILLISECONDS)) {
+                    finished = true;
+                    break;
+                }
+                if (cancelled != null && cancelled.getAsBoolean()) {
+                    log.info("git отменён оператором — убиваю процесс: {}", Arrays.toString(command));
+                    killProcess(process, reader);
+                    Thread.currentThread().interrupt();
+                    throw new InterruptedException("git отменён оператором");
+                }
+            }
         } catch (InterruptedException e) {
-            // Главный поток прерван — убиваем git и reader, восстанавливаем флаг.
-            process.destroyForcibly();
-            reader.interrupt();
+            // Прерывание потока сбора (или наша отмена выше) — убиваем git и reader, флаг восстановлен.
+            killProcess(process, reader);
             throw e;
         }
 
         if (!finished) {
             log.error("git timeout ({} сек), убиваю процесс: {}",
                     timeoutSeconds, Arrays.toString(command));
-            process.destroyForcibly();
-            process.waitFor(DESTROY_GRACE_SECONDS, TimeUnit.SECONDS);
-            // pipe закрыт — reader выйдет из readLine на IOException/null. Дадим ему завершиться.
-            reader.join(TimeUnit.SECONDS.toMillis(DESTROY_GRACE_SECONDS));
+            killProcess(process, reader);
             throw new GitCommandFailedException(
                     Arrays.toString(command),
                     TIMEOUT_EXIT_CODE,
@@ -208,6 +230,22 @@ public class GitCliClient {
         if (exitCode != 0) {
             throw new GitCommandFailedException(
                     Arrays.toString(command), exitCode, snapshotTail(tail));
+        }
+    }
+
+    /**
+     * Убивает git-процесс и reader-поток best-effort (destroyForcibly + дожидание в пределах grace).
+     * Прерывание во время дожидания не пробрасывается — процесс уже помечен на убийство; флаг
+     * прерывания восстанавливается.
+     */
+    private static void killProcess(Process process, Thread reader) {
+        process.destroyForcibly();
+        reader.interrupt();
+        try {
+            process.waitFor(DESTROY_GRACE_SECONDS, TimeUnit.SECONDS);
+            reader.join(TimeUnit.SECONDS.toMillis(DESTROY_GRACE_SECONDS));
+        } catch (InterruptedException ignore) {
+            Thread.currentThread().interrupt();
         }
     }
 
