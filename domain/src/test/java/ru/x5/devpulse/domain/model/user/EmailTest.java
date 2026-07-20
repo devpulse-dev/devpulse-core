@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
+import java.util.Locale;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -48,5 +49,21 @@ class EmailTest {
         assertThatThrownBy(() -> new Email(null))
                 .as("null-значение недопустимо — ожидается NPE")
                 .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("Нормализация независима от системной локали (regression: tr-TR ломал бы 'I')")
+    void normalizationIsLocaleIndependent() {
+        Locale original = Locale.getDefault();
+        try {
+            // Под tr-TR обычный "I".toLowerCase() = "ı" (без точки) → сломанный матчинг email.
+            // Email использует toLowerCase(Locale.ROOT) → стабильно "I" → "i".
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            assertThat(new Email("BORIS.I@X5.RU").value())
+                    .as("под tr-TR 'I' должна нормализоваться в ASCII 'i', а не 'ı'")
+                    .isEqualTo("boris.i@x5.ru");
+        } finally {
+            Locale.setDefault(original);
+        }
     }
 }

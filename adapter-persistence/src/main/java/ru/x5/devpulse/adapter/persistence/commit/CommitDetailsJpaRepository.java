@@ -10,6 +10,18 @@ import org.springframework.data.repository.query.Param;
 
 interface CommitDetailsJpaRepository extends JpaRepository<CommitDetailsEntity, Long> {
 
+    /**
+     * Хеши, уже присутствующие в {@code commit_details}. Дедуп сбора: existing → {@code markSeen}
+     * (не пересохраняются).
+     *
+     * <p><b>Инвариант — глобальность по {@code commit_hash}, не по репозиторию:</b> {@code commit_hash}
+     * — UNIQUE во всей таблице, и матч идёт без {@code repository_name}. Это опирается на допущение,
+     * что репозитории в {@code git.repositories} <b>независимы</b> (нет зеркал/форков с общей
+     * историей — один и тот же SHA не встречается в двух репо). Если такой репозиторий появится,
+     * общий коммит будет приписан ПЕРВОМУ собранному репо (при сборе второго он увидится как
+     * existing), и per-repo метрики исказятся — тогда потребуется {@code UNIQUE(commit_hash,
+     * repository_name)} + per-repo дедуп (матч по паре ключей).</p>
+     */
     @Query("select c.commitHash from CommitDetailsEntity c where c.commitHash in :hashes")
     List<String> findExistingHashes(@Param("hashes") Collection<String> hashes);
 

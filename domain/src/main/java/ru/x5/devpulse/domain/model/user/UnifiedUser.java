@@ -1,6 +1,7 @@
 package ru.x5.devpulse.domain.model.user;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -23,6 +24,11 @@ public record UnifiedUser(
         LocalDateTime updatedAt,
         LocalDateTime lastSyncedAt
 ) {
+
+    public UnifiedUser {
+        // email — ключ, объединяющий идентичности; null недопустим (защита инварианта).
+        Objects.requireNonNull(email, "unified user email must not be null");
+    }
 
     public Optional<String> displayName() {
         return Optional.ofNullable(name);

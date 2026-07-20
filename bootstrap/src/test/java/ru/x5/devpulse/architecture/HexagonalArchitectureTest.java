@@ -4,6 +4,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -37,6 +38,8 @@ class HexagonalArchitectureTest {
     private static final String ADAPTER_REST = ROOT + ".adapter.rest..";
     private static final String ADAPTER_PERSISTENCE = ROOT + ".adapter.persistence..";
     private static final String ADAPTER_GIT = ROOT + ".adapter.git..";
+    /** Shared GitLab transport (HTTP-клиент + DTO + rate-limiter): переиспользуется reviews и identity. */
+    private static final String ADAPTER_GITLAB = ROOT + ".adapter.gitlab..";
     private static final String ADAPTER_KAITEN = ROOT + ".adapter.kaiten..";
     private static final String ADAPTER_REVIEWS = ROOT + ".adapter.reviews..";
     private static final String ADAPTER_IDENTITY = ROOT + ".adapter.identity..";
@@ -69,9 +72,13 @@ class HexagonalArchitectureTest {
             "org.hibernate.."
     };
 
+    // БЕЗ DO_NOT_INCLUDE_JARS намеренно: при `mvn verify` (или `-pl bootstrap` после install) модули
+    // резолвятся в JAR из ~/.m2, и DO_NOT_INCLUDE_JARS отбросил бы их все кроме bootstrap → ArchUnit
+    // импортировал бы ~8 классов, и ВСЕ layered-правила прошли бы вакуумно (allowEmptyShould). Наш
+    // importPackages(ROOT) и так фильтрует по пакету ru.x5.devpulse — сторонние JAR (spring и пр.)
+    // в выборку не попадают. classpathIsNotVacuous страхует от регресса (см. ниже).
     private static final JavaClasses CLASSES = new ClassFileImporter()
             .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-            .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_JARS)
             .importPackages(ROOT);
 
     /* ====================== направление зависимостей ====================== */
@@ -87,6 +94,7 @@ class HexagonalArchitectureTest {
                 .layer("adapter-rest").definedBy(ADAPTER_REST)
                 .layer("adapter-persistence").definedBy(ADAPTER_PERSISTENCE)
                 .layer("adapter-git").definedBy(ADAPTER_GIT)
+                .layer("adapter-gitlab").definedBy(ADAPTER_GITLAB)
                 .layer("adapter-kaiten").definedBy(ADAPTER_KAITEN)
                 .layer("adapter-reviews").definedBy(ADAPTER_REVIEWS)
                 .layer("adapter-identity").definedBy(ADAPTER_IDENTITY)
@@ -97,6 +105,11 @@ class HexagonalArchitectureTest {
                 .whereLayer("adapter-rest").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-persistence").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-git").mayOnlyBeAccessedByLayers("bootstrap")
+                // Shared GitLab transport: доступен реализациям портов поверх него (reviews/identity)
+                // и bootstrap. gitlab сам НЕ обращается к application/domain (чистый transport) —
+                // это гарантируется тем, что его нет в списках mayOnlyBeAccessedBy для application/domain.
+                .whereLayer("adapter-gitlab")
+                        .mayOnlyBeAccessedByLayers("adapter-reviews", "adapter-identity", "bootstrap")
                 .whereLayer("adapter-kaiten").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-reviews").mayOnlyBeAccessedByLayers("bootstrap")
                 .whereLayer("adapter-identity").mayOnlyBeAccessedByLayers("bootstrap")
@@ -115,6 +128,18 @@ class HexagonalArchitectureTest {
                                 "adapter-identity", "adapter-auth");
 
         rule.check(CLASSES);
+    }
+
+    @Test
+    @DisplayName("Sanity: импортированы классы всех модулей, а не только bootstrap (анти-вакуум)")
+    void classpathIsNotVacuous() {
+        // DO_NOT_INCLUDE_JARS + сплошной allowEmptyShould(true) на правилах = риск, что при сборке,
+        // где модули резолвятся в JAR (mvn verify после install / -pl bootstrap), импортируются
+        // только ~классы bootstrap, и ВСЕ правила проходят вакуумно-зелёными. Этот порог заведомо
+        // ниже реального числа наших классов, но много выше «только bootstrap» → ловит вакуум.
+        assertThat(CLASSES.size())
+                .as("должны импортироваться классы всех модулей (domain/application/адаптеры), не только bootstrap")
+                .isGreaterThan(100);
     }
 
     /* ====================== framework-bans ====================== */

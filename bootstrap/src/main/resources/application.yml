@@ -20,6 +20,11 @@ spring:
         # шлёт по одному round-trip'у на строку. Задаём через data-source-properties, чтобы работало
         # независимо от того, как задан DB_URL в проде.
         reWriteBatchedInserts: true
+        # TCP keepalive: advisory-lock (PgAdvisoryCollectionLock) держит один коннект IDLE весь сбор
+        # (минуты-часы). Без keepalive промежуточный firewall/LB может тихо оборвать простаивающий
+        # коннект → Postgres преждевременно освободит lock при ещё идущем сборе → возможен параллельный
+        # прогон. Keepalive не даёт коннекту выглядеть простаивающим для сетевого оборудования.
+        tcpKeepAlive: true
 
   jpa:
     open-in-view: false

@@ -95,7 +95,7 @@ class StatsControllerTest {
     @Test
     @DisplayName("GET /daily?from=&to= возвращает 200 и список агрегатов с email/repo")
     void dailyReturnsList() throws Exception {
-        when(getDailyStats.findByPeriod(any())).thenReturn(List.of(new DailyAuthorStats(
+        when(getDailyStats.findByPeriod(any(), any(), any())).thenReturn(List.of(new DailyAuthorStats(
                 1L, new Email("a@x5.ru"), LocalDate.of(2026, 5, 10),
                 new RepoName("xrg-core"), 3, 0, 10, 5, 1,
                 LocalDateTime.now(), 42L)));
@@ -106,6 +106,20 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$[0].email").value("a@x5.ru"))
                 .andExpect(jsonPath("$[0].repo").value("xrg-core"))
                 .andExpect(jsonPath("$[0].commits").value(3));
+    }
+
+    @Test
+    @DisplayName("GET /daily?email=&team= прокидывает опциональные фильтры в use case")
+    void dailyPassesOptionalFilters() throws Exception {
+        when(getDailyStats.findByPeriod(any(), any(), any())).thenReturn(List.of());
+
+        mvc.perform(get("/api/v2/stats/daily")
+                        .param("from", "2026-05-01").param("to", "2026-05-31")
+                        .param("team", "Platform"))
+                .andExpect(status().isOk());
+
+        // email отсутствует → Optional.empty(); team задан → Optional.of("Platform")
+        verify(getDailyStats).findByPeriod(any(), eq(Optional.empty()), eq(Optional.of("Platform")));
     }
 
     @Test

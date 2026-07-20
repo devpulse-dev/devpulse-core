@@ -128,8 +128,9 @@ public final class CollectDailyStatsService implements CollectDailyStatsUseCase 
         }
 
         // Ревью-метрики из GitLab — изолированно. Падение/недоступность GitLab не валит прогон.
+        // cancel прокинут внутрь: отмена прекращает опрос новых проектов ревью.
         try {
-            collectReviews.collect(effectiveSince);
+            collectReviews.collect(effectiveSince, cancel);
         } catch (Exception e) {
             log.error("Сбор ревью-метрик из GitLab упал (остальные фазы уже сохранены): {}",
                     e.getMessage(), e);

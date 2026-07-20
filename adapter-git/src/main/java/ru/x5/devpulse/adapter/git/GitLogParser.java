@@ -63,9 +63,11 @@ final class GitLogParser {
      * <p>Каждый завершённый коммит сразу уходит в {@code sink}. Внутри держится максимум
      * <i>один</i> незавершённый коммит — O(1) по памяти независимо от размера output.</p>
      *
-     * <p><b>Невалидная дата:</b> коммит молча отбрасывается (warn в лог). Это сохраняет
-     * совместимость с прежним поведением — несколько повреждённых записей не должны валить
-     * сбор.</p>
+     * <p><b>Невалидная запись</b> (дата / hash / email) — коммит молча отбрасывается (warn в лог).
+     * Несколько повреждённых записей не должны валить сбор. Особенно важно для email: коммиты с
+     * dotless-доменом ({@code ci@runner}, {@code root@localhost}) массово встречаются в CI/легаси,
+     * а {@code new Email(...)} на них бросает — без skip это исключение улетало бы на reader-VT
+     * ({@code drainStdout}), убивая reader и маскируя причину под git-сбой (SIGPIPE → exit≠0).</p>
      */
     static final class Streaming {
 
@@ -110,7 +112,10 @@ final class GitLogParser {
 
         private void flushCurrent() {
             if (header != null) {
-                sink.accept(buildCommit(header, repo, added, deleted, testAdded));
+                Commit commit = buildCommit(header, repo, added, deleted, testAdded);
+                if (commit != null) {
+                    sink.accept(commit);
+                }
                 header = null;
             }
         }
@@ -164,20 +169,29 @@ final class GitLogParser {
         }
     }
 
+    /** Собирает {@link Commit} или {@code null}, если hash/email невалидны (коммит пропускается). */
     private static Commit buildCommit(Header h, RepoName repo, long added, long deleted, long testAdded) {
-        TaskNumber task = CommitMessageParser.extractTaskNumber(h.message()).orElse(null);
-        return new Commit(
-                new CommitHash(h.hash()),
-                new Email(h.email()),
-                h.date(),
-                h.merge(),
-                added,
-                deleted,
-                testAdded,
-                h.message(),
-                task,
-                repo
-        );
+        try {
+            TaskNumber task = CommitMessageParser.extractTaskNumber(h.message()).orElse(null);
+            return new Commit(
+                    new CommitHash(h.hash()),
+                    new Email(h.email()),
+                    h.date(),
+                    h.merge(),
+                    added,
+                    deleted,
+                    testAdded,
+                    h.message(),
+                    task,
+                    repo
+            );
+        } catch (IllegalArgumentException e) {
+            // Битый hash или email (напр. dotless-домен ci@runner) — пропускаем коммит, как и
+            // невалидную дату. Иначе IllegalArgumentException улетел бы на reader-VT и убил бы reader.
+            log.warn("Пропущен коммит {} — невалидный hash/email (email={}): {}",
+                    h.hash(), h.email(), e.getMessage());
+            return null;
+        }
     }
 
     private record Header(String hash, String email, LocalDateTime date, boolean merge, String message) {}

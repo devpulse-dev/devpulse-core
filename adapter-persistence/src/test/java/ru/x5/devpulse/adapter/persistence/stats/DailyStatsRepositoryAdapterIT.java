@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +22,8 @@ import ru.x5.devpulse.domain.common.TaskNumber;
 import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.CommitHash;
 import ru.x5.devpulse.domain.model.git.RepoName;
+import ru.x5.devpulse.domain.model.stats.AuthorSummary;
+import ru.x5.devpulse.domain.model.stats.WeeklyAuthorActivity;
 import ru.x5.devpulse.domain.model.user.Email;
 
 @SpringBootTest
@@ -139,6 +142,128 @@ class DailyStatsRepositoryAdapterIT extends PostgresContainerSupport {
         assertAll("team-фильтр",
                 () -> assertThat(apr.has("alpha")).as("своя команда — есть").isTrue(),
                 () -> assertThat(apr.has("beta")).as("чужая команда — нет").isFalse());
+    }
+
+    @Test
+    @DisplayName("aggregateAuthorsByPeriod: GROUP BY сворачивает (день,репо) в одну строку на автора")
+    void aggregateAuthorsCollapsesToPerAuthor() {
+        Email alice = new Email("alice-agg@x5.ru");
+        Email bob = new Email("bob-agg@x5.ru");
+        RepoName r1 = new RepoName("agg-repo-1");
+        RepoName r2 = new RepoName("agg-repo-2");
+        LocalDate d1 = LocalDate.of(2026, 6, 1);
+        LocalDate d2 = LocalDate.of(2026, 6, 2);
+        Period period = new Period(d1, d2);
+
+        Map<Email, Long> ids = unifiedUserRepository.findOrCreateAll(List.of(alice, bob));
+        // alice: 3 коммита, размазанные по 2 дням И 2 репозиториям (3 daily-строки);
+        // bob: 1 коммит. Агрегат должен свернуть alice в ОДНУ строку с commits=3.
+        // Хеши в собственном «неймспейсе» aa../bb.. — commit_hash глобально UNIQUE, а IT-классы
+        // модуля шарят один Testcontainers-контейнер без очистки между ними (см. CommitRepositoryAdapterIT,
+        // где занят "a1".repeat(20)). Изоляция данных IT — долг, вынесен в задачу гигиены.
+        commitRepository.saveAll(List.of(
+                commit("aa11".repeat(10), alice, d1, r1),
+                commit("aa12".repeat(10), alice, d2, r1),
+                commit("aa13".repeat(10), alice, d2, r2),
+                commit("bb11".repeat(10), bob, d1, r1)), ids);
+        repo.recomputeFromCommits(List.of(alice, bob), period);
+
+        List<AuthorSummary> agg = repo.aggregateAuthorsByPeriod(period).stream()
+                .filter(a -> a.email().value().endsWith("-agg@x5.ru"))
+                .toList();
+
+        assertAll("свёртка по автору в БД",
+                () -> assertThat(agg).as("две строки — по одной на автора").hasSize(2),
+                () -> assertThat(byEmail(agg, alice).commits())
+                        .as("alice: 3 коммита из 2 дней/2 репо сведены в одну строку").isEqualTo(3L),
+                () -> assertThat(byEmail(agg, alice).addedLines())
+                        .as("added суммируется по всем строкам автора (3×10)").isEqualTo(30L),
+                () -> assertThat(byEmail(agg, bob).commits()).as("bob: 1").isEqualTo(1L));
+    }
+
+    @Test
+    @DisplayName("aggregateAuthorsByPeriod: строки вне периода не учитываются")
+    void aggregateRespectsPeriod() {
+        Email carol = new Email("carol-agg@x5.ru");
+        RepoName r = new RepoName("agg-repo-window");
+        Map<Email, Long> ids = unifiedUserRepository.findOrCreateAll(List.of(carol));
+        commitRepository.saveAll(List.of(
+                commit("cc11".repeat(10), carol, LocalDate.of(2026, 8, 10), r),   // в окне
+                commit("cc12".repeat(10), carol, LocalDate.of(2026, 9, 10), r)),   // вне окна
+                ids);
+        repo.recomputeFromCommits(List.of(carol),
+                new Period(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 9, 30)));
+
+        List<AuthorSummary> augustOnly = repo.aggregateAuthorsByPeriod(
+                        new Period(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31))).stream()
+                .filter(a -> a.email().equals(carol)).toList();
+
+        assertThat(augustOnly).singleElement()
+                .extracting(AuthorSummary::commits)
+                .as("только августовский коммит попал в агрегат").isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("findByPeriod с фильтрами: email → один автор; team → участники команды (фильтр в БД)")
+    void filteredDailyByAuthorAndTeam() {
+        Email dave = new Email("dave-flt@x5.ru");
+        Email erin = new Email("erin-flt@x5.ru");
+        RepoName r = new RepoName("flt-repo");
+        LocalDate d = LocalDate.of(2026, 10, 5);
+        Period period = new Period(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31));
+
+        Map<Email, Long> ids = unifiedUserRepository.findOrCreateAll(List.of(dave, erin));
+        unifiedUserRepository.updateTeam(dave, "gamma-flt");
+        commitRepository.saveAll(List.of(
+                commit("dd11".repeat(10), dave, d, r),
+                commit("ee11".repeat(10), erin, d, r)), ids);
+        repo.recomputeFromCommits(List.of(dave, erin), period);
+
+        assertAll("опциональные фильтры daily",
+                // email-фильтр → ровно этот автор
+                () -> assertThat(repo.findByPeriod(period, Optional.of(dave), Optional.empty()))
+                        .extracting(s -> s.authorEmail().value())
+                        .containsOnly("dave-flt@x5.ru"),
+                // team-фильтр → только участники gamma-flt (dave состоит, erin нет)
+                () -> assertThat(repo.findByPeriod(period, Optional.empty(), Optional.of("gamma-flt")))
+                        .extracting(s -> s.authorEmail().value())
+                        .containsOnly("dave-flt@x5.ru"),
+                // без фильтров → оба присутствуют (в шаренном контейнере могут быть и другие авторы)
+                () -> assertThat(repo.findByPeriod(period, Optional.empty(), Optional.empty()))
+                        .extracting(s -> s.authorEmail().value())
+                        .contains("dave-flt@x5.ru", "erin-flt@x5.ru"));
+    }
+
+    @Test
+    @DisplayName("weeklyAuthorActivity: GROUP BY (email, ISO-неделя) сворачивает коммиты по неделям")
+    void weeklyAggregatesByIsoWeek() {
+        Email dev = new Email("weekly-agg@x5.ru");
+        unifiedUserRepository.findOrCreateAll(List.of(dev));
+        RepoName r = new RepoName("weekly-repo");
+        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
+        // 2026-05-04 (Пн, ISO week 19), 2026-05-07 (та же неделя), 2026-05-11 (Пн, week 20)
+        commitRepository.saveAll(List.of(
+                commit("f1a9".repeat(10), dev, LocalDate.of(2026, 5, 4), r),
+                commit("f2a9".repeat(10), dev, LocalDate.of(2026, 5, 7), r),
+                commit("f3a9".repeat(10), dev, LocalDate.of(2026, 5, 11), r)), Map.of());
+        repo.recomputeFromCommits(List.of(dev), may);
+
+        List<WeeklyAuthorActivity> mine = repo.weeklyAuthorActivity(may).stream()
+                .filter(w -> w.email().value().equals("weekly-agg@x5.ru")).toList();
+
+        assertAll("понедельная свёртка в БД",
+                () -> assertThat(mine).extracting(WeeklyAuthorActivity::isoWeek)
+                        .containsExactlyInAnyOrder(19, 20),
+                () -> assertThat(byWeek(mine, 19).commits()).as("week 19 = 2 коммита").isEqualTo(2L),
+                () -> assertThat(byWeek(mine, 20).commits()).as("week 20 = 1 коммит").isEqualTo(1L));
+    }
+
+    private static WeeklyAuthorActivity byWeek(List<WeeklyAuthorActivity> list, int week) {
+        return list.stream().filter(w -> w.isoWeek() == week).findFirst().orElseThrow();
+    }
+
+    private static AuthorSummary byEmail(List<AuthorSummary> list, Email email) {
+        return list.stream().filter(a -> a.email().equals(email)).findFirst().orElseThrow();
     }
 
     private static MonthlyAuthorActivity byMonth(List<MonthlyAuthorActivity> list, String ym) {

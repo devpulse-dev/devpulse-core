@@ -2,6 +2,7 @@ package ru.x5.devpulse.application.port.out;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.RepoName;
@@ -24,9 +25,14 @@ public interface GitGateway {
      * знать, что под капотом git CLI и есть какой-то локальный кеш — это implementation detail.</p>
      *
      * @param batchHandler вызывается на каждом батче распарсенных коммитов
+     * @param cancelled    опрашивается адаптером во время git-команд (clone/fetch/log); при отмене
+     *                     git-процесс убивается ВНУТРИ репо, не дожидаясь конца или таймаута.
+     *                     {@code BooleanSupplier} (а не {@code CancellationSignal} из port.in) —
+     *                     чтобы port.out не зависел от port.in; вызывающий передаёт {@code cancel::cancelled}
      */
     void streamCommits(RepoName repo,
                        LocalDateTime since,
                        LocalDateTime until,
-                       Consumer<List<Commit>> batchHandler);
+                       Consumer<List<Commit>> batchHandler,
+                       BooleanSupplier cancelled);
 }

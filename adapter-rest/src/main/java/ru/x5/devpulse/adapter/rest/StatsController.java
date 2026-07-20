@@ -68,8 +68,16 @@ class StatsController implements StatsApi {
     private final MergedMrStatsMapper mergedMrStatsMapper;
 
     @Override
-    public ResponseEntity<List<DailyStats>> getDailyStats(LocalDate from, LocalDate to) {
-        var data = getDailyStats.findByPeriod(new Period(from, to)).stream()
+    public ResponseEntity<List<DailyStats>> getDailyStats(LocalDate from, LocalDate to, String email,
+                                                          String team) {
+        // email/team опциональны и независимы: пусто/blank → без соответствующего фильтра (как hourly).
+        Optional<Email> author = (email == null || email.isBlank())
+                ? Optional.empty()
+                : Optional.of(new Email(email));
+        Optional<String> teamFilter = (team == null || team.isBlank())
+                ? Optional.empty()
+                : Optional.of(team);
+        var data = getDailyStats.findByPeriod(new Period(from, to), author, teamFilter).stream()
                 .map(dailyStatsMapper::toDto).toList();
         return ResponseEntity.ok(data);
     }

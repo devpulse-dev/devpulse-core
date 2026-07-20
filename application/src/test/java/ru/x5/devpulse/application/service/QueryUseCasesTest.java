@@ -28,8 +28,10 @@ import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.PageRequest;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.RepoName;
+import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.stats.UserProfile;
+import ru.x5.devpulse.domain.model.stats.WeeklyAuthorActivity;
 import ru.x5.devpulse.domain.model.user.Email;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
@@ -51,12 +53,14 @@ class QueryUseCasesTest {
     @DisplayName("GetDailyStatsService")
     class DailyStats {
         @Test
-        @DisplayName("делегирует findByPeriod без модификаций")
+        @DisplayName("делегирует findByPeriod с фильтрами автора/команды без модификаций")
         void delegatesFindByPeriod() {
             List<DailyAuthorStats> data = List.of(day(LocalDate.of(2026, 5, 10), 3));
-            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(data);
+            when(dailyStatsRepository.findByPeriod(PERIOD, Optional.of(EMAIL), Optional.empty()))
+                    .thenReturn(data);
 
-            assertThat(new GetDailyStatsService(dailyStatsRepository).findByPeriod(PERIOD))
+            assertThat(new GetDailyStatsService(dailyStatsRepository)
+                    .findByPeriod(PERIOD, Optional.of(EMAIL), Optional.empty()))
                     .isSameAs(data);
         }
     }
@@ -67,9 +71,9 @@ class QueryUseCasesTest {
         @Test
         @DisplayName("группирует по ISO-неделям + enrich displayName/avatarUrl из unified_user")
         void groupsByWeekAndEnriches() {
-            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of(
-                    day(EMAIL, LocalDate.of(2026, 5, 4), 1, 0),    // ISO week 19
-                    day(EMAIL, LocalDate.of(2026, 5, 11), 2, 0)    // ISO week 20
+            when(dailyStatsRepository.weeklyAuthorActivity(PERIOD)).thenReturn(List.of(
+                    new WeeklyAuthorActivity(EMAIL, 2026, 19, 1, 0, 10, 5, 1),   // ISO week 19
+                    new WeeklyAuthorActivity(EMAIL, 2026, 20, 2, 0, 10, 5, 1)    // ISO week 20
             ));
             when(unifiedUserRepository.findByEmails(anyCollection())).thenReturn(List.of(
                     userWithProfile(EMAIL, "Boris", "https://avatar/b")
@@ -87,7 +91,7 @@ class QueryUseCasesTest {
         @Test
         @DisplayName("пустые stats → пустой список, без обращения к unified_user")
         void emptyWeeks() {
-            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of());
+            when(dailyStatsRepository.weeklyAuthorActivity(PERIOD)).thenReturn(List.of());
 
             var weeks = new GetWeeklyStatsService(dailyStatsRepository, unifiedUserRepository)
                     .findByPeriod(PERIOD);
@@ -104,7 +108,7 @@ class QueryUseCasesTest {
         @Test
         @DisplayName("период с пустым набором → нулевая сводка, unified_user не зовём")
         void emptyPeriod() {
-            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of());
+            when(dailyStatsRepository.aggregateAuthorsByPeriod(PERIOD)).thenReturn(List.of());
 
             var s = new GetPeriodSummaryService(dailyStatsRepository, unifiedUserRepository)
                     .summarize(PERIOD);
@@ -119,8 +123,8 @@ class QueryUseCasesTest {
         @Test
         @DisplayName("topAuthors enriched displayName/avatarUrl из unified_user")
         void summaryEnrichesTopAuthors() {
-            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of(
-                    day(EMAIL, LocalDate.of(2026, 5, 1), 5, 0)
+            when(dailyStatsRepository.aggregateAuthorsByPeriod(PERIOD)).thenReturn(List.of(
+                    authorAgg(EMAIL, 5, 0)
             ));
             when(unifiedUserRepository.findByEmails(anyCollection())).thenReturn(List.of(
                     userWithProfile(EMAIL, "Boris", "https://avatar/b")
@@ -248,11 +252,11 @@ class QueryUseCasesTest {
         @Test
         @DisplayName("paginated + enrich avatar/name из unified_user")
         void paginatedAndEnriched() {
-            // 3 автора с разной активностью
-            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of(
-                    day(EMAIL, LocalDate.of(2026, 5, 1), 10, 0),
-                    day(new Email("alice@x5.ru"), LocalDate.of(2026, 5, 2), 5, 0),
-                    day(new Email("bob@x5.ru"), LocalDate.of(2026, 5, 3), 1, 0)
+            // 3 автора с разной активностью (агрегат по автору, как из SQL GROUP BY)
+            when(dailyStatsRepository.aggregateAuthorsByPeriod(PERIOD)).thenReturn(List.of(
+                    authorAgg(EMAIL, 10, 0),
+                    authorAgg(new Email("alice@x5.ru"), 5, 0),
+                    authorAgg(new Email("bob@x5.ru"), 1, 0)
             ));
 
             // unified_user знает только Boris-а — alice/bob ещё не синканы
@@ -287,7 +291,7 @@ class QueryUseCasesTest {
         @Test
         @DisplayName("пустые stats → пустая страница с правильным page/size, без обращения к unified_user")
         void emptyStats() {
-            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of());
+            when(dailyStatsRepository.aggregateAuthorsByPeriod(PERIOD)).thenReturn(List.of());
 
             var d = new GetDashboardService(dailyStatsRepository, unifiedUserRepository, 50.0)
                     .get(PERIOD, new PageRequest(0, 10));
@@ -311,6 +315,11 @@ class QueryUseCasesTest {
         return new DailyAuthorStats(
                 null, email, date, REPO, commits, merge, 10, 5, 1,
                 LocalDateTime.now(), null);
+    }
+
+    /** Per-author агрегат за период — как его вернёт {@code aggregateAuthorsByPeriod} (SQL GROUP BY). */
+    private static AuthorSummary authorAgg(Email email, long commits, long merge) {
+        return new AuthorSummary(email, null, null, commits, merge, 10, 5, 1, null, null, false);
     }
 
     private static UnifiedUser userWithKaiten(long kaitenId) {
