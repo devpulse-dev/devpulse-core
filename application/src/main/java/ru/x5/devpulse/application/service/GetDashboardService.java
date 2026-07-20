@@ -15,7 +15,6 @@ import ru.x5.devpulse.domain.model.stats.ActivityScore;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.Dashboard;
 import ru.x5.devpulse.domain.service.ActivityScorer;
-import ru.x5.devpulse.domain.service.StatsSummarizer;
 
 /**
  * Дашборд с {@link ActivityScore} и пагинацией.
@@ -43,8 +42,10 @@ public final class GetDashboardService implements GetDashboardUseCase {
 
     @Override
     public Dashboard get(Period period, PageRequest page) {
-        List<AuthorSummary> authors = StatsSummarizer.activeAuthorsByActivity(
-                dailyStatsRepository.findByPeriod(period));
+        // Агрегация по автору выполняется в БД (GROUP BY): в heap приходит по строке на человека,
+        // а не все daily-строки периода. Scoring/сортировка/пагинация ниже работают на этом
+        // компактном списке (десятки–сотни авторов), а не на миллионах daily-строк за год.
+        List<AuthorSummary> authors = dailyStatsRepository.aggregateAuthorsByPeriod(period);
 
         if (authors.isEmpty()) {
             return new Dashboard(period, new Page<>(List.of(), page.page(), page.size(), 0));

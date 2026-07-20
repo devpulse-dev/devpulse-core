@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.cohort.MonthlyAuthorActivity;
+import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.user.Email;
 
@@ -168,9 +169,60 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
                         rs.getLong("deleted_lines")));
     }
 
+    /**
+     * Агрегат по автору за период: одна строка на автора. Свёртка {@code (email, date, repo)}-строк
+     * до {@code (email)} делается в БД (GROUP BY), heap не растёт с длиной периода.
+     *
+     * <p>{@code LOWER(email)} — email в {@code daily_author_stats} уже lowercase (миграция 020),
+     * {@code LOWER()} страхует от старых строк и совпадает по форме с functional-индексом
+     * {@code idx_daily_stats_email_lower_date(LOWER(email), date)} — фильтр по {@code date} +
+     * группировка по {@code LOWER(email)} им покрываются.</p>
+     */
+    private static final String AGGREGATE_AUTHORS_SQL = """
+            SELECT LOWER(email)                       AS email,
+                   COALESCE(SUM(commits),          0) AS commits,
+                   COALESCE(SUM(merge_commits),    0) AS merge_commits,
+                   COALESCE(SUM(added_lines),      0) AS added_lines,
+                   COALESCE(SUM(deleted_lines),    0) AS deleted_lines,
+                   COALESCE(SUM(test_added_lines), 0) AS test_added_lines
+              FROM daily_author_stats
+             WHERE date BETWEEN ? AND ?
+             GROUP BY LOWER(email)
+            """;
+
+    @Override
+    public List<AuthorSummary> aggregateAuthorsByPeriod(Period period) {
+        return jdbcTemplate.query(AGGREGATE_AUTHORS_SQL,
+                ps -> {
+                    ps.setObject(1, period.from());
+                    ps.setObject(2, period.to());
+                },
+                (rs, rowNum) -> new AuthorSummary(
+                        new Email(rs.getString("email")),
+                        null, null,
+                        rs.getLong("commits"),
+                        rs.getLong("merge_commits"),
+                        rs.getLong("added_lines"),
+                        rs.getLong("deleted_lines"),
+                        rs.getLong("test_added_lines"),
+                        null, null, false));
+    }
+
     @Override
     public List<DailyAuthorStats> findByPeriod(Period period) {
         return jpa.findByPeriod(period.from(), period.to()).stream()
+                .map(mapper::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<DailyAuthorStats> findByPeriod(Period period,
+                                               java.util.Optional<Email> author,
+                                               java.util.Optional<String> team) {
+        // Email.value() — уже lowercase (инвариант VO); JPQL lower(s.email) — defence in depth.
+        String email = author.map(Email::value).orElse(null);
+        String teamFilter = team.filter(t -> !t.isBlank()).orElse(null);
+        return jpa.findByPeriodFiltered(period.from(), period.to(), email, teamFilter).stream()
                 .map(mapper::toDomain)
                 .toList();
     }

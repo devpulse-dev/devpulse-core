@@ -24,4 +24,26 @@ interface DailyAuthorStatsJpaRepository extends JpaRepository<DailyAuthorStatsEn
             @Param("email") String email,
             @Param("from") LocalDate from,
             @Param("to") LocalDate to);
+
+    /**
+     * Daily-агрегаты за период с опциональными фильтрами по автору/команде (фильтр в БД).
+     *
+     * <p>{@code email}/{@code team} == {@code null} → соответствующий фильтр отключён. {@code email}
+     * ожидается уже в lower-case (инвариант {@code Email}); {@code lower(s.email)} — defence in depth.
+     * Team — членство в {@code unified_user.team} через подзапрос (email нормализован к lower с обеих
+     * сторон), как в hourly/monthly-агрегатах.</p>
+     */
+    @Query("""
+            select s from DailyAuthorStatsEntity s
+             where s.date between :from and :to
+               and (:email is null or lower(s.email) = :email)
+               and (:team is null
+                    or lower(s.email) in (select lower(u.email) from UnifiedUserEntity u where u.team = :team))
+             order by s.date, s.email
+            """)
+    List<DailyAuthorStatsEntity> findByPeriodFiltered(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            @Param("email") String email,
+            @Param("team") String team);
 }

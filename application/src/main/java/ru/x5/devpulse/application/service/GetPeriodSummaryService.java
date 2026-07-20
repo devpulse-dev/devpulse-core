@@ -21,7 +21,10 @@ public final class GetPeriodSummaryService implements GetPeriodSummaryUseCase {
 
     @Override
     public PeriodSummary summarize(Period period) {
-        PeriodSummary raw = StatsSummarizer.summarize(period, dailyStatsRepository.findByPeriod(period));
+        // Агрегация по автору — в БД (GROUP BY): totals и top-N считаются на компактном
+        // per-author списке, а не на всех daily-строках периода.
+        PeriodSummary raw = StatsSummarizer.summarizeAuthors(
+                period, dailyStatsRepository.aggregateAuthorsByPeriod(period));
         var enriched = new AuthorSummaryEnricher(unifiedUserRepository).enrich(raw.topAuthors());
         return raw.withTopAuthors(enriched);
     }
