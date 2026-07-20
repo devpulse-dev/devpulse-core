@@ -3,6 +3,7 @@ package ru.x5.devpulse.adapter.auth;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -78,6 +79,21 @@ class RbacSecurityTest {
     void perfReviewAnyForElevated() throws Exception {
         mvc.perform(get("/api/v2/performance/review").param("email", "alice@x5.ru")
                         .with(user("a").roles("ADMIN")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("Запуск/отмена сбора (POST /collection/**) — только ADMIN; даже TEAMLEAD → 403; GET открыт")
+    void collectionOperationalAdminOnly() throws Exception {
+        // POST /collection/runs (запуск) — операционное, только ADMIN (CSRF выключен → без токена).
+        mvc.perform(post("/api/v2/collection/runs").with(user("m").roles("MEMBER")))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/v2/collection/runs").with(user("l").roles("TEAMLEAD")))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/v2/collection/runs").with(user("a").roles("ADMIN")))
+                .andExpect(status().isNotFound()); // authz пройден, handler'а нет в слайсе
+        // GET статуса прогона — доступен всем аутентифицированным (нужен UI).
+        mvc.perform(get("/api/v2/collection/runs/latest").with(user("m").roles("MEMBER")))
                 .andExpect(status().isNotFound());
     }
 }

@@ -47,8 +47,12 @@ class SecurityConfig {
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // RBAC (ADR-13). Контроллеры adapter-rest под префиксом /api/v2
-                        // (WebMvcConfig); auth-эндпоинты — нет (другой пакет). Гейтим только
-                        // аналитические разделы; операционное (collection) — любому аутентиф.
+                        // (WebMvcConfig); auth-эндпоинты — нет (другой пакет).
+                        // Операционное управление сбором (запуск/отмена прогона) — только ADMIN:
+                        // дорогая глобальная операция, не для любого аутентифицированного. GET
+                        // (статус/последний прогон) остаётся доступен всем — нужен UI.
+                        .requestMatchers(HttpMethod.POST, "/api/v2/collection/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v2/collection/**").hasRole("ADMIN")
                         .requestMatchers("/api/v2/cohorts/**").hasAnyRole("ADMIN", "TEAMLEAD")
                         // Мутация карточек Kaiten (простановка флага AI-Agent) — только elevated.
                         .requestMatchers(HttpMethod.POST, "/api/v2/stats/defects/ai-agent")
