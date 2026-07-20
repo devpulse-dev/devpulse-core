@@ -140,7 +140,7 @@ class PerformanceReviewServiceTest {
         return new KaitenCard(new KaitenCardId(1L), "defect", null, 8, 3,
                 "col", "board", "space", null, null,
                 LocalDateTime.of(2026, 1, 5, 10, 0), closed, closed, false, "https://k/1", List.of(),
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, false);
     }
 
     private static KaitenCard devInProgress() {
@@ -148,6 +148,6 @@ class PerformanceReviewServiceTest {
                 "col", "board", "space", null, null,
                 LocalDateTime.of(2026, 1, 5, 10, 0), LocalDateTime.of(2026, 2, 1, 10, 0),
                 null, false, "https://k/2", List.of(),
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, false);
     }
 }

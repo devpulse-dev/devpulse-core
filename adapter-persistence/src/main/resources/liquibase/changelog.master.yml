@@ -57,3 +57,5 @@ databaseChangeLog:
       file: liquibase/migration/028-add-cancel-requested-to-collection-run.yaml
   - include:
       file: liquibase/migration/029-create-spring-session-schema.yaml
+  - include:
+      file: liquibase/migration/030-add-target-branch-to-merge-request.yaml

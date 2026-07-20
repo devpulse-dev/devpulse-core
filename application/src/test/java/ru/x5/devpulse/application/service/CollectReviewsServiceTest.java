@@ -32,7 +32,7 @@ class CollectReviewsServiceTest {
     void delegatesToWriteRepository() {
         var mr = new CollectedMergeRequest(
                 42L, 7L, new Email("boris@x5.ru"), "fix", "https://scm/mr/7", "merged",
-                SINCE, SINCE.plusHours(4), List.of());
+                SINCE, SINCE.plusHours(4), "dev", List.of());
         when(reviewGateway.fetchMergeRequests(SINCE)).thenReturn(List.of(mr));
 
         new CollectReviewsService(reviewGateway, reviewWriteRepository).collect(SINCE);

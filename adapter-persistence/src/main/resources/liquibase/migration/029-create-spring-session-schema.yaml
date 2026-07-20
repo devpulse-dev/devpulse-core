@@ -5,6 +5,11 @@ databaseChangeLog:
   - changeSet:
       id: 029-create-spring-session-schema
       author: devpulse
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: spring_session
       changes:
         - sql:
             sql: >

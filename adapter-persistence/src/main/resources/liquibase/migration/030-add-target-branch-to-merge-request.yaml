@@ -1,0 +1,36 @@
+# Ветка назначения MR (target_branch) в merge_request.
+#
+# Фича «Вмерженные MR только в дев»: раздел /stats/merged-mrs считает MR, вмерженные в
+# набор dev-веток (по умолчанию dev/main/development, конфиг merged-mrs.dev-branches).
+# Nullable: у MR, собранных до этой миграции, ветки нет — попадут под фильтр только после
+# пересбора ревью (полный прогон дособерёт target_branch по натуральному ключу project+iid).
+databaseChangeLog:
+  - changeSet:
+      id: 030-add-target-branch-to-merge-request
+      author: boris.osechinskiy
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                tableName: merge_request
+                columnName: target_branch
+      changes:
+        - addColumn:
+            tableName: merge_request
+            columns:
+              - column:
+                  name: target_branch
+                  type: VARCHAR(255)
+        - createIndex:
+            indexName: idx_merge_request_target_branch
+            tableName: merge_request
+            columns:
+              - column:
+                  name: target_branch
+      rollback:
+        - dropIndex:
+            indexName: idx_merge_request_target_branch
+            tableName: merge_request
+        - dropColumn:
+            tableName: merge_request
+            columnName: target_branch

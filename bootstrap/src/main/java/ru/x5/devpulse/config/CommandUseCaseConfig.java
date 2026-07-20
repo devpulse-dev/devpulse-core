@@ -7,6 +7,7 @@ import ru.x5.devpulse.application.port.in.CancelCollectionUseCase;
 import ru.x5.devpulse.application.port.in.CollectDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectGitStatsUseCase;
 import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
+import ru.x5.devpulse.application.port.in.MarkDefectsAiAgentUseCase;
 import ru.x5.devpulse.application.port.in.SetTeamLeadUseCase;
 import ru.x5.devpulse.application.port.in.SetUserTeamUseCase;
 import ru.x5.devpulse.application.port.in.SyncKaitenUsersUseCase;
@@ -16,6 +17,7 @@ import ru.x5.devpulse.application.port.out.CollectionRunRepository;
 import ru.x5.devpulse.application.port.out.CommitRepository;
 import ru.x5.devpulse.application.port.out.DailyStatsRepository;
 import ru.x5.devpulse.application.port.out.GitGateway;
+import ru.x5.devpulse.application.port.out.KaitenCardWriter;
 import ru.x5.devpulse.application.port.out.KaitenCardsCache;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
 import ru.x5.devpulse.application.port.out.ReviewGateway;
@@ -26,6 +28,7 @@ import ru.x5.devpulse.application.service.CancelCollectionService;
 import ru.x5.devpulse.application.service.CollectDailyStatsService;
 import ru.x5.devpulse.application.service.CollectGitStatsService;
 import ru.x5.devpulse.application.service.CollectReviewsService;
+import ru.x5.devpulse.application.service.MarkDefectsAiAgentService;
 import ru.x5.devpulse.application.service.StartupReconciliationService;
 import ru.x5.devpulse.application.service.SetTeamLeadService;
 import ru.x5.devpulse.application.service.SetUserTeamService;
@@ -117,5 +120,11 @@ class CommandUseCaseConfig {
     @Bean
     SetTeamLeadUseCase setTeamLeadUseCase(UnifiedUserRepository unifiedUserRepository) {
         return new SetTeamLeadService(unifiedUserRepository);
+    }
+
+    /** Простановка флага «AI-Agent» карточкам дефектов в Kaiten (set-only, only elevated). */
+    @Bean
+    MarkDefectsAiAgentUseCase markDefectsAiAgentUseCase(KaitenCardWriter kaitenCardWriter) {
+        return new MarkDefectsAiAgentService(kaitenCardWriter);
     }
 }

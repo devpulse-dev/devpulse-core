@@ -3,6 +3,11 @@ databaseChangeLog:
       id: 022-create-merge-request-and-review
       author: boris.osechinskiy
       comment: B2 ревью-метрики — MR из GitLab и участие ревьюеров (approve + комментарии)
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: merge_request
       changes:
         - createTable:
             tableName: merge_request

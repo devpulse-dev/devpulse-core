@@ -282,6 +282,7 @@ class ReviewGatewayAdapter implements ReviewGateway {
                 mr.state(),
                 mr.createdAt() == null ? null : mr.createdAt().toLocalDateTime(),
                 mr.mergedAt() == null ? null : mr.mergedAt().toLocalDateTime(),
+                mr.targetBranch(),
                 reviews);
     }
 

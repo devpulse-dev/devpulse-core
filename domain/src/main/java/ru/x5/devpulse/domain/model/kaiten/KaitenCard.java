@@ -40,7 +40,9 @@ public record KaitenCard(
         String parentTitle,
         String parentUrl,
         LocalDateTime inProgressAt,
-        LocalDateTime doneAt
+        LocalDateTime doneAt,
+        /** Галка «AI-Agent» в карточке (Kaiten property {@code id_6064}); false, если не проставлена. */
+        boolean aiAgent
 ) {
 
     public KaitenCard {

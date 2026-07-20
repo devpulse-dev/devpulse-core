@@ -20,6 +20,7 @@ import ru.x5.devpulse.domain.model.user.Email;
  * @param state           состояние GitLab: opened / merged / closed / locked
  * @param createdAt       момент открытия
  * @param mergedAt        момент merge ({@code null} если не смержен)
+ * @param targetBranch    ветка назначения MR ({@code null} у исторических записей до сбора ветки)
  * @param reviews         участие ревьюеров (approve + объём комментов)
  */
 public record CollectedMergeRequest(
@@ -31,6 +32,7 @@ public record CollectedMergeRequest(
         String state,
         LocalDateTime createdAt,
         LocalDateTime mergedAt,
+        String targetBranch,
         List<MrReview> reviews
 ) {
 

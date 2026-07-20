@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -28,15 +29,23 @@ import ru.x5.devpulse.application.port.in.GetHourlyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetPerformanceReviewUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
+import ru.x5.devpulse.application.port.in.GetTeamDefectsUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
+import ru.x5.devpulse.application.port.in.GetMergedMrStatsUseCase;
+import ru.x5.devpulse.application.port.in.MarkDefectsAiAgentUseCase;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCardType;
 import ru.x5.devpulse.domain.model.kaiten.KaitenColumnStatus;
 import ru.x5.devpulse.domain.model.kaiten.KaitenUrgency;
+import ru.x5.devpulse.domain.model.performance.AiAgentMarkResult;
 import ru.x5.devpulse.domain.model.performance.CycleTime;
 import ru.x5.devpulse.domain.model.performance.CycleTimeBreakdown;
+import ru.x5.devpulse.domain.model.performance.DefectDetail;
+import ru.x5.devpulse.domain.model.performance.DefectMember;
 import ru.x5.devpulse.domain.model.performance.DefectsSummary;
+import ru.x5.devpulse.domain.model.performance.PeriodDefectCounts;
+import ru.x5.devpulse.domain.model.performance.TeamDefectsReport;
 import ru.x5.devpulse.domain.model.performance.DeliveredFeature;
 import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
 import ru.x5.devpulse.domain.model.performance.FirefightingItem;
@@ -51,12 +60,16 @@ import ru.x5.devpulse.domain.model.performance.TaskTypeBreakdown;
 import ru.x5.devpulse.domain.model.performance.UrgencyCounts;
 import ru.x5.devpulse.domain.model.performance.UseCaseRef;
 import ru.x5.devpulse.domain.model.performance.WorkBalance;
+import ru.x5.devpulse.domain.model.review.AuthorMergedMrCount;
+import ru.x5.devpulse.domain.model.review.RepoMergedMrCount;
 import ru.x5.devpulse.domain.model.review.ReviewAuthorStats;
 import ru.x5.devpulse.domain.model.review.ReviewStats;
+import ru.x5.devpulse.domain.model.review.TeamMergedMrStats;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.stats.HourlyBucket;
 import ru.x5.devpulse.domain.model.stats.HourlyStats;
+import ru.x5.devpulse.domain.model.kaiten.KaitenCardId;
 import ru.x5.devpulse.domain.model.stats.PeriodSummary;
 import ru.x5.devpulse.domain.model.user.Email;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
@@ -75,6 +88,9 @@ class StatsControllerTest {
     @MockitoBean GetHourlyStatsUseCase getHourlyStats;
     @MockitoBean GetReviewStatsUseCase getReviewStats;
     @MockitoBean GetPerformanceReviewUseCase getPerformanceReview;
+    @MockitoBean GetTeamDefectsUseCase getTeamDefects;
+    @MockitoBean GetMergedMrStatsUseCase getMergedMrStats;
+    @MockitoBean MarkDefectsAiAgentUseCase markDefectsAiAgent;
 
     @Test
     @DisplayName("GET /daily?from=&to= возвращает 200 и список агрегатов с email/repo")
@@ -242,5 +258,76 @@ class StatsControllerTest {
                         .param("email", "unknown@x5.ru")
                         .param("from", "2026-01-01").param("to", "2026-03-31"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("POST /defects → 200: периоды (byPriority/total/aiAgentCount) + детализация с участниками")
+    void defectsReturnsPeriodsAndDetails() throws Exception {
+        Period period = new Period(LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30));
+        TeamDefectsReport report = new TeamDefectsReport(
+                "Platform",
+                List.of(new PeriodDefectCounts(period, new UrgencyCounts(2, 5, 4, 3, 0), 6)),
+                List.of(new DefectDetail(
+                        new KaitenCardId(150766L), "Не грузится отчёт", "https://kaiten.x5.ru/150766",
+                        LocalDateTime.of(2026, 4, 5, 10, 0), true,
+                        List.of(new DefectMember(new Email("boris@x5.ru"), "Boris", "http://a")))));
+        when(getTeamDefects.get(eq("Platform"), any())).thenReturn(report);
+
+        mvc.perform(post("/api/v2/stats/defects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"team\":\"Platform\",\"periods\":[{\"from\":\"2026-04-01\",\"to\":\"2026-04-30\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.team").value("Platform"))
+                .andExpect(jsonPath("$.periods[0].total").value(14))
+                .andExpect(jsonPath("$.periods[0].aiAgentCount").value(6))
+                .andExpect(jsonPath("$.periods[0].byPriority.high").value(5))
+                .andExpect(jsonPath("$.defects[0].id").value(150766))
+                .andExpect(jsonPath("$.defects[0].aiAgent").value(true))
+                .andExpect(jsonPath("$.defects[0].members[0].email").value("boris@x5.ru"));
+    }
+
+    @Test
+    @DisplayName("POST /defects с пустой командой → 400 (раздел team-scoped)")
+    void defectsBlankTeamReturns400() throws Exception {
+        mvc.perform(post("/api/v2/stats/defects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"team\":\"  \",\"periods\":[{\"from\":\"2026-04-01\",\"to\":\"2026-04-30\"}]}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("GET /merged-mrs → 200: total + разбивки по авторам и репозиториям")
+    void mergedMrsReturnsStats() throws Exception {
+        Period period = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
+        TeamMergedMrStats stats = new TeamMergedMrStats(
+                "Platform", period, 37,
+                List.of(new AuthorMergedMrCount(new Email("boris@x5.ru"), "Boris", "http://a", 21)),
+                List.of(new RepoMergedMrCount("gkr/xrg-markable", 23)));
+        when(getMergedMrStats.get(eq("Platform"), any())).thenReturn(stats);
+
+        mvc.perform(get("/api/v2/stats/merged-mrs")
+                        .param("from", "2026-05-01").param("to", "2026-05-31").param("team", "Platform"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(37))
+                .andExpect(jsonPath("$.authors[0].email").value("boris@x5.ru"))
+                .andExpect(jsonPath("$.authors[0].count").value(21))
+                .andExpect(jsonPath("$.byRepo[0].repo").value("gkr/xrg-markable"))
+                .andExpect(jsonPath("$.byRepo[0].count").value(23));
+    }
+
+    @Test
+    @DisplayName("POST /defects/ai-agent → 200: requested/updated/failedIds; cardIds → use-case")
+    void markAiAgentReturnsResult() throws Exception {
+        when(markDefectsAiAgent.mark(any()))
+                .thenReturn(new AiAgentMarkResult(2, 1, List.of(new KaitenCardId(273814L))));
+
+        mvc.perform(post("/api/v2/stats/defects/ai-agent")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cardIds\":[150766,273814]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requested").value(2))
+                .andExpect(jsonPath("$.updated").value(1))
+                .andExpect(jsonPath("$.failedIds[0]").value(273814));
+        verify(markDefectsAiAgent).mark(List.of(new KaitenCardId(150766L), new KaitenCardId(273814L)));
     }
 }

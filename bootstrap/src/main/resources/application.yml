@@ -144,7 +144,7 @@ gitlab:
     max-backfill-days: ${GITLAB_MAX_BACKFILL_DAYS:0}
     # Сколько MR обрабатывать параллельно (approvals+notes на virtual threads). Главный рычаг
     # скорости: per-MR вызовы — узкое место. Подними, если scm.x5.ru держит больше RPS.
-    concurrency: ${GITLAB_CONCURRENCY:8}
+    concurrency: ${GITLAB_CONCURRENCY:16}
     request-delay-ms: 200
     max-retries: 5
     retry-backoff-ms: 2000
@@ -153,7 +153,7 @@ gitlab:
     # bounded retry per-call мог бы держать advisory-лок часами. По истечении недособранные MR
     # отменяются, прогон продолжается (агрегатный WARN о потерянных), курсор не двигается → следующий
     # сбор доберёт. 0s — без границы (старое поведение). Формат Duration (30m / 1h / 0s).
-    project-review-timeout: ${GITLAB_PROJECT_REVIEW_TIMEOUT:30m}
+    project-review-timeout: ${GITLAB_PROJECT_REVIEW_TIMEOUT:1h}
     # scm.x5.ru за внутренним X5 CA — как и Kaiten, в dev можно отключить проверку SSL.
     insecure-ssl: ${GITLAB_INSECURE_SSL:false}
 
@@ -162,6 +162,13 @@ scoring:
   # Baseline: ожидаемое количество не-мердж коммитов за 30 дней — норма команды (score = 1.0).
   # Для других периодов масштабируется линейно (за 15 дней ожидание = 25, и т.д.).
   expected-commits-per-30-days: ${SCORING_EXPECTED_COMMITS_PER_30D:50}
+
+# === Merged-MR статистика ===
+merged-mrs:
+  # Ветки назначения, которые считаются «дев» для раздела GET /stats/merged-mrs
+  # (target_branch ∈ этого набора). Comma-separated env → список. Историю нужно
+  # пересобрать, чтобы у старых MR появился target_branch (nullable до миграции 030).
+  dev-branches: ${MERGED_MRS_DEV_BRANCHES:dev,main,development}
 
 # === Auth (ADR-13) ===
 auth:

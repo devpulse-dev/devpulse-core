@@ -1,9 +1,13 @@
 package ru.x5.devpulse.adapter.kaiten;
 
 import java.util.List;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
+import org.springframework.web.service.annotation.PatchExchange;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenCardDto;
+import ru.x5.devpulse.adapter.kaiten.dto.KaitenCardUpdateDto;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenUserDto;
 
 /**
@@ -63,4 +67,11 @@ public interface KaitenHttpClient {
             @org.springframework.web.bind.annotation.RequestParam(required = false, name = "member_ids") String memberIds,
             @org.springframework.web.bind.annotation.RequestParam(required = false, name = "updated_after") String updatedAfter
     );
+
+    /**
+     * {@code PATCH /cards/{id}} — «Update card». Сейчас используется только для простановки
+     * кастомных property (флаг «AI-Agent» {@code id_6064}). Ответ не используем.
+     */
+    @PatchExchange("/cards/{id}")
+    void updateCard(@PathVariable long id, @RequestBody KaitenCardUpdateDto body);
 }

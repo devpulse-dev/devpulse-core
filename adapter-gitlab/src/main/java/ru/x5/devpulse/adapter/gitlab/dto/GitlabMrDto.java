@@ -15,5 +15,6 @@ public record GitlabMrDto(
         @JsonProperty("web_url") String webUrl,
         @JsonProperty("created_at") OffsetDateTime createdAt,
         @JsonProperty("merged_at") OffsetDateTime mergedAt,
+        @JsonProperty("target_branch") String targetBranch,
         GitlabUserDto author
 ) {}

@@ -50,6 +50,9 @@ class SecurityConfig {
                         // (WebMvcConfig); auth-эндпоинты — нет (другой пакет). Гейтим только
                         // аналитические разделы; операционное (collection) — любому аутентиф.
                         .requestMatchers("/api/v2/cohorts/**").hasAnyRole("ADMIN", "TEAMLEAD")
+                        // Мутация карточек Kaiten (простановка флага AI-Agent) — только elevated.
+                        .requestMatchers(HttpMethod.POST, "/api/v2/stats/defects/ai-agent")
+                                .hasAnyRole("ADMIN", "TEAMLEAD")
                         // GET /teams — список команд для ГЛОБАЛЬНОГО фильтра в топбаре —
                         // доступен всем аутентифицированным (фильтр на открытых страницах).
                         // Управление (назначение лида/команды) — только elevated.

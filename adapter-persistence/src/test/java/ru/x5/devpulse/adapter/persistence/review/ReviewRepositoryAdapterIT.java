@@ -19,7 +19,9 @@ import ru.x5.devpulse.application.port.out.ReviewWriteRepository;
 import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.review.CollectedMergeRequest;
 import ru.x5.devpulse.domain.model.review.MergeRequest;
+import ru.x5.devpulse.domain.model.review.MergedMrCountRow;
 import ru.x5.devpulse.domain.model.review.MrReview;
+import ru.x5.devpulse.domain.model.review.RepoMergedMrCount;
 import ru.x5.devpulse.domain.model.user.Email;
 
 /**
@@ -106,6 +108,63 @@ class ReviewRepositoryAdapterIT extends PostgresContainerSupport {
                 () -> assertThat(b.reviews().getFirst().commentCount()).isEqualTo(9));
     }
 
+    @Test
+    @DisplayName("countMergedMrByAuthor: группировка по автору + фильтры период/ветки/авторы")
+    void countsMergedByAuthor() {
+        Email x = new Email("agg-author-x@x5.ru");
+        Email y = new Email("agg-author-y@x5.ru");
+        Email z = new Email("agg-author-z@x5.ru"); // не в запросе
+        writeRepo.upsert(List.of(
+                merged(9100L, 1L, x, mayDay(11), "dev"),
+                merged(9100L, 2L, x, mayDay(12), "main"),
+                merged(9100L, 3L, x, mayDay(13), "feature/x"),   // не dev-ветка → исключить
+                merged(9100L, 4L, x, LocalDateTime.of(2026, 6, 15, 12, 0), "dev"), // merged вне периода
+                merged(9100L, 5L, y, mayDay(14), "dev"),
+                merged(9100L, 6L, z, mayDay(15), "dev")));       // автор не в запросе → исключить
+
+        List<MergedMrCountRow> rows =
+                readRepo.countMergedMrByAuthor(MAY, List.of(x, y), List.of("dev", "main"));
+        Map<Email, Long> byEmail = rows.stream()
+                .collect(Collectors.toMap(MergedMrCountRow::email, MergedMrCountRow::count));
+
+        assertAll("агрегат по авторам",
+                () -> assertThat(byEmail).containsOnlyKeys(x, y),
+                () -> assertThat(byEmail.get(x)).as("dev + main, без feature/вне периода").isEqualTo(2L),
+                () -> assertThat(byEmail.get(y)).isEqualTo(1L));
+    }
+
+    @Test
+    @DisplayName("countMergedMrByRepo: группировка по проекту, имя репо из web_url, те же фильтры")
+    void countsMergedByRepo() {
+        Email a = new Email("agg-repo-a@x5.ru");
+        writeRepo.upsert(List.of(
+                mergedUrl(9201L, 11L, a, mayDay(11), "dev", "https://scm.x5.ru/gkr/core/-/merge_requests/11"),
+                mergedUrl(9201L, 12L, a, mayDay(12), "main", "https://scm.x5.ru/gkr/core/-/merge_requests/12"),
+                mergedUrl(9202L, 13L, a, mayDay(13), "dev", "https://scm.x5.ru/gkr/markable/-/merge_requests/13"),
+                mergedUrl(9203L, 14L, a, mayDay(14), "feature/z", "https://scm.x5.ru/gkr/other/-/merge_requests/14")));
+
+        List<RepoMergedMrCount> rows =
+                readRepo.countMergedMrByRepo(MAY, List.of(a), List.of("dev", "main"));
+        Map<String, Integer> byRepo = rows.stream()
+                .collect(Collectors.toMap(RepoMergedMrCount::repo, RepoMergedMrCount::count));
+
+        assertAll("агрегат по репозиториям",
+                () -> assertThat(byRepo).as("feature/z-ветка исключена").containsOnlyKeys("gkr/core", "gkr/markable"),
+                () -> assertThat(byRepo.get("gkr/core")).isEqualTo(2),
+                () -> assertThat(byRepo.get("gkr/markable")).isEqualTo(1));
+    }
+
+    @Test
+    @DisplayName("Пустой список авторов или веток → пустой результат (без запроса в БД)")
+    void emptyInputsYieldEmpty() {
+        Email a = new Email("agg-empty@x5.ru");
+        assertAll(
+                () -> assertThat(readRepo.countMergedMrByAuthor(MAY, List.of(), List.of("dev"))).isEmpty(),
+                () -> assertThat(readRepo.countMergedMrByAuthor(MAY, List.of(a), List.of())).isEmpty(),
+                () -> assertThat(readRepo.countMergedMrByRepo(MAY, List.of(), List.of("dev"))).isEmpty(),
+                () -> assertThat(readRepo.countMergedMrByRepo(MAY, List.of(a), List.of())).isEmpty());
+    }
+
     private MergeRequest readByAuthor(Email author) {
         return readRepo.findMergeRequestsByPeriod(MAY).stream()
                 .filter(m -> m.author().equals(author))
@@ -113,10 +172,25 @@ class ReviewRepositoryAdapterIT extends PostgresContainerSupport {
                 .orElseThrow(() -> new AssertionError("MR автора " + author.value() + " не найден"));
     }
 
+    private static LocalDateTime mayDay(int day) {
+        return LocalDateTime.of(2026, 5, day, 12, 0);
+    }
+
     private static CollectedMergeRequest mr(long projectId, long iid, Email author,
                                             LocalDateTime mergedAt, List<MrReview> reviews) {
         return new CollectedMergeRequest(
                 projectId, iid, author, "title", "https://scm/mr/" + iid, "merged",
-                CREATED, mergedAt, reviews);
+                CREATED, mergedAt, "dev", reviews);
+    }
+
+    private static CollectedMergeRequest merged(long projectId, long iid, Email author,
+                                                LocalDateTime mergedAt, String branch) {
+        return mergedUrl(projectId, iid, author, mergedAt, branch, "https://scm/mr/" + iid);
+    }
+
+    private static CollectedMergeRequest mergedUrl(long projectId, long iid, Email author,
+                                                   LocalDateTime mergedAt, String branch, String webUrl) {
+        return new CollectedMergeRequest(
+                projectId, iid, author, "title", webUrl, "merged", CREATED, mergedAt, branch, List.of());
     }
 }

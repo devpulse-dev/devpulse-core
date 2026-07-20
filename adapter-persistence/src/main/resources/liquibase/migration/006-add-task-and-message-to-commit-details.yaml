@@ -2,6 +2,12 @@ databaseChangeLog:
   - changeSet:
       id: 006-add-task-and-message-to-commit-details
       author: boris.osechinskiy
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                tableName: commit_details
+                columnName: task_number
       changes:
         - addColumn:
             tableName: commit_details

@@ -90,6 +90,45 @@ class KaitenCardMapperTest {
     }
 
     @Test
+    @DisplayName("aiAgentFrom: true/[true]/\"true\"/1 → true; false/null/absent/иное → false")
+    void parsesAiAgentFlag() {
+        assertAll(
+                () -> assertThat(mapper.aiAgentFrom(Map.of("id_6064", true))).isTrue(),
+                () -> assertThat(mapper.aiAgentFrom(Map.of("id_6064", List.of(true)))).isTrue(),
+                () -> assertThat(mapper.aiAgentFrom(Map.of("id_6064", "true"))).isTrue(),
+                () -> assertThat(mapper.aiAgentFrom(Map.of("id_6064", 1))).isTrue(),
+                () -> assertThat(mapper.aiAgentFrom(Map.of("id_6064", false))).isFalse(),
+                () -> assertThat(mapper.aiAgentFrom(Map.of("id_6064", "no"))).isFalse(),
+                () -> assertThat(mapper.aiAgentFrom(Map.of("id_6064", 0))).isFalse(),
+                () -> assertThat(mapper.aiAgentFrom(Map.of("id_6064", List.of()))).isFalse(),
+                () -> assertThat(mapper.aiAgentFrom(Map.of("other", true))).as("нет ключа").isFalse(),
+                () -> assertThat(mapper.aiAgentFrom(null)).isFalse());
+    }
+
+    @Test
+    @DisplayName("toDomain: properties.id_6064=true → card.aiAgent()=true; отсутствие → false")
+    void mapsAiAgentFromProperties() {
+        KaitenCardDto withFlag = new KaitenCardDto(
+                1L, "t", null, 8,
+                new KaitenCardDto.KaitenColumnDto(1L, "c", 2),
+                new KaitenCardDto.KaitenNamedRefDto(1L, "b"),
+                new KaitenCardDto.KaitenNamedRefDto(1L, "s"),
+                null, LocalDateTime.of(2026, 4, 1, 0, 0), null, null, false, List.of(),
+                Map.of("id_6064", true), null, null, null);
+        KaitenCardDto noFlag = new KaitenCardDto(
+                2L, "t", null, 8,
+                new KaitenCardDto.KaitenColumnDto(1L, "c", 2),
+                new KaitenCardDto.KaitenNamedRefDto(1L, "b"),
+                new KaitenCardDto.KaitenNamedRefDto(1L, "s"),
+                null, LocalDateTime.of(2026, 4, 1, 0, 0), null, null, false, List.of(),
+                Map.of("id_2561", List.of(4524)), null, null, null);
+
+        assertAll(
+                () -> assertThat(mapper.toDomain(withFlag, "").aiAgent()).isTrue(),
+                () -> assertThat(mapper.toDomain(noFlag, "").aiAgent()).isFalse());
+    }
+
+    @Test
     @DisplayName("Пустой webBaseUrl → KaitenCard.url=null, остальное полностью замаппено")
     void blankBaseUrlGivesNullCardUrl() {
         KaitenCardDto dto = new KaitenCardDto(

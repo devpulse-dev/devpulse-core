@@ -41,12 +41,29 @@ interface KaitenCardMapper {
     @Mapping(target = "parentUrl", expression = "java(parentUrlFrom(dto.parents(), webBaseUrl))")
     @Mapping(target = "inProgressAt", source = "dto.inProgressAt")
     @Mapping(target = "doneAt", source = "dto.doneAt")
+    @Mapping(target = "aiAgent", expression = "java(aiAgentFrom(dto.properties()))")
     KaitenCard toDomain(KaitenCardDto dto, String webBaseUrl);
 
     /** Срочность из property {@code id_2561} (массив; берём первый код). */
     default KaitenUrgency urgencyFrom(Map<String, Object> properties) {
         if (properties == null) return KaitenUrgency.UNKNOWN;
         return KaitenUrgency.fromId(firstInt(properties.get("id_2561")));
+    }
+
+    /**
+     * Галка «AI-Agent» из property {@code id_6064}: {@code true} только при явном true
+     * (может отсутствовать или быть false). Терпим к форме: {@code true}/{@code [true]}/{@code "true"}/{@code 1}.
+     */
+    default boolean aiAgentFrom(Map<String, Object> properties) {
+        if (properties == null) return false;
+        Object v = properties.get("id_6064");
+        if (v instanceof List<?> list) {
+            v = list.isEmpty() ? null : list.get(0);
+        }
+        if (v instanceof Boolean b) return b;
+        if (v instanceof String s) return "true".equalsIgnoreCase(s.trim());
+        if (v instanceof Number n) return n.intValue() != 0;
+        return false;
     }
 
     default KaitenCardId parentIdFrom(List<KaitenCardDto.KaitenParentDto> parents) {

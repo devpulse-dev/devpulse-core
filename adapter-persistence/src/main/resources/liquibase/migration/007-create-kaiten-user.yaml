@@ -2,6 +2,11 @@ databaseChangeLog:
   - changeSet:
       id: 007-create-kaiten-user
       author: boris.osechinskiy
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: kaiten_user
       changes:
         - createTable:
             tableName: kaiten_user

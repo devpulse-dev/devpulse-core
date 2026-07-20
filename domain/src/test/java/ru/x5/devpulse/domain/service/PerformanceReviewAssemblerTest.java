@@ -210,7 +210,7 @@ class PerformanceReviewAssemblerTest {
                 new KaitenCardId(id), "card" + id, null, TYPE_DEFECT, col,
                 "col", "board", "space", null, null,
                 created, updated, done, false, url, List.of(),
-                urgency, null, null, null, null, null);
+                urgency, null, null, null, null, null, false);
     }
 
     private static KaitenCard buildCard(long id, int typeId, int columnType,
@@ -221,7 +221,7 @@ class PerformanceReviewAssemblerTest {
                 new KaitenCardId(id), title, null, typeId, columnType,
                 "col", "board", "space", null, null,
                 created, updated, closedAt, false, url, List.of(),
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, false);
     }
 
     @Nested
@@ -340,6 +340,6 @@ class PerformanceReviewAssemblerTest {
                 new KaitenCardId(id), "card" + id, null, typeId, columnType,
                 "col", "board", "space", null, null,
                 created, updated, closedAt, false, "https://k/" + id, List.of(),
-                urgency, parent, parentTitle, parentUrl, inProgressAt, doneAt);
+                urgency, parent, parentTitle, parentUrl, inProgressAt, doneAt, false);
     }
 }

@@ -2,6 +2,11 @@ databaseChangeLog:
   - changeSet:
       id: 009-create-kaiten-card-comment
       author: boris.osechinskiy
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: kaiten_card_comment
       changes:
         - createTable:
             tableName: kaiten_card_comment

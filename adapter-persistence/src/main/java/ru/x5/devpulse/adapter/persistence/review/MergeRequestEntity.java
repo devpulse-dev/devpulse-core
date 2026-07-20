@@ -51,6 +51,10 @@ public class MergeRequestEntity {
     @Column(name = "state", nullable = false, length = 20)
     private String state;
 
+    /** Ветка назначения MR (target_branch). Nullable: у собранных до миграции 030 её нет. */
+    @Column(name = "target_branch", length = 255)
+    private String targetBranch;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

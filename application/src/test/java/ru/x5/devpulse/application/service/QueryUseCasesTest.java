@@ -353,6 +353,6 @@ class QueryUseCasesTest {
                 null, null, now, now, null, false,
                 "https://kaiten.x5.ru/" + id,
                 List.of(),
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, false);
     }
 }

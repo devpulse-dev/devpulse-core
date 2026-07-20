@@ -20,6 +20,61 @@ interface MergeRequestJpaRepository extends JpaRepository<MergeRequestEntity, Lo
             @Param("to") LocalDateTime to);
 
     /**
+     * Кол-во вмерженных MR по авторам за период: {@code merged_at ∈ [from,to]}, автор ∈ emails.
+     * Агрегация GROUP BY на стороне БД — в память MR не поднимаем. Interface-проекция
+     * (author + count) маппится в домен адаптером.
+     */
+    @Query("""
+            select m.authorEmail as authorEmail, count(m) as mergedCount
+              from MergeRequestEntity m
+             where m.mergedAt between :from and :to
+               and m.authorEmail in :emails
+               and m.targetBranch in :branches
+             group by m.authorEmail
+            """)
+    List<AuthorMergedCountView> countMergedByAuthor(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("emails") Collection<String> emails,
+            @Param("branches") Collection<String> branches);
+
+    /** Проекция результата {@link #countMergedByAuthor}. */
+    interface AuthorMergedCountView {
+        String getAuthorEmail();
+
+        long getMergedCount();
+    }
+
+    /**
+     * Кол-во вмерженных MR по репозиториям за период: те же фильтры, GROUP BY проекта.
+     * {@code min(web_url)} — представитель для парсинга пути репо (у всех MR проекта один хост/namespace).
+     */
+    @Query("""
+            select m.gitlabProjectId as projectId,
+                   min(m.webUrl) as sampleWebUrl,
+                   count(m) as mergedCount
+              from MergeRequestEntity m
+             where m.mergedAt between :from and :to
+               and m.authorEmail in :emails
+               and m.targetBranch in :branches
+             group by m.gitlabProjectId
+            """)
+    List<RepoMergedCountView> countMergedByRepo(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("emails") Collection<String> emails,
+            @Param("branches") Collection<String> branches);
+
+    /** Проекция результата {@link #countMergedByRepo}. */
+    interface RepoMergedCountView {
+        Long getProjectId();
+
+        String getSampleWebUrl();
+
+        long getMergedCount();
+    }
+
+    /**
      * Batch-lookup существующих MR по натуральному ключу GitLab — для upsert при сборе.
      *
      * <p>Заменяет N+1 (по одному {@code findBy} на MR). Запрос по двум IN-множествам даёт
