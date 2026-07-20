@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.DisplayName;
@@ -74,7 +75,8 @@ class ReviewGatewayCollectTest {
                 new GitlabNoteDto(2L, BORIS_SIMPLE, false),
                 new GitlabNoteDto(3L, ALICE_SIMPLE, true)));
 
-        List<CollectedMergeRequest> result = adapter().fetchMergeRequests(LocalDateTime.of(2026, 5, 1, 0, 0));
+        List<CollectedMergeRequest> result = new ArrayList<>();
+        adapter().streamMergeRequests(LocalDateTime.of(2026, 5, 1, 0, 0), result::addAll);
 
         assertThat(result).hasSize(1);
         CollectedMergeRequest c = result.getFirst();
@@ -116,8 +118,8 @@ class ReviewGatewayCollectTest {
         // bad — approvals бросает: toCollected падает, MR теряется, но good остаётся
         when(http.getApprovals("grp/repo", 8L)).thenThrow(new RuntimeException("GitLab 500"));
 
-        List<CollectedMergeRequest> result =
-                adapter().fetchMergeRequests(LocalDateTime.of(2026, 5, 1, 0, 0));
+        List<CollectedMergeRequest> result = new ArrayList<>();
+        adapter().streamMergeRequests(LocalDateTime.of(2026, 5, 1, 0, 0), result::addAll);
 
         assertAll("частичный сбор устойчив к падению одного MR",
                 () -> assertThat(result).as("good собран, bad потерян — не весь батч").hasSize(1),

@@ -2,6 +2,7 @@ package ru.x5.devpulse.application.port.out;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.function.Consumer;
 import ru.x5.devpulse.domain.model.review.CollectedMergeRequest;
 
 /**
@@ -14,8 +15,17 @@ import ru.x5.devpulse.domain.model.review.CollectedMergeRequest;
 public interface ReviewGateway {
 
     /**
-     * MR, обновлённые после {@code updatedAfter}, по всем настроенным проектам.
-     * Инкрементальный сбор: {@code updatedAfter} = начало периода прогона.
+     * Стримит MR, обновлённые после {@code updatedAfter}, по всем настроенным проектам — отдавая
+     * их <b>батчами по проекту</b> в {@code projectBatchHandler} (по образцу {@code streamCommits}/
+     * {@code streamCards}).
+     *
+     * <p>Инкрементальный сбор: {@code updatedAfter} = начало периода прогона. Стриминг per-project,
+     * чтобы не держать в heap весь корпус MR всех проектов одновременно (на бэкфилле за год это
+     * OOM-риск): собрали проект → отдали батч на запись → освободили. Батч одного проекта может
+     * быть пустым — обработчик сам решает, писать ли (обычно пропускает пустой).</p>
+     *
+     * <p>Устойчивость к сбоям — на адаптере: падение/дедлайн одного проекта не срывает остальные
+     * (потери логируются агрегатно), обработчику отдаётся то, что удалось собрать.</p>
      */
-    List<CollectedMergeRequest> fetchMergeRequests(LocalDateTime updatedAfter);
+    void streamMergeRequests(LocalDateTime updatedAfter, Consumer<List<CollectedMergeRequest>> projectBatchHandler);
 }

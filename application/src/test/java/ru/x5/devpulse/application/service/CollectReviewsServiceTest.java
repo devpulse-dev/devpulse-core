@@ -1,13 +1,15 @@
 package ru.x5.devpulse.application.service;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,12 +30,17 @@ class CollectReviewsServiceTest {
     @Mock ReviewWriteRepository reviewWriteRepository;
 
     @Test
-    @DisplayName("Собранные MR прокидываются в upsert")
+    @DisplayName("Батч проекта прокидывается в upsert")
     void delegatesToWriteRepository() {
         var mr = new CollectedMergeRequest(
                 42L, 7L, new Email("boris@x5.ru"), "fix", "https://scm/mr/7", "merged",
                 SINCE, SINCE.plusHours(4), "dev", List.of());
-        when(reviewGateway.fetchMergeRequests(SINCE)).thenReturn(List.of(mr));
+        // gateway стримит один project-batch в handler (per-project коллбэк)
+        doAnswer(inv -> {
+            Consumer<List<CollectedMergeRequest>> handler = inv.getArgument(1);
+            handler.accept(List.of(mr));
+            return null;
+        }).when(reviewGateway).streamMergeRequests(eq(SINCE), any());
 
         new CollectReviewsService(reviewGateway, reviewWriteRepository).collect(SINCE);
 
@@ -41,13 +48,18 @@ class CollectReviewsServiceTest {
     }
 
     @Test
-    @DisplayName("Пусто из GitLab ⇒ upsert не зовём")
-    void emptyGatewaySkipsWrite() {
-        when(reviewGateway.fetchMergeRequests(any())).thenReturn(List.of());
+    @DisplayName("Пустой батч ⇒ upsert не зовём")
+    void emptyBatchSkipsWrite() {
+        // gateway отдаёт пустой batch — писать нечего
+        doAnswer(inv -> {
+            Consumer<List<CollectedMergeRequest>> handler = inv.getArgument(1);
+            handler.accept(List.of());
+            return null;
+        }).when(reviewGateway).streamMergeRequests(eq(SINCE), any());
 
         new CollectReviewsService(reviewGateway, reviewWriteRepository).collect(SINCE);
 
-        verifyNoInteractions(reviewWriteRepository);
         verify(reviewWriteRepository, never()).upsert(any());
+        verifyNoInteractions(reviewWriteRepository);
     }
 }

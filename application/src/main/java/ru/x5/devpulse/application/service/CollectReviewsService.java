@@ -1,25 +1,24 @@
 package ru.x5.devpulse.application.service;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import ru.x5.devpulse.application.port.in.CollectReviewsUseCase;
 import ru.x5.devpulse.application.port.out.ReviewGateway;
 import ru.x5.devpulse.application.port.out.ReviewWriteRepository;
-import ru.x5.devpulse.domain.model.review.CollectedMergeRequest;
 
 /**
  * Реализация {@link CollectReviewsUseCase}: GitLab → БД.
  *
  * <ol>
- *   <li>{@code reviewGateway.fetchMergeRequests(since)} — MR/approvals/notes из GitLab,
- *       email'ы ревьюеров уже разрезолвлены;</li>
- *   <li>{@code reviewWriteRepository.upsert(...)} — идемпотентная запись.</li>
+ *   <li>{@code reviewGateway.streamMergeRequests(since, ...)} — MR/approvals/notes из GitLab
+ *       батчами по проекту, email'ы ревьюеров уже разрезолвлены;</li>
+ *   <li>{@code reviewWriteRepository.upsert(batch)} — идемпотентная запись батча проекта.</li>
  * </ol>
  *
- * <p>Без I/O напрямую — только координация порта-сбора и порта-записи (как остальные
- * collection-фазы). Изоляцию (падение не валит прогон) обеспечивает оркестратор.</p>
+ * <p>Стриминг per-project: батч каждого проекта пишется и освобождается сразу, весь корпус MR
+ * в heap не копится (на бэкфилле за год это OOM-риск). Без I/O напрямую — только координация
+ * порта-сбора и порта-записи. Изоляцию (падение не валит прогон) обеспечивает оркестратор.</p>
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -31,12 +30,18 @@ public final class CollectReviewsService implements CollectReviewsUseCase {
     @Override
     public void collect(LocalDateTime since) {
         log.info("Старт сбора ревью-метрик из GitLab (updated_after={})", since);
-        List<CollectedMergeRequest> mrs = reviewGateway.fetchMergeRequests(since);
-        if (mrs.isEmpty()) {
+        int[] total = {0};
+        reviewGateway.streamMergeRequests(since, batch -> {
+            if (batch.isEmpty()) {
+                return;
+            }
+            reviewWriteRepository.upsert(batch);
+            total[0] += batch.size();
+        });
+        if (total[0] == 0) {
             log.info("GitLab не вернул MR за период — нечего писать");
             return;
         }
-        reviewWriteRepository.upsert(mrs);
-        log.info("Сбор ревью завершён: {} MR записано/обновлено", mrs.size());
+        log.info("Сбор ревью завершён: {} MR записано/обновлено", total[0]);
     }
 }

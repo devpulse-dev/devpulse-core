@@ -18,6 +18,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
@@ -59,12 +60,21 @@ class ReviewGatewayAdapter implements ReviewGateway {
     private final GitlabProperties properties;
     private final GitRepoProperties gitRepos;
 
+    /**
+     * Верхний потолок числа страниц пагинации (MR / notes / users). Защита от зациклившегося
+     * или аномального API: без него {@code while(size==perPage)} мог бы крутиться бесконечно.
+     * При {@code pageSize=100} это 100k элементов на одну пагинацию — заведомо выше реального
+     * объёма проекта; достижение капа логируется WARN'ом (данные усечены, доберёт следующий сбор).
+     */
+    private static final int MAX_PAGES = 1000;
+
     @Override
-    public List<CollectedMergeRequest> fetchMergeRequests(LocalDateTime updatedAfter) {
+    public void streamMergeRequests(LocalDateTime updatedAfter,
+                                    Consumer<List<CollectedMergeRequest>> projectBatchHandler) {
         List<String> projects = GitlabProjectPaths.resolve(properties, gitRepos);
         if (projects.isEmpty()) {
             log.warn("GitLab: не настроены проекты (gitlab.api.projects / git.repositories) — сбор ревью пропущен");
-            return List.of();
+            return;
         }
 
         // Опциональный кап окна бэкфилла: maxBackfillDays > 0 → не сканируем глубже now - N дней.
@@ -86,17 +96,20 @@ class ReviewGatewayAdapter implements ReviewGateway {
         log.info("GitLab: старт сбора ревью по {} проектам (updated_after={}, public_email={})",
                 projects.size(), updatedAfterIso, properties.fetchPublicEmails() ? "вкл" : "username@домен");
 
-        List<CollectedMergeRequest> result = new ArrayList<>();
+        int grandTotal = 0;
         for (String project : projects) {
             try {
-                collectProject(project, updatedAfterIso, publicEmailById, result);
+                // Стриминг per-project: собрали проект → отдали батч на запись → освободили heap.
+                // Весь корпус MR всех проектов в памяти не копится (бэкфилл за год = OOM-риск).
+                List<CollectedMergeRequest> projectMrs = collectProject(project, updatedAfterIso, publicEmailById);
+                grandTotal += projectMrs.size();
+                projectBatchHandler.accept(projectMrs);
             } catch (Exception e) {
                 // Падение одного проекта не должно ронять остальные.
                 log.error("GitLab: проект {} — сбор ревью упал: {}", project, e.getMessage(), e);
             }
         }
-        log.info("GitLab: собрано {} MR с ревью по {} проектам", result.size(), projects.size());
-        return result;
+        log.info("GitLab: собрано {} MR с ревью по {} проектам", grandTotal, projects.size());
     }
 
     /* ----------------------------- users ----------------------------- */
@@ -117,6 +130,10 @@ class ReviewGatewayAdapter implements ReviewGateway {
                     }
                 }
                 if (users.size() < perPage) break;
+                if (page >= MAX_PAGES) {
+                    log.warn("GitLab: потолок пагинации /users ({} стр.), public_email усечён", MAX_PAGES);
+                    break;
+                }
                 page++;
             }
             log.info("GitLab: загружено {} public_email'ов", byId.size());
@@ -131,8 +148,8 @@ class ReviewGatewayAdapter implements ReviewGateway {
 
     /* ----------------------------- MR + reviews ----------------------------- */
 
-    private void collectProject(String project, String updatedAfterIso,
-                                Map<Long, String> publicEmailById, List<CollectedMergeRequest> out) {
+    private List<CollectedMergeRequest> collectProject(String project, String updatedAfterIso,
+                                                       Map<Long, String> publicEmailById) {
         // 1. Список MR — последовательно (дёшево: 1 запрос на страницу из pageSize MR).
         List<GitlabMrDto> allMrs = new ArrayList<>();
         int page = 1;
@@ -144,16 +161,22 @@ class ReviewGatewayAdapter implements ReviewGateway {
                     () -> http.getMergeRequests(project, updatedAfterIso, p, perPage, "all", "all"));
             allMrs.addAll(mrs);
             if (mrs.size() < perPage) break;
+            if (p >= MAX_PAGES) {
+                log.warn("GitLab: {} — достигнут потолок пагинации MR ({} стр. × {}), список усечён — "
+                        + "часть MR не собрана этим прогоном (доберёт следующий)", project, MAX_PAGES, perPage);
+                break;
+            }
             page++;
         }
-        if (allMrs.isEmpty()) return;
+        if (allMrs.isEmpty()) return List.of();
 
         log.info("GitLab: {} — {} MR в списке, тяну approvals+notes (concurrency={})",
                 project, allMrs.size(), properties.concurrency());
 
         // 2. Per-MR ревью (approvals + notes) — параллельно, bounded virtual threads.
-        out.addAll(fetchReviewsConcurrently(project, allMrs, publicEmailById));
+        List<CollectedMergeRequest> collected = fetchReviewsConcurrently(project, allMrs, publicEmailById);
         log.info("GitLab: {} — всего {} MR обработано", project, allMrs.size());
+        return collected;
     }
 
     /**
@@ -308,6 +331,10 @@ class ReviewGatewayAdapter implements ReviewGateway {
                     () -> http.getNotes(project, iid, p, perPage));
             all.addAll(notes);
             if (notes.size() < perPage) break;
+            if (p >= MAX_PAGES) {
+                log.warn("GitLab: {}!{} — потолок пагинации notes ({} стр.), усечено", project, iid, MAX_PAGES);
+                break;
+            }
             page++;
         }
         return all;
