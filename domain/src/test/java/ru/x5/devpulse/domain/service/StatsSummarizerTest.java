@@ -16,6 +16,7 @@ import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.stats.PeriodSummary;
+import ru.x5.devpulse.domain.model.stats.WeeklyAuthorActivity;
 import ru.x5.devpulse.domain.model.stats.WeeklyStats;
 import ru.x5.devpulse.domain.model.user.Email;
 
@@ -85,6 +86,35 @@ class StatsSummarizerTest {
     @DisplayName("weekly: пустой/null вход → пустой список")
     void weeklyEmpty(String label, List<DailyAuthorStats> input) {
         assertThat(StatsSummarizer.weekly(input)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("weeklyFromAggregates: reshape (email,неделя)-агрегатов в недели с per-author breakdown")
+    void weeklyFromAggregatesReshapes() {
+        List<WeeklyAuthorActivity> rows = List.of(
+                new WeeklyAuthorActivity(new Email("a@x5.ru"), 2026, 19, 3, 0, 30, 10, 2),
+                new WeeklyAuthorActivity(new Email("b@x5.ru"), 2026, 19, 1, 0, 5, 1, 0),
+                new WeeklyAuthorActivity(new Email("a@x5.ru"), 2026, 20, 5, 1, 50, 20, 4)
+        );
+
+        List<WeeklyStats> weeks = StatsSummarizer.weeklyFromAggregates(rows);
+
+        assertAll("reshape по ISO-неделям",
+                () -> assertThat(weeks).hasSize(2),
+                () -> assertThat(weeks.get(0).week()).as("сначала более ранняя неделя").isEqualTo(19),
+                () -> assertThat(weeks.get(0).totalCommits()).as("3 + 1").isEqualTo(4),
+                () -> assertThat(weeks.get(0).authors()).extracting(x -> x.email().value())
+                        .as("a первый (3 коммита > 1)").containsExactly("a@x5.ru", "b@x5.ru"),
+                () -> assertThat(weeks.get(0).weekStart().getDayOfWeek().getValue())
+                        .as("weekStart — понедельник").isEqualTo(1),
+                () -> assertThat(weeks.get(1).week()).isEqualTo(20),
+                () -> assertThat(weeks.get(1).totalCommits()).isEqualTo(5));
+    }
+
+    @Test
+    @DisplayName("weeklyFromAggregates: пустой вход → пустой список")
+    void weeklyFromAggregatesEmpty() {
+        assertThat(StatsSummarizer.weeklyFromAggregates(List.of())).isEmpty();
     }
 
     /**

@@ -31,6 +31,7 @@ import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.stats.UserProfile;
+import ru.x5.devpulse.domain.model.stats.WeeklyAuthorActivity;
 import ru.x5.devpulse.domain.model.user.Email;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
@@ -70,9 +71,9 @@ class QueryUseCasesTest {
         @Test
         @DisplayName("группирует по ISO-неделям + enrich displayName/avatarUrl из unified_user")
         void groupsByWeekAndEnriches() {
-            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of(
-                    day(EMAIL, LocalDate.of(2026, 5, 4), 1, 0),    // ISO week 19
-                    day(EMAIL, LocalDate.of(2026, 5, 11), 2, 0)    // ISO week 20
+            when(dailyStatsRepository.weeklyAuthorActivity(PERIOD)).thenReturn(List.of(
+                    new WeeklyAuthorActivity(EMAIL, 2026, 19, 1, 0, 10, 5, 1),   // ISO week 19
+                    new WeeklyAuthorActivity(EMAIL, 2026, 20, 2, 0, 10, 5, 1)    // ISO week 20
             ));
             when(unifiedUserRepository.findByEmails(anyCollection())).thenReturn(List.of(
                     userWithProfile(EMAIL, "Boris", "https://avatar/b")
@@ -90,7 +91,7 @@ class QueryUseCasesTest {
         @Test
         @DisplayName("пустые stats → пустой список, без обращения к unified_user")
         void emptyWeeks() {
-            when(dailyStatsRepository.findByPeriod(PERIOD)).thenReturn(List.of());
+            when(dailyStatsRepository.weeklyAuthorActivity(PERIOD)).thenReturn(List.of());
 
             var weeks = new GetWeeklyStatsService(dailyStatsRepository, unifiedUserRepository)
                     .findByPeriod(PERIOD);

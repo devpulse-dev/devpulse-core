@@ -72,9 +72,13 @@ class HexagonalArchitectureTest {
             "org.hibernate.."
     };
 
+    // БЕЗ DO_NOT_INCLUDE_JARS намеренно: при `mvn verify` (или `-pl bootstrap` после install) модули
+    // резолвятся в JAR из ~/.m2, и DO_NOT_INCLUDE_JARS отбросил бы их все кроме bootstrap → ArchUnit
+    // импортировал бы ~8 классов, и ВСЕ layered-правила прошли бы вакуумно (allowEmptyShould). Наш
+    // importPackages(ROOT) и так фильтрует по пакету ru.x5.devpulse — сторонние JAR (spring и пр.)
+    // в выборку не попадают. classpathIsNotVacuous страхует от регресса (см. ниже).
     private static final JavaClasses CLASSES = new ClassFileImporter()
             .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-            .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_JARS)
             .importPackages(ROOT);
 
     /* ====================== направление зависимостей ====================== */

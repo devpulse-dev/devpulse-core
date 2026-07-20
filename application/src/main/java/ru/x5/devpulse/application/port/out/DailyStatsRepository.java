@@ -8,6 +8,7 @@ import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.cohort.MonthlyAuthorActivity;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
+import ru.x5.devpulse.domain.model.stats.WeeklyAuthorActivity;
 import ru.x5.devpulse.domain.model.user.Email;
 
 /**
@@ -44,6 +45,14 @@ public interface DailyStatsRepository {
     List<DailyAuthorStats> findByPeriod(Period period, Optional<Email> author, Optional<String> team);
 
     List<DailyAuthorStats> findByAuthorAndPeriod(Email email, Period period);
+
+    /**
+     * SQL-агрегат активности по {@code (email, ISO-неделя)} за период — основа недельной статистики.
+     * GROUP BY в БД, по строке на {@code (email, неделя)}; не поднимает все daily-строки периода в
+     * heap (в отличие от {@link #findByPeriod}). Reshape в {@code WeeklyStats} — в
+     * {@code StatsSummarizer.weeklyFromAggregates}.
+     */
+    List<WeeklyAuthorActivity> weeklyAuthorActivity(Period period);
 
     /**
      * SQL-агрегат по автору за период: <b>одна строка на автора</b> (SUM по всем дням и репо

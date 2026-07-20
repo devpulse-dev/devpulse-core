@@ -12,6 +12,7 @@ import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.stats.PeriodSummary;
+import ru.x5.devpulse.domain.model.stats.WeeklyAuthorActivity;
 import ru.x5.devpulse.domain.model.stats.WeeklyStats;
 import ru.x5.devpulse.domain.model.user.Email;
 
@@ -60,6 +61,10 @@ public final class StatsSummarizer {
     /**
      * Группирует daily-агрегаты по ISO-неделям, для каждой недели даёт totals + per-author breakdown.
      * Список отсортирован по началу недели возрастающе.
+     *
+     * <p><b>Осиротел:</b> прод перешёл на {@link #weeklyFromAggregates} (свёртка (email, неделя) в
+     * БД, без подъёма всех daily-строк в heap). Метод пока сохранён под регрессионные тесты
+     * weekStart-детерминизма; удалить при следующей чистке мёртвого кода.</p>
      */
     public static List<WeeklyStats> weekly(Collection<DailyAuthorStats> stats) {
         Map<WeekKey, WeekAcc> byWeek = new HashMap<>();
@@ -74,6 +79,25 @@ public final class StatsSummarizer {
 
         List<WeeklyStats> result = new ArrayList<>(byWeek.size());
         for (Map.Entry<WeekKey, WeekAcc> e : byWeek.entrySet()) {
+            result.add(e.getValue().toWeeklyStats(e.getKey()));
+        }
+        result.sort(Comparator.comparing(WeeklyStats::weekStart));
+        return result;
+    }
+
+    /**
+     * Reshape SQL-агрегата {@code (email, ISO-неделя)} в недельную статистику с per-author breakdown.
+     * Группирует по {@code (isoYear, isoWeek)}, для каждой недели — totals + отсортированный список
+     * авторов. Свёртка daily→(email, неделя) сделана в БД (см. {@code weeklyAuthorActivity}), heap не
+     * растёт с длиной периода — в отличие от {@link #weekly(Collection)}.
+     */
+    public static List<WeeklyStats> weeklyFromAggregates(Collection<WeeklyAuthorActivity> rows) {
+        Map<WeekKey, WeekAgg> byWeek = new HashMap<>();
+        for (WeeklyAuthorActivity r : rows) {
+            byWeek.computeIfAbsent(new WeekKey(r.isoYear(), r.isoWeek()), k -> new WeekAgg()).add(r);
+        }
+        List<WeeklyStats> result = new ArrayList<>(byWeek.size());
+        for (Map.Entry<WeekKey, WeekAgg> e : byWeek.entrySet()) {
             result.add(e.getValue().toWeeklyStats(e.getKey()));
         }
         result.sort(Comparator.comparing(WeeklyStats::weekStart));
@@ -151,6 +175,35 @@ public final class StatsSummarizer {
                     commits, mergeCommits, addedLines, deletedLines, testAddedLines,
                     authorList
             );
+        }
+    }
+
+    /** Аккумулятор недели из уже per-author SQL-агрегата (для {@link #weeklyFromAggregates}). */
+    private static final class WeekAgg {
+        long commits;
+        long mergeCommits;
+        long added;
+        long deleted;
+        long testAdded;
+        final List<AuthorSummary> authors = new ArrayList<>();
+
+        void add(WeeklyAuthorActivity r) {
+            commits += r.commits();
+            mergeCommits += r.mergeCommits();
+            added += r.addedLines();
+            deleted += r.deletedLines();
+            testAdded += r.testAddedLines();
+            authors.add(new AuthorSummary(r.email(), null, null,
+                    r.commits(), r.mergeCommits(), r.addedLines(), r.deletedLines(), r.testAddedLines(),
+                    null, null, false));
+        }
+
+        WeeklyStats toWeeklyStats(WeekKey key) {
+            List<AuthorSummary> sorted = authors.stream()
+                    .sorted(Comparator.comparingLong(AuthorSummary::commits).reversed())
+                    .toList();
+            return new WeeklyStats(key.year, key.week, weekStart(key.year, key.week),
+                    commits, mergeCommits, added, deleted, testAdded, sorted);
         }
     }
 }

@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -81,16 +82,32 @@ class ReviewWriteRepositoryAdapter implements ReviewWriteRepository {
     @Transactional
     public void upsert(List<CollectedMergeRequest> mergeRequests) {
         if (mergeRequests == null || mergeRequests.isEmpty()) return;
+        // Дедуп по натуральному ключу (project_id, iid), last-wins. Offset-пагинация GitLab ШТАТНО
+        // возвращает дубли на границах страниц у активного проекта (новые MR сдвигают окно). Дубль
+        // в одном чанке ронял бы native ON CONFLICT ("cannot affect row a second time" при
+        // reWriteBatchedInserts) либо uk_mr_review_mr_reviewer (ревью вставились бы дважды) → откат
+        // транзакции и потеря всех ревью проекта. Дедуп до чанкинга снимает обе поломки.
+        List<CollectedMergeRequest> deduped = dedupLastWins(mergeRequests);
         LocalDateTime now = LocalDateTime.now();
-        int total = mergeRequests.size();
+        int total = deduped.size();
 
         for (int start = 0; start < total; start += CHUNK) {
             int end = Math.min(start + CHUNK, total);
-            upsertChunk(mergeRequests.subList(start, end), now);
+            upsertChunk(deduped.subList(start, end), now);
             em.clear(); // отцепляем прочитанные findBy-сущности — persistence context не растёт на бэкфилле
             log.info("Записано {}/{} MR с ревью", end, total);
         }
-        log.info("Записано/обновлено {} MR с ревью", total);
+        log.info("Записано/обновлено {} MR с ревью ({} дублей пагинации отброшено)",
+                total, mergeRequests.size() - total);
+    }
+
+    /** Дедуп по (project_id, iid), last-wins; порядок первого появления сохраняется. */
+    private static List<CollectedMergeRequest> dedupLastWins(List<CollectedMergeRequest> mrs) {
+        LinkedHashMap<MrKey, CollectedMergeRequest> byKey = new LinkedHashMap<>(mrs.size());
+        for (CollectedMergeRequest c : mrs) {
+            byKey.put(new MrKey(c.gitlabProjectId(), c.gitlabMrIid()), c);
+        }
+        return new ArrayList<>(byKey.values());
     }
 
     private void upsertChunk(List<CollectedMergeRequest> chunk, LocalDateTime now) {

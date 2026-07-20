@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
@@ -183,10 +184,13 @@ public class GitCliClient {
 
         Process process = pb.start();
         Deque<String> tail = new ArrayDeque<>(TAIL_BUFFER_SIZE + 1);
+        // Ошибка обработчика строки (парсинг/persist) на reader-VT сохраняется сюда и пробрасывается
+        // главным потоком — иначе она молча убивала бы reader и мимикрировала под git-сбой (SIGPIPE).
+        AtomicReference<Throwable> handlerError = new AtomicReference<>();
 
         Thread reader = Thread.ofVirtual()
                 .name("git-stdout-reader")
-                .start(() -> drainStdout(process, lineHandler, tail));
+                .start(() -> drainStdout(process, lineHandler, tail, handlerError));
 
         long timeoutSeconds = properties.commandTimeout().toSeconds();
         long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
@@ -223,8 +227,26 @@ public class GitCliClient {
                     List.of("[timeout after " + timeoutSeconds + "s]"));
         }
 
-        // Process завершился сам — дожидаемся reader (он близок к концу: stdout закрыт).
-        reader.join();
+        // Process завершился сам — дожидаемся reader (доедает stdout + последний persist-батч).
+        // С таймаутом: зависший DB-persist на reader не должен вешать прогон и держать лок навсегда.
+        reader.join(TimeUnit.SECONDS.toMillis(timeoutSeconds));
+        if (reader.isAlive()) {
+            log.error("reader-поток не завершился за {} сек после git — прерываю (persist завис?)",
+                    timeoutSeconds);
+            reader.interrupt();
+            throw new GitCommandFailedException(Arrays.toString(command), TIMEOUT_EXIT_CODE,
+                    List.of("[reader join timeout after " + timeoutSeconds + "s]"));
+        }
+
+        // Ошибка обработчика на reader-VT (битая запись / persist) — пробрасываем, а не маскируем
+        // под git-сбой (иначе причина теряется, а retry бессмыслен на детерминированной ошибке).
+        Throwable he = handlerError.get();
+        if (he instanceof RuntimeException re) {
+            throw re;
+        }
+        if (he != null) {
+            throw new GitCommandFailedException(Arrays.toString(command), -2, List.of(he.toString()));
+        }
 
         int exitCode = process.exitValue();
         if (exitCode != 0) {
@@ -258,12 +280,22 @@ public class GitCliClient {
      */
     private static void drainStdout(Process process,
                                     Consumer<String> lineHandler,
-                                    Deque<String> tail) {
+                                    Deque<String> tail,
+                                    AtomicReference<Throwable> handlerError) {
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                lineHandler.accept(line);
+                try {
+                    lineHandler.accept(line);
+                } catch (RuntimeException e) {
+                    // Ошибка обработчика (парсинг/persist) — сохраняем и убиваем git, чтобы главный
+                    // поток пробросил её. Без этого reader молча умирал бы, а git падал бы по SIGPIPE
+                    // (причина терялась бы под «git command failed»).
+                    handlerError.compareAndSet(null, e);
+                    process.destroyForcibly();
+                    return;
+                }
                 synchronized (tail) {
                     if (tail.size() >= TAIL_BUFFER_SIZE) tail.pollFirst();
                     tail.addLast(line);

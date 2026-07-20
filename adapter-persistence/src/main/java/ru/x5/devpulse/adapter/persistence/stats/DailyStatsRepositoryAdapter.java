@@ -14,6 +14,7 @@ import ru.x5.devpulse.domain.common.Period;
 import ru.x5.devpulse.domain.model.cohort.MonthlyAuthorActivity;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
+import ru.x5.devpulse.domain.model.stats.WeeklyAuthorActivity;
 import ru.x5.devpulse.domain.model.user.Email;
 
 /**
@@ -232,5 +233,42 @@ class DailyStatsRepositoryAdapter implements DailyStatsRepository {
         return jpa.findByAuthorAndPeriod(email.value(), period.from(), period.to()).stream()
                 .map(mapper::toDomain)
                 .toList();
+    }
+
+    /**
+     * Понедельный агрегат по автору: GROUP BY в БД по {@code (LOWER(email), ISO-год, ISO-неделя)}.
+     * Не поднимает все daily-строки периода в heap. {@code EXTRACT(ISOYEAR/WEEK)} — ISO-8601 неделя
+     * (1..53) и её week-based-год, согласовано с {@code StatsSummarizer.weekStart}.
+     */
+    private static final String WEEKLY_ACTIVITY_SQL = """
+            SELECT LOWER(email)                          AS email,
+                   EXTRACT(ISOYEAR FROM date)::int       AS iso_year,
+                   EXTRACT(WEEK    FROM date)::int       AS iso_week,
+                   COALESCE(SUM(commits),          0)    AS commits,
+                   COALESCE(SUM(merge_commits),    0)    AS merge_commits,
+                   COALESCE(SUM(added_lines),      0)    AS added_lines,
+                   COALESCE(SUM(deleted_lines),    0)    AS deleted_lines,
+                   COALESCE(SUM(test_added_lines), 0)    AS test_added_lines
+              FROM daily_author_stats
+             WHERE date BETWEEN ? AND ?
+             GROUP BY LOWER(email), EXTRACT(ISOYEAR FROM date), EXTRACT(WEEK FROM date)
+            """;
+
+    @Override
+    public List<WeeklyAuthorActivity> weeklyAuthorActivity(Period period) {
+        return jdbcTemplate.query(WEEKLY_ACTIVITY_SQL,
+                ps -> {
+                    ps.setObject(1, period.from());
+                    ps.setObject(2, period.to());
+                },
+                (rs, rowNum) -> new WeeklyAuthorActivity(
+                        new Email(rs.getString("email")),
+                        rs.getInt("iso_year"),
+                        rs.getInt("iso_week"),
+                        rs.getLong("commits"),
+                        rs.getLong("merge_commits"),
+                        rs.getLong("added_lines"),
+                        rs.getLong("deleted_lines"),
+                        rs.getLong("test_added_lines")));
     }
 }

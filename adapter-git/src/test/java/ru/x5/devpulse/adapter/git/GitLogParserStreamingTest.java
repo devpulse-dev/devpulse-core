@@ -103,4 +103,23 @@ class GitLogParserStreamingTest {
                 () -> assertThat(sink).hasSize(1),
                 () -> assertThat(sink.getFirst().hash().value()).isEqualTo(SHA2));
     }
+
+    @Test
+    @DisplayName("Коммит с невалидным email (dotless-домен ci@runner) отбрасывается, следующий парсится")
+    void invalidEmailDoesNotPoisonStream() {
+        List<Commit> sink = new ArrayList<>();
+        GitLogParser.Streaming parser = new GitLogParser.Streaming(REPO, sink::add);
+
+        // ci@runner — без точки в домене → new Email бросит IllegalArgumentException. Коммит должен
+        // быть пропущен (skip+warn), а не убить reader-VT и замаскироваться под git-сбой.
+        parser.onLine(SHA1 + "|ci@runner|p|2026-01-15T12:00:00+03:00|ci build");
+        parser.onLine("10\t5\tA.java");
+        parser.onLine(SHA2 + "|b@x5.ru|p|2026-01-16T12:00:00+03:00|ok");
+        parser.onLine("1\t1\tB.java");
+        parser.finish();
+
+        assertAll("битый email пропущен, валидный остался",
+                () -> assertThat(sink).hasSize(1),
+                () -> assertThat(sink.getFirst().hash().value()).isEqualTo(SHA2));
+    }
 }

@@ -26,7 +26,10 @@ public final class GetWeeklyStatsService implements GetWeeklyStatsUseCase {
 
     @Override
     public List<WeeklyStats> findByPeriod(Period period) {
-        List<WeeklyStats> weeks = StatsSummarizer.weekly(dailyStatsRepository.findByPeriod(period));
+        // Агрегация по (email, ISO-неделя) — в БД (GROUP BY): не поднимаем все daily-строки периода
+        // в heap. Reshape в недельные срезы + per-author breakdown — в домене.
+        List<WeeklyStats> weeks = StatsSummarizer.weeklyFromAggregates(
+                dailyStatsRepository.weeklyAuthorActivity(period));
         if (weeks.isEmpty()) return weeks;
 
         // Один batch на все недели сразу.

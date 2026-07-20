@@ -83,9 +83,9 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
                 allAffected.addAll(collectOneRepo(repo, since, until, period, cancel));
             } catch (RuntimeException e) {
                 // git теперь interrupt-aware: отмена могла убить процесс ВНУТРИ репо. Отличаем нашу
-                // отмену от реального git-сбоя — при cancel это не ошибка (deleteZombies не выполнялся,
-                // частичных данных нет: streamCommits прервался до sweep'а).
-                if (cancel.cancelled()) {
+                // отмену от реального git-сбоя (при отмене deleteZombies не выполнялся — streamCommits
+                // прервался до sweep'а). Перепроверка безопасна к взведённому interrupt-флагу (см. helper).
+                if (isCancelledSafely(cancel)) {
                     throw new CollectionCancelledException(
                             "Сбор отменён во время репозитория " + repo.value());
                 }
@@ -104,6 +104,26 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
         }
 
         return allAffected;
+    }
+
+    /**
+     * Безопасная перепроверка отмены в catch git-фазы. Interrupt-aware git ставит interrupt-флаг
+     * перед выбросом ({@code killProcess}), а {@code cancel.cancelled()} ходит в БД — на
+     * interrupted-потоке {@code getConnection()} может бросить (пул прерывает ожидание). Снимаем
+     * флаг на время запроса и восстанавливаем после; если запрос всё же упал, но флаг был взведён
+     * нашей же отменой — трактуем как отмену, а не как FAILED.
+     */
+    private static boolean isCancelledSafely(CancellationSignal cancel) {
+        boolean wasInterrupted = Thread.interrupted(); // снимает флаг, чтобы БД-запрос не упал под ним
+        try {
+            return cancel.cancelled();
+        } catch (RuntimeException dbError) {
+            return wasInterrupted; // не смогли перепроверить, но interrupt был → это наша отмена
+        } finally {
+            if (wasInterrupted) {
+                Thread.currentThread().interrupt(); // восстанавливаем флаг прерывания
+            }
+        }
     }
 
     private Set<Email> collectOneRepo(RepoName repo,

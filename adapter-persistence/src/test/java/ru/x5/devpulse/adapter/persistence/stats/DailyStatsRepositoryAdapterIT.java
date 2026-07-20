@@ -23,6 +23,7 @@ import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.CommitHash;
 import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
+import ru.x5.devpulse.domain.model.stats.WeeklyAuthorActivity;
 import ru.x5.devpulse.domain.model.user.Email;
 
 @SpringBootTest
@@ -231,6 +232,34 @@ class DailyStatsRepositoryAdapterIT extends PostgresContainerSupport {
                 () -> assertThat(repo.findByPeriod(period, Optional.empty(), Optional.empty()))
                         .extracting(s -> s.authorEmail().value())
                         .contains("dave-flt@x5.ru", "erin-flt@x5.ru"));
+    }
+
+    @Test
+    @DisplayName("weeklyAuthorActivity: GROUP BY (email, ISO-неделя) сворачивает коммиты по неделям")
+    void weeklyAggregatesByIsoWeek() {
+        Email dev = new Email("weekly-agg@x5.ru");
+        unifiedUserRepository.findOrCreateAll(List.of(dev));
+        RepoName r = new RepoName("weekly-repo");
+        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
+        // 2026-05-04 (Пн, ISO week 19), 2026-05-07 (та же неделя), 2026-05-11 (Пн, week 20)
+        commitRepository.saveAll(List.of(
+                commit("f1a9".repeat(10), dev, LocalDate.of(2026, 5, 4), r),
+                commit("f2a9".repeat(10), dev, LocalDate.of(2026, 5, 7), r),
+                commit("f3a9".repeat(10), dev, LocalDate.of(2026, 5, 11), r)), Map.of());
+        repo.recomputeFromCommits(List.of(dev), may);
+
+        List<WeeklyAuthorActivity> mine = repo.weeklyAuthorActivity(may).stream()
+                .filter(w -> w.email().value().equals("weekly-agg@x5.ru")).toList();
+
+        assertAll("понедельная свёртка в БД",
+                () -> assertThat(mine).extracting(WeeklyAuthorActivity::isoWeek)
+                        .containsExactlyInAnyOrder(19, 20),
+                () -> assertThat(byWeek(mine, 19).commits()).as("week 19 = 2 коммита").isEqualTo(2L),
+                () -> assertThat(byWeek(mine, 20).commits()).as("week 20 = 1 коммит").isEqualTo(1L));
+    }
+
+    private static WeeklyAuthorActivity byWeek(List<WeeklyAuthorActivity> list, int week) {
+        return list.stream().filter(w -> w.isoWeek() == week).findFirst().orElseThrow();
     }
 
     private static AuthorSummary byEmail(List<AuthorSummary> list, Email email) {

@@ -47,6 +47,14 @@ public class GitlabRateLimiter {
     /** Потолок экспоненциального backoff (мс). */
     private static final long RETRY_MAX_BACKOFF_MS = 60_000;
 
+    /**
+     * Потолок паузы из серверного {@code Retry-After} (5 мин). GitLab под инцидентом (или враждебно)
+     * может отдать {@code Retry-After: 86400} → без кэпа global pause взвелась бы на сутки, и главный
+     * review-поток спал бы с advisory-локом, не реагируя на отмену. Легитимные rate-limit окна GitLab
+     * измеряются секундами–минутами, поэтому 5 мин достаточно.
+     */
+    private static final long RETRY_AFTER_MAX_MS = 300_000;
+
     private final GitlabProperties properties;
 
     /**
@@ -72,7 +80,9 @@ public class GitlabRateLimiter {
                     throw e;
                 }
                 long fallback = jitter(Math.min(backoffAt(attempt), RETRY_MAX_BACKOFF_MS));
-                long wait = retryAfterMillis(e.getResponseHeaders()).orElse(fallback);
+                long wait = retryAfterMillis(e.getResponseHeaders())
+                        .map(v -> Math.min(v, RETRY_AFTER_MAX_MS)) // кэп: не даём серверу усыпить нас на часы
+                        .orElse(fallback);
                 setGlobalPause(wait);
                 log.warn("GitLab 429, пауза {} мс (попытка {}/{}) для {}",
                         wait, attempt + 1, properties.maxRetries(), description);
