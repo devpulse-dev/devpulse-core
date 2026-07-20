@@ -127,6 +127,9 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
         Set<CommitHash> hashes = new HashSet<>(batch.size());
         for (Commit c : batch) hashes.add(c.hash());
 
+        // Дедуп по commit_hash ГЛОБАЛЬНО (не per-repo): commit_hash уникален во всей таблице.
+        // Опирается на инвариант «репозитории независимы» (нет зеркал/форков с общей историей) —
+        // см. CommitDetailsJpaRepository.findExistingHashes. Появится зеркало → нужен per-repo ключ.
         Set<CommitHash> existing = commitRepository.findExistingHashes(hashes);
 
         // Existing-коммиты всё ещё в git — защищаем от sweep'а (bump collected_at до runMark).

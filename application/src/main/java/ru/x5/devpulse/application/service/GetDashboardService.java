@@ -33,11 +33,9 @@ import ru.x5.devpulse.domain.service.ActivityScorer;
 @RequiredArgsConstructor
 public final class GetDashboardService implements GetDashboardUseCase {
 
-    private static final int BASELINE_PERIOD_DAYS = 30;
-
     private final DailyStatsRepository dailyStatsRepository;
     private final UnifiedUserRepository unifiedUserRepository;
-    /** Baseline: ожидаемое количество не-мердж коммитов за {@value #BASELINE_PERIOD_DAYS} дней. */
+    /** Baseline: ожидаемое число не-мердж коммитов за {@code ActivityScorer.BASELINE_PERIOD_DAYS} дней. */
     private final double expectedCommitsPer30Days;
 
     @Override
@@ -64,12 +62,13 @@ public final class GetDashboardService implements GetDashboardUseCase {
     }
 
     /**
-     * Масштабирует baseline 50 / 30 дней пропорционально к длине запрошенного периода.
-     * Период считается включительно: {@code [from..to]} = (to − from) + 1 день.
+     * Масштабирует baseline под длину запрошенного периода (формула — в доменном
+     * {@link ActivityScorer#scaleExpectedForDays}, единый дом с когортами).
+     * Период включительный: {@code [from..to]} = (to − from) + 1 день.
      */
     private double scaleExpected(Period period) {
         long days = ChronoUnit.DAYS.between(period.from(), period.to()) + 1;
-        return expectedCommitsPer30Days * (days / (double) BASELINE_PERIOD_DAYS);
+        return ActivityScorer.scaleExpectedForDays(expectedCommitsPer30Days, days);
     }
 
     private static List<AuthorSummary> withScores(List<AuthorSummary> authors, double expected) {
