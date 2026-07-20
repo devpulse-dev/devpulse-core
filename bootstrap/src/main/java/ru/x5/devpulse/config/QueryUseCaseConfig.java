@@ -1,5 +1,6 @@
 package ru.x5.devpulse.config;
 
+import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,9 +9,11 @@ import ru.x5.devpulse.application.port.in.GetCollectionRunUseCase;
 import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetDashboardUseCase;
 import ru.x5.devpulse.application.port.in.GetHourlyStatsUseCase;
+import ru.x5.devpulse.application.port.in.GetMergedMrStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetPerformanceReviewUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
+import ru.x5.devpulse.application.port.in.GetTeamDefectsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserCommitsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserProfileUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
@@ -27,8 +30,10 @@ import ru.x5.devpulse.application.service.GetCollectionRunService;
 import ru.x5.devpulse.application.service.GetDailyStatsService;
 import ru.x5.devpulse.application.service.GetDashboardService;
 import ru.x5.devpulse.application.service.GetHourlyStatsService;
+import ru.x5.devpulse.application.service.GetMergedMrStatsService;
 import ru.x5.devpulse.application.service.GetPeriodSummaryService;
 import ru.x5.devpulse.application.service.GetReviewStatsService;
+import ru.x5.devpulse.application.service.GetTeamDefectsService;
 import ru.x5.devpulse.application.service.GetUserCommitsService;
 import ru.x5.devpulse.application.service.GetUserProfileService;
 import ru.x5.devpulse.application.service.GetWeeklyStatsService;
@@ -105,6 +110,23 @@ class QueryUseCaseConfig {
             KaitenGateway kaitenGateway) {
         return new PerformanceReviewService(
                 unifiedUserRepository, dailyStatsRepository, reviewStatsRepository, kaitenGateway);
+    }
+
+    /** Дефекты команды по приоритету за периоды — live-стрим карточек Kaiten, дедуп по id. */
+    @Bean
+    GetTeamDefectsUseCase getTeamDefectsUseCase(
+            UnifiedUserRepository unifiedUserRepository,
+            KaitenGateway kaitenGateway) {
+        return new GetTeamDefectsService(unifiedUserRepository, kaitenGateway);
+    }
+
+    /** Вмерженные MR по команде за период (только dev-ветки) — агрегат из БД + обогащение. */
+    @Bean
+    GetMergedMrStatsUseCase getMergedMrStatsUseCase(
+            UnifiedUserRepository unifiedUserRepository,
+            ReviewStatsRepository reviewStatsRepository,
+            @Value("${merged-mrs.dev-branches:dev,main,development}") List<String> devBranches) {
+        return new GetMergedMrStatsService(unifiedUserRepository, reviewStatsRepository, devBranches);
     }
 
     /** Список пользователей (picker perf-review + управление командами). */

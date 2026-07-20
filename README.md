@@ -59,10 +59,13 @@ DevPulse/
 │                                 # service/  — реализации use cases (POJO + Lombok, без Spring)
 │
 ├── adapter-rest/                 # IN-адаптер: REST controllers (implement OpenAPI *Api) + MapStruct mappers
+├── adapter-auth/                 # IN: аутентификация/RBAC (Spring Security, GitLab PAT+OAuth2, сессии)
 ├── adapter-persistence/          # OUT: JPA entities + Spring Data + Liquibase
 ├── adapter-git/                  # OUT: git CLI client (реализация GitGateway)
-├── adapter-kaiten/               # OUT: Kaiten HTTP client (реализация KaitenGateway)
-├── adapter-reviews/               # OUT: ревью-метрики через GitLab API (реализация ReviewGateway)
+├── adapter-kaiten/               # OUT: Kaiten HTTP client (чтение карточек + запись флага AI-Agent)
+├── adapter-gitlab/               # OUT: общий GitLab HTTP client (@HttpExchange, rate-limiter)
+├── adapter-reviews/               # OUT: ревью-метрики (MR/approvals/notes) поверх adapter-gitlab
+├── adapter-identity/             # OUT: резолв GitLab-идентичности при логине
 │
 └── bootstrap/                    # @SpringBootApplication, application.yml, wiring (@Configuration)
                                   # + ArchUnit-тесты гексагона
@@ -79,7 +82,11 @@ DevPulse/
 
 ## Структура БД
 
-PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibase/migration/`. Добавляем только новые нумерованные файлы, применённые не редактируем (последняя — `026-add-team-lead.yaml`).
+PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibase/migration/`. Добавляем только новые нумерованные файлы, применённые не редактируем (последняя — `030-add-target-branch-to-merge-request.yaml`).
+
+> Идемпотентность наката на непустую схему: `create`/`addColumn`-миграции защищены
+> `preConditions` (`not tableExists`/`not columnExists`, `onFail: MARK_RAN`) — накат на БД,
+> где часть таблиц уже есть, не падает с «relation already exists».
 
 Ключевые таблицы:
 
@@ -88,8 +95,9 @@ PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibas
 | `commit_details` | Один git-коммит со статистикой строк, привязкой к UnifiedUser и `kaiten_card_id` (если в сообщении был номер задачи) |
 | `daily_author_stats` | Дневной агрегат (commits, lines added/deleted, test added) по ключу `(email, date, repository_name)` |
 | `unified_user` | Один человек = один `id`. Объединяет git author (email), Kaiten (`kaiten_id`) и GitLab (`gitlab_id`). Несёт `team` (команда) и `is_lead` (лид команды) |
-| `merge_request` / `mr_review` | Ревью-метрики из GitLab: MR + участие ревьюеров (approve, кол-во комментов), для `GET /stats/reviews` |
-| `collection_run` | Журнал прогонов сбора: started/finished, since/until, status, error |
+| `merge_request` / `mr_review` | Ревью-метрики из GitLab: MR (+ `target_branch` для фильтра вмерженных MR по dev-веткам) и участие ревьюеров. Для `GET /stats/reviews` и `GET /stats/merged-mrs` |
+| `collection_run` | Журнал прогонов сбора: started/finished, since/until, status, `cancel_requested` |
+| `spring_session` / `spring_session_attributes` | Сессии Spring Session JDBC (ADR-13, аутентификация) |
 
 > **Kaiten больше не зеркалится в БД.** Таблицы `kaiten_*` удалены (миграции 021/023): карточки тянутся live через `KaitenGateway` с Caffeine-кэшем (TTL 5 мин), пользователи синхронизируются прямо в `unified_user`.
 
@@ -117,6 +125,34 @@ PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibas
 лид — через `PUT /api/v2/teams/lead`. Поля `team` и `isLead` присутствуют **во всех** DTO с
 информацией о разработчике (`UserProfile`, `AuthorSummary`, `ReviewAuthor`) — фронт показывает
 принадлежность к команде и значок лида везде без кросс-резолва.
+
+---
+
+## Аналитика дефектов и вмерженных MR
+
+**Дефекты по приоритету × команда × периоды** (`POST /api/v2/stats/defects`) — уникальные
+дефекты команды (Kaiten `cardType=DEFECT`) с разбивкой по приоритету (urgency) за 1..10 периодов.
+Команда → участники (kaiten id) → **один** live-стрим карточек из Kaiten → **дедуп по id карточки**
+(в карточке может быть несколько участников — считаем один раз) → раскладка по периодам (по `createdAt`)
+в доменном `DefectPeriodAssembler`. Ответ несёт агрегаты + `aiAgentCount` на период и плоский список
+дефектов с участниками (резолв в `unified_user`), ссылкой, флагом AI-Agent и датой.
+
+**Флаг «AI-Agent»** (`id_6064` в Kaiten) считывается при маппинге карточки и **проставляется** через
+`POST /api/v2/stats/defects/ai-agent` (`KaitenCardWriter` → `PATCH /cards/{id}`, set-only, идемпотентно,
+**только ADMIN/TEAMLEAD**). Kaiten пишется глобально ~4 rps (rate-limiter), поэтому bulk — минуты.
+
+**Вмерженные MR по команде** (`GET /api/v2/stats/merged-mrs`) — из БД (`merge_request`): `merged_at ∈
+период`, автор — участник команды, `target_branch ∈` набора dev-веток (`merged-mrs.dev-branches`,
+дефолт `dev,main,development`). Две агрегатки (GROUP BY автор / GROUP BY проект) на стороне БД; имя
+репо выводится из `web_url`. `target_branch` собирается GitLab-сборщиком (нужен пересбор истории —
+у старых MR ветки нет, см. миграцию 030).
+
+## Аутентификация и RBAC (ADR-13)
+
+Модуль `adapter-auth` (Spring Security): вход по GitLab PAT (`POST /api/v2/auth/login`) или OAuth2
+(`/oauth2/**`), сессии — Spring Session JDBC. Роли: `ADMIN` / `TEAMLEAD` (elevated) / `MEMBER`.
+Аналитические разделы (когорты, простановка AI-Agent, управление командами) — только elevated;
+MEMBER видит perf-review только по себе. Список админов — `auth.admins` (env).
 
 ---
 
@@ -220,14 +256,15 @@ done
 | `shared-contract` | Общие schemas (Email, Period, Page, `UserProfile` (с `team`/`isLead`), `AuthorSummary` (с `team`/`isLead`), `ReviewAuthor`, Commit, KaitenCard, ProblemDetails…) |
 | `collection-contract` | `POST /api/v2/collection/runs`, `GET /api/v2/collection/runs/{id}` |
 | `dashboard-contract` | `GET /api/v2/dashboard` (paginated, sorted by activity score) |
-| `stats-contract` | `GET /api/v2/stats/{daily,weekly,summary,reviews}`, `GET /api/v2/performance/review` (досье к perf-review) |
+| `stats-contract` | `GET /api/v2/stats/{daily,weekly,summary,reviews}`, `GET /api/v2/performance/review`; `POST /api/v2/stats/defects`, `POST /api/v2/stats/defects/ai-agent`, `GET /api/v2/stats/merged-mrs` |
 | `users-contract` | `GET /api/v2/users` (+`?team=`), `GET /api/v2/users/{email}/{profile,commits}`, `PUT /api/v2/users/{email}/team`; тег **Teams**: `GET /api/v2/teams`, `PUT /api/v2/teams/lead` |
 | `kaiten-contract` | `POST /api/v2/kaiten/sync-users` |
+| `auth-contract` | `POST /api/v2/auth/login`, `GET /api/v2/auth/me`, `POST /api/v2/auth/logout`, `GET /api/v2/auth/config` |
 
 Каждый contract — Maven-артефакт в GitHub Packages (`com.devpulse:<name>:<version>`).
-**Lockstep-версионирование:** все 6 contract'ов публикуются одной версией (единый
-`<revision>` в корневом pom OAS-репо). Текущая — `1.7.0`. На нашей стороне это одна
-property `devpulse-oas.version` в `adapter-rest/pom.xml`.
+**Lockstep-версионирование:** все 7 contract'ов публикуются одной версией (единый
+`<revision>` в корневом pom OAS-репо). Текущая — `3.8.0`. На нашей стороне это одна
+property `devpulse-oas.version` в `adapter-rest/pom.xml` (и `adapter-auth/pom.xml`).
 
 ### Как это работает на бэке
 
@@ -255,8 +292,8 @@ property `devpulse-oas.version` в `adapter-rest/pom.xml`.
 
 OpenAPI спеки описывают пути без префикса (`/collection/runs`, `/dashboard` …).
 `WebMvcConfig.addPathPrefix("/api/v2", ...)` добавляет префикс централизованно к
-любому `@RestController` в пакете `adapter.rest`. Actuator/management-эндпоинты
-остаются на корне.
+любому `@RestController` в пакетах `adapter.rest` и `adapter.auth`. OAuth2-эндпоинты
+Spring Security (`/oauth2/**`, `/login/oauth2/**`) и actuator остаются на корне.
 
 ### Как настроить локальный доступ к GitHub Packages
 
@@ -288,7 +325,7 @@ OpenAPI спеки описывают пути без префикса (`/collec
 
 1. Открой PR в [devpulse-oas](https://github.com/devpulse-dev/devpulse-oas).
 2. Поменяй нужный `*.yaml` и bump'ни **единый** `<revision>` в корневом `pom.xml`
-   OAS-репо (lockstep — едут все 6 Maven-артефактов + npm `@devpulse-dev/api-types`):
+   OAS-репо (lockstep — едут все 7 Maven-артефактов + npm `@devpulse-dev/api-types`):
    - patch — доки/метадата.
    - minor — добавлено поле, новый endpoint, backward-compatible.
    - major — breaking (удалено/переименовано поле, поменялся enum).

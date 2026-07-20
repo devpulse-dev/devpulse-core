@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.model.user.Email;
+import ru.x5.devpulse.domain.model.user.GitIdentity;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
 
@@ -82,6 +83,43 @@ class UnifiedUserRepositoryAdapter implements UnifiedUserRepository {
             }
         }
         return result;
+    }
+
+    @Override
+    @Transactional
+    public UnifiedUser provision(GitIdentity identity) {
+        // Email.value() — lowercase (инвариант VO); в БД email тоже lowercase.
+        String email = identity.email().value();
+        Optional<UnifiedUserEntity> existing = jpa.findByEmail(email);
+        LocalDateTime now = LocalDateTime.now();
+
+        if (existing.isPresent()) {
+            UnifiedUserEntity u = existing.get();
+            // Уже накопленному сбором юзеру линкуем gitlabId; name/avatar остаются за Kaiten-sync.
+            if (u.getGitlabId() == null && identity.gitlabId() != null) {
+                u.setGitlabId(identity.gitlabId());
+                u.setUpdatedAt(now);
+                jpa.save(u);
+            }
+            return mapper.toDomain(u);
+        }
+
+        UnifiedUserEntity created = UnifiedUserEntity.builder()
+                .email(email)
+                .username(identity.username() != null ? identity.username() : localPart(email))
+                .name(identity.name())
+                .avatarUrl(identity.avatarUrl())
+                .gitlabId(identity.gitlabId())
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        try {
+            return mapper.toDomain(jpa.save(created));
+        } catch (DataIntegrityViolationException ex) {
+            // Конкурентный первый логин (UNIQUE email) — перечитаем созданную параллельно строку.
+            log.debug("Concurrent provision insert in unified_user, refetching {}", email);
+            return jpa.findByEmail(email).map(mapper::toDomain).orElseThrow(() -> ex);
+        }
     }
 
     @Override

@@ -2,6 +2,11 @@ databaseChangeLog:
   - changeSet:
       id: 001-create-analysis-run
       author: boris.osechinskiy
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: analysis_run
       changes:
         - createTable:
             tableName: analysis_run
@@ -41,6 +46,11 @@ databaseChangeLog:
   - changeSet:
       id: 002-create-author-stats
       author: vlad
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: author_stats
       changes:
         - createTable:
             tableName: author_stats
@@ -103,6 +113,11 @@ databaseChangeLog:
   - changeSet:
       id: 003-create-repo-stats
       author: vlad
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: repo_stats
       changes:
         - createTable:
             tableName: repo_stats

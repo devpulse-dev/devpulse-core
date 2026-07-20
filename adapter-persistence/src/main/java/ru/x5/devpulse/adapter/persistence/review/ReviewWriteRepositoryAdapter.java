@@ -99,6 +99,7 @@ class ReviewWriteRepositoryAdapter implements ReviewWriteRepository {
             mr.setTitle(truncate(c.title()));
             mr.setWebUrl(truncate(c.webUrl()));
             mr.setState(c.state() == null || c.state().isBlank() ? "unknown" : c.state());
+            mr.setTargetBranch(c.targetBranch());
             mr.setCreatedAt(c.createdAt());
             mr.setMergedAt(c.mergedAt());
             mr.setCollectedAt(now);

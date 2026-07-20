@@ -17,10 +17,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabApprovalsDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabMrDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabNoteDto;
-import ru.x5.devpulse.adapter.reviews.dto.GitlabUserDto;
+import ru.x5.devpulse.adapter.gitlab.GitRepoProperties;
+import ru.x5.devpulse.adapter.gitlab.GitlabHttpClient;
+import ru.x5.devpulse.adapter.gitlab.GitlabProperties;
+import ru.x5.devpulse.adapter.gitlab.GitlabRateLimiter;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabApprovalsDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabMrDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabNoteDto;
+import ru.x5.devpulse.adapter.gitlab.dto.GitlabUserDto;
 import ru.x5.devpulse.domain.model.review.CollectedMergeRequest;
 import ru.x5.devpulse.domain.model.review.MrReview;
 
@@ -55,7 +59,7 @@ class ReviewGatewayCollectTest {
         OffsetDateTime created = OffsetDateTime.of(2026, 5, 10, 10, 0, 0, 0, ZoneOffset.UTC);
         OffsetDateTime merged = OffsetDateTime.of(2026, 5, 10, 14, 0, 0, 0, ZoneOffset.UTC);
         GitlabMrDto mr = new GitlabMrDto(1000L, 7L, 42L, "fix", "merged",
-                "https://scm/mr/7", created, merged, BORIS_SIMPLE);
+                "https://scm/mr/7", created, merged, "dev", BORIS_SIMPLE);
         // 1 MR (< perPage) → пагинация останавливается на первой странице, page 2 не запрашивается.
         when(http.getMergeRequests(eq("grp/repo"), anyString(), eq(1), eq(100), eq("all"), eq("all")))
                 .thenReturn(List.of(mr));
@@ -100,9 +104,9 @@ class ReviewGatewayCollectTest {
 
         OffsetDateTime created = OffsetDateTime.of(2026, 5, 10, 10, 0, 0, 0, ZoneOffset.UTC);
         GitlabMrDto good = new GitlabMrDto(1000L, 7L, 42L, "ok", "opened",
-                "https://scm/mr/7", created, null, ALICE_SIMPLE);
+                "https://scm/mr/7", created, null, "dev", ALICE_SIMPLE);
         GitlabMrDto bad = new GitlabMrDto(1000L, 8L, 42L, "boom", "opened",
-                "https://scm/mr/8", created, null, ALICE_SIMPLE);
+                "https://scm/mr/8", created, null, "dev", ALICE_SIMPLE);
         when(http.getMergeRequests(eq("grp/repo"), anyString(), eq(1), eq(100), eq("all"), eq("all")))
                 .thenReturn(List.of(good, bad));
 

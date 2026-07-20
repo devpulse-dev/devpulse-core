@@ -2,6 +2,12 @@ databaseChangeLog:
   - changeSet:
       id: 013-add-user-id-to-daily-stats
       author: boris.osechinskiy
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                tableName: daily_author_stats
+                columnName: user_id
       changes:
         - addColumn:
             tableName: daily_author_stats

@@ -2,6 +2,12 @@ databaseChangeLog:
   - changeSet:
       id: 004-add-repository-name-to-daily-stats
       author: boris.osechinskiy
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                tableName: daily_author_stats
+                columnName: repository_name
       changes:
         - addColumn:
             tableName: daily_author_stats

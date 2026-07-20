@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ru.x5.devpulse</groupId>
+        <artifactId>devpulse-parent</artifactId>
+        <version>2.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>adapter-identity</artifactId>
+    <name>DevPulse — Identity out-adapter</name>
+    <description>
+        Реализует GitIdentityProvider port (auth, ADR-13): identity пользователя из GitLab
+        (GET /user его токеном) + проверка доступа к проектам (GET /projects/:id/members
+        сервисным токеном). Поверх общей connectivity из adapter-gitlab.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>ru.x5.devpulse</groupId>
+            <artifactId>application</artifactId>
+        </dependency>
+
+        <!-- Общая GitLab-инфраструктура (клиент, конфиг, DTO, резолв проектов). -->
+        <dependency>
+            <groupId>ru.x5.devpulse</groupId>
+            <artifactId>adapter-gitlab</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

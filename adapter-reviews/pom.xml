@@ -24,6 +24,12 @@
             <artifactId>application</artifactId>
         </dependency>
 
+        <!-- Общая GitLab-инфраструктура (клиент, конфиг, DTO, резолв проектов). -->
+        <dependency>
+            <groupId>ru.x5.devpulse</groupId>
+            <artifactId>adapter-gitlab</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

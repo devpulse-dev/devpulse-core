@@ -731,6 +731,53 @@ JPA-операциям (`order_updates` и т.п.).
 
 ---
 
+## ADR-13. Аутентификация по GitLab + RBAC (P1-3)
+
+**Контекст.** До сих пор у сервиса не было аутентификации (OAS: `security: []`, аутентификация
+«вне контракта» — но в коде её нет: ни Spring Security, ни понятия «текущий юзер» на фронте).
+Нужно: пускать только валидных пользователей GitLab с доступом к нашим проектам, авто-провижинить
+новичков (как при дейли-сборе), и ввести ролевую модель.
+
+**Решение.**
+
+- **Два входа, одна точка схождения.** Кастомная страница `/login`: поле **GitLab PAT** +
+  кнопка **OAuth2** (`/oauth2/authorization/gitlab`). Оба сходятся в общий
+  `fetchIdentity → projectAccess → provision → session`. PAT-вход — кастомный `POST /auth/login`
+  (вручную поднимает SecurityContext); OAuth2 — `.oauth2Login()` с кастомным user-service. Оба
+  кладут одинаковый principal (`email + role`) и httpOnly-сессию.
+- **GitIdentityProvider (port out).** `fetchIdentity(token, type)` — `GET /user` (PAT → заголовок
+  `PRIVATE-TOKEN`, OAuth → `Authorization: Bearer`); `maxProjectAccessLevel(gitlabUserId)` —
+  сервисным токеном `GET /projects/{cfg}/members/all/{id}` по проектам из `gitlab.api.projects`.
+  Реализация в `adapter-reviews` (реюз `GitlabHttpClient`).
+- **Политика доступа (в app-слое).** Пускаем, если `email ∈ auth.admins` (админы обходят гейт)
+  ЛИБО `maxProjectAccessLevel ≥ 30 (Developer)` хотя бы в одном проекте. Иначе 403.
+- **Провижининг.** Нет `unified_user` по email → upsert из GitLab-identity
+  (`UnifiedUserRepository.provision`): новому ставим email/username/gitlabId/name/avatar; существующему
+  только линкуем `gitlabId` (name/avatar остаются за Kaiten). Kaiten-энрич **не блокирует логин** —
+  непривязанного добирает существующий `SyncKaitenUsersService` (как при дейли-сборе).
+- **Роль — derivable, БЕЗ колонки в БД.** `Role.resolve(email∈admins, user.lead())`:
+  `ADMIN` (конфиг `auth.admins`) → `TEAMLEAD` (существующий `is_lead`) → `MEMBER`. Колонку `role`
+  НЕ заводим: это дублирование с риском дрейфа config↔БД (admins — конфиг, teamlead — `is_lead`).
+  Роль вычисляется при сборке principal.
+- **Сессия.** Spring Session **JDBC (Postgres)** — мультипод без sticky. Cookie
+  `HttpOnly+Secure+SameSite=Lax`, rolling idle **8ч**. Доступ к GitLab перепроверяется только при
+  логине (staleness ограничен TTL). CSRF: `XSRF-TOKEN`/`X-XSRF-TOKEN` (Spring default).
+- **RBAC.** Гейтим только аналитические разделы: `cohorts`/`teams` — `@PreAuthorize(ADMIN|TEAMLEAD)`;
+  perf-review — `MEMBER ⇒ email==self`; `compare` — **FE-only** (нет своего эндпоинта, данные = уже
+  открытый дашборд). Дашборд/недели/активность/профиль/**сбор** — любой аутентифицированный.
+
+**Гексагональность.** `Role`/`GitIdentity` — `domain`; `GitIdentityProvider` — `port.out` (реализация
+в `adapter-reviews`); `AuthenticateUseCase`/`AuthenticatedUser` — `port.in`; политика доступа и резолв
+роли — в `application.service.AuthService` (Spring-free, `adminEmails` инжектится из bootstrap-конфига);
+Spring Security/сессия/`/auth/*` — в `adapter-rest`. Провижининг реюзает `UnifiedUserRepository`.
+Единственная новая DB-схема — таблицы Spring Session (колонки `role` нет).
+
+**Фазы.** (1) hexagon-core (domain+application+persistence-provision) → (2) GitLab-адаптер +
+Spring Security + session + `/auth/*` + bootstrap-deps → (3) RBAC на эндпоинтах → (4) OAS
+(`auth`-тег, `role`, cookie-схема, 401/403) → (5) FE (`/login`, AuthProvider, гейтинг).
+
+---
+
 ## ADR-13. Startup-реконсиляция осиротевших RUNNING-прогонов (review #2)
 
 **Контекст.** Процесс упал/убит mid-run (OOM, `kill -9`, деплой) → запись `collection_run`

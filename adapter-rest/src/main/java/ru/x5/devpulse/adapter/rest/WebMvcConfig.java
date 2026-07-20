@@ -28,11 +28,16 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 class WebMvcConfig implements WebMvcConfigurer {
 
     private static final String REST_BASE_PACKAGE = "ru.x5.devpulse.adapter.rest";
+    // adapter.auth: AuthController реализует сгенерированный AuthApi (пути без /api/v2) —
+    // префикс нужен и ему. Один addPathPrefix на оба пакета (повторный вызов с тем же
+    // префиксом перетёр бы предыдущий — поэтому объединяем предикатом).
+    private static final String AUTH_BASE_PACKAGE = "ru.x5.devpulse.adapter.auth";
 
     @Override
     public void configurePathMatch(PathMatchConfigurer configurer) {
         configurer.addPathPrefix("/api/v2", c ->
-                c.getPackageName().startsWith(REST_BASE_PACKAGE)
+                (c.getPackageName().startsWith(REST_BASE_PACKAGE)
+                        || c.getPackageName().startsWith(AUTH_BASE_PACKAGE))
                         && AnnotationUtils.findAnnotation(c, RestController.class) != null);
     }
 }

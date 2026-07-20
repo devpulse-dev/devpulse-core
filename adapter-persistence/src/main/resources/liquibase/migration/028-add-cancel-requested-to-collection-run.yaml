@@ -7,6 +7,12 @@ databaseChangeLog:
   - changeSet:
       id: 028-add-cancel-requested-to-collection-run
       author: devpulse
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                tableName: collection_run
+                columnName: cancel_requested
       changes:
         - addColumn:
             tableName: collection_run

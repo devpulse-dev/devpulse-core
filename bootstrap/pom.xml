@@ -36,6 +36,21 @@
             <groupId>ru.x5.devpulse</groupId>
             <artifactId>adapter-reviews</artifactId>
         </dependency>
+        <dependency>
+            <groupId>ru.x5.devpulse</groupId>
+            <artifactId>adapter-identity</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ru.x5.devpulse</groupId>
+            <artifactId>adapter-auth</artifactId>
+        </dependency>
+
+        <!-- Сессия в Postgres (Spring Session JDBC): мультипод без sticky (ADR-13).
+             Подключается на уровне сборки приложения — нужен DataSource. -->
+        <dependency>
+            <groupId>org.springframework.session</groupId>
+            <artifactId>spring-session-jdbc</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

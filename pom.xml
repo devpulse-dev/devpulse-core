@@ -26,7 +26,10 @@
         <module>adapter-persistence</module>
         <module>adapter-git</module>
         <module>adapter-kaiten</module>
+        <module>adapter-gitlab</module>
         <module>adapter-reviews</module>
+        <module>adapter-identity</module>
+        <module>adapter-auth</module>
         <module>bootstrap</module>
     </modules>
 
@@ -86,7 +89,22 @@
             </dependency>
             <dependency>
                 <groupId>ru.x5.devpulse</groupId>
+                <artifactId>adapter-gitlab</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ru.x5.devpulse</groupId>
                 <artifactId>adapter-reviews</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ru.x5.devpulse</groupId>
+                <artifactId>adapter-identity</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ru.x5.devpulse</groupId>
+                <artifactId>adapter-auth</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

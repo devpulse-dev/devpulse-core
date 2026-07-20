@@ -2,6 +2,11 @@ databaseChangeLog:
   - changeSet:
       id: 015-create-collection-run
       author: boris.osechinskiy
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: collection_run
       changes:
         - createTable:
             tableName: collection_run

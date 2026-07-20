@@ -52,6 +52,41 @@ spring:
     default-schema: public
     liquibase-schema: public
 
+  # === Сессия (Spring Session JDBC, ADR-13) ===
+  session:
+    store-type: jdbc
+    # Rolling idle-timeout: 8ч без активности → сессия истекает.
+    timeout: 8h
+    jdbc:
+      # Схему ведёт Liquibase (миграция 029), не автогенератор Spring.
+      initialize-schema: never
+
+  # === OAuth2-вход через GitLab (ADR-13) ===
+  # Реальные client-id/secret — в application-local.yml (профиль local, gitignore), как
+  # git/kaiten-токены. Дефолт "default" (НЕ пустой) — намеренно: пустой client-id ронял бы
+  # OAuth2ClientProperties.validate() на старте (CI/тесты без env). С дефолтом контекст грузится.
+  # Примечание: при дефолте регистрация формально активна → /auth/config: oauthEnabled=true,
+  # кнопка OAuth видна, но вход сработает только с реальным client-id из application-local.yml.
+  security:
+    oauth2:
+      client:
+        registration:
+          gitlab:
+            provider: gitlab
+            client-id: ${GITLAB_OAUTH_CLIENT_ID:default}
+            client-secret: ${GITLAB_OAUTH_CLIENT_SECRET:default}
+            authorization-grant-type: authorization_code
+            # read_user достаточно для GET /user; членство в проектах — сервисным токеном.
+            scope: read_user
+            redirect-uri: "{baseUrl}/login/oauth2/code/gitlab"
+            client-name: GitLab
+        provider:
+          gitlab:
+            authorization-uri: ${GITLAB_OAUTH_AUTHORIZE_URI:https://scm.x5.ru/oauth/authorize}
+            token-uri: ${GITLAB_OAUTH_TOKEN_URI:https://scm.x5.ru/oauth/token}
+            user-info-uri: ${GITLAB_OAUTH_USERINFO_URI:https://scm.x5.ru/api/v4/user}
+            user-name-attribute: username
+
 # === Git collection ===
 # repositories и token — задаются через env-переменные / профиль application-local.yml.
 # В этом файле НИКОГДА не должно быть реальных токенов или внутренних URL'ов:
@@ -109,7 +144,7 @@ gitlab:
     max-backfill-days: ${GITLAB_MAX_BACKFILL_DAYS:0}
     # Сколько MR обрабатывать параллельно (approvals+notes на virtual threads). Главный рычаг
     # скорости: per-MR вызовы — узкое место. Подними, если scm.x5.ru держит больше RPS.
-    concurrency: ${GITLAB_CONCURRENCY:8}
+    concurrency: ${GITLAB_CONCURRENCY:16}
     request-delay-ms: 200
     max-retries: 5
     retry-backoff-ms: 2000
@@ -118,7 +153,7 @@ gitlab:
     # bounded retry per-call мог бы держать advisory-лок часами. По истечении недособранные MR
     # отменяются, прогон продолжается (агрегатный WARN о потерянных), курсор не двигается → следующий
     # сбор доберёт. 0s — без границы (старое поведение). Формат Duration (30m / 1h / 0s).
-    project-review-timeout: ${GITLAB_PROJECT_REVIEW_TIMEOUT:30m}
+    project-review-timeout: ${GITLAB_PROJECT_REVIEW_TIMEOUT:1h}
     # scm.x5.ru за внутренним X5 CA — как и Kaiten, в dev можно отключить проверку SSL.
     insecure-ssl: ${GITLAB_INSECURE_SSL:false}
 
@@ -128,8 +163,32 @@ scoring:
   # Для других периодов масштабируется линейно (за 15 дней ожидание = 25, и т.д.).
   expected-commits-per-30-days: ${SCORING_EXPECTED_COMMITS_PER_30D:50}
 
+# === Merged-MR статистика ===
+merged-mrs:
+  # Ветки назначения, которые считаются «дев» для раздела GET /stats/merged-mrs
+  # (target_branch ∈ этого набора). Comma-separated env → список. Историю нужно
+  # пересобрать, чтобы у старых MR появился target_branch (nullable до миграции 030).
+  dev-branches: ${MERGED_MRS_DEV_BRANCHES:dev,main,development}
+
+# === Auth (ADR-13) ===
+auth:
+  # Email администраторов (роль ADMIN). Источник истины для ADMIN — этот список (роль
+  # derivable, без колонки в БД). Comma-separated env → список. Матчатся в lower-case.
+  # Админы обходят проверку доступа к GitLab-проектам (см. ADR-13).
+  admins: ${AUTH_ADMINS:}
+
 server:
   port: 8080
+  # За reverse-proxy/gateway (и vite-proxy в dev с xfwd) — чтобы {baseUrl} в OAuth
+  # redirect-uri резолвился в публичный origin, а не во внутренний host:port.
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      # SameSite=Lax — базовая CSRF-защита (кросс-сайтовый POST/fetch не несёт cookie).
+      # secure выставляется автоматически на https. CSRF-токены выключены (см. SecurityConfig).
+      cookie:
+        http-only: true
+        same-site: lax
 
 management:
   endpoints:

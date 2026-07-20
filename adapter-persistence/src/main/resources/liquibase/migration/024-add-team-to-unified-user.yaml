@@ -8,6 +8,12 @@ databaseChangeLog:
   - changeSet:
       id: 024-add-team-to-unified-user
       author: boris.osechinskiy
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                tableName: unified_user
+                columnName: team
       changes:
         - addColumn:
             tableName: unified_user
