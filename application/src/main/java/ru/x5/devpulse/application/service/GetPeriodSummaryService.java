@@ -11,7 +11,7 @@ import ru.x5.devpulse.domain.service.StatsSummarizer;
 /**
  * Сводка за период: totals + top-N авторов c enriched displayName/avatarUrl.
  *
- * <p>Top по умолчанию ≤ 10 (см. {@link StatsSummarizer#summarize}), batch-fetch для них — тривиален.</p>
+ * <p>Top по умолчанию ≤ 10 (см. {@link StatsSummarizer#summarizeAuthors}), batch-fetch для них — тривиален.</p>
  */
 @RequiredArgsConstructor
 public final class GetPeriodSummaryService implements GetPeriodSummaryUseCase {

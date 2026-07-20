@@ -17,6 +17,14 @@ import org.testcontainers.containers.PostgreSQLContainer;
  * контекст со старым URL и валится с «connection refused».</p>
  *
  * <p>Liquibase прогоняет миграции автоматически при старте Spring-контекста.</p>
+ *
+ * <p><b>Изоляция данных — по конвенции, не через cleanup:</b> контейнер и БД шарятся между ВСЕМИ
+ * тестами модуля, данные между тестами НЕ чистятся. Поэтому каждый тест обязан использовать
+ * <b>уникальные ключи</b> (email / период / commit_hash) и фильтровать прочитанное по ним, а не
+ * полагаться на глобальный размер выборки. Особо критично для {@code commit_details.commit_hash} —
+ * он глобально UNIQUE, и одинаковый хеш в двух тестах даёт {@code DuplicateKeyException} (см.
+ * неймспейсы хешей в IT). Полноценная per-test изоляция (TRUNCATE/rollback) — известный долг;
+ * пока держимся конвенции уникальных ключей.</p>
  */
 public abstract class PostgresContainerSupport {
 

@@ -61,3 +61,5 @@ databaseChangeLog:
       file: liquibase/migration/030-add-target-branch-to-merge-request.yaml
   - include:
       file: liquibase/migration/031-add-email-commit-date-index.yaml
+  - include:
+      file: liquibase/migration/032-drop-schema-cruft.yaml

@@ -28,46 +28,10 @@ public final class StatsSummarizer {
     private StatsSummarizer() {}
 
     /**
-     * Сводка за {@code period}: totals + top-{@value #TOP_AUTHORS} авторов по убыванию коммитов.
-     */
-    public static PeriodSummary summarize(Period period, Collection<DailyAuthorStats> stats) {
-        long totalCommits = 0;
-        long totalMerge = 0;
-        long totalAdded = 0;
-        long totalDeleted = 0;
-        long totalTestAdded = 0;
-        Map<Email, AuthorAcc> byAuthor = new HashMap<>();
-
-        for (DailyAuthorStats s : stats) {
-            totalCommits += s.commits();
-            totalMerge += s.mergeCommits();
-            totalAdded += s.addedLines();
-            totalDeleted += s.deletedLines();
-            totalTestAdded += s.testAddedLines();
-            byAuthor.computeIfAbsent(s.authorEmail(), k -> new AuthorAcc()).add(s);
-        }
-
-        List<AuthorSummary> top = byAuthor.entrySet().stream()
-                .map(e -> e.getValue().toSummary(e.getKey()))
-                .sorted(Comparator.comparingLong(AuthorSummary::commits).reversed())
-                .limit(TOP_AUTHORS)
-                .toList();
-
-        return new PeriodSummary(
-                period,
-                totalCommits, totalMerge, totalAdded, totalDeleted, totalTestAdded,
-                byAuthor.size(),
-                top
-        );
-    }
-
-    /**
      * Сводка за период из <b>уже агрегированных по автору</b> строк (см.
      * {@code DailyStatsRepository.aggregateAuthorsByPeriod}, где свёртка daily→автор сделана в БД):
-     * totals как сумма по авторам + top-{@value #TOP_AUTHORS} по убыванию коммитов.
-     *
-     * <p>Отличие от {@link #summarize(Period, Collection)}: на вход подаётся по строке на автора,
-     * а не сырые daily-строки — heap не растёт с длиной периода.</p>
+     * totals как сумма по авторам + top-{@value #TOP_AUTHORS} по убыванию коммитов. На вход — по
+     * строке на автора (не сырые daily-строки), heap не растёт с длиной периода.
      */
     public static PeriodSummary summarizeAuthors(Period period, Collection<AuthorSummary> authors) {
         long totalCommits = 0;
@@ -91,28 +55,6 @@ public final class StatsSummarizer {
                 totalCommits, totalMerge, totalAdded, totalDeleted, totalTestAdded,
                 authors.size(),
                 top);
-    }
-
-    /**
-     * Все активные авторы за период (имеющие &ge; 1 коммит), отсортированы по убыванию
-     * не-мердж коммитов. Use case применит к этому списку pagination через {@link
-     * ru.x5.devpulse.domain.common.Page#of}.
-     *
-     * <p>Авторы здесь без {@code displayName}/{@code avatarUrl} — те enriche use case'ом
-     * из {@code unified_user}.</p>
-     */
-    public static List<AuthorSummary> activeAuthorsByActivity(Collection<DailyAuthorStats> stats) {
-        Map<Email, AuthorAcc> byAuthor = new HashMap<>();
-        for (DailyAuthorStats s : stats) {
-            byAuthor.computeIfAbsent(s.authorEmail(), k -> new AuthorAcc()).add(s);
-        }
-        return byAuthor.entrySet().stream()
-                .map(e -> e.getValue().toSummary(e.getKey()))
-                .sorted(Comparator
-                        .comparingLong(AuthorSummary::nonMergeCommits).reversed()
-                        // Стабильность при ничьей: алфавит email — детерминированный порядок страниц.
-                        .thenComparing(a -> a.email().value()))
-                .toList();
     }
 
     /**

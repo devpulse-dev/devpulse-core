@@ -27,8 +27,11 @@ import ru.x5.devpulse.domain.model.user.Email;
  * <p><b>Пайплайн:</b></p>
  * <ol>
  *   <li>Для каждого репо: {@code runMark = now()} — метка начала сбора;</li>
- *   <li>Стрим git коммитов → {@code persistCommitBatch} per-batch (своя короткая tx):
- *       existing-коммиты помечаются {@code markSeen(runMark)}, новые — сохраняются с {@code now()};</li>
+ *   <li>Стрим git коммитов → {@code persistCommitBatch}: existing-коммиты помечаются
+ *       {@code markSeen(runMark)}, новые — сохраняются с {@code now()}. <b>Батч НЕ атомарен:</b>
+ *       каждый вызов репозитория (markSeen / findOrCreateAll / saveAll) — своя короткая tx
+ *       (адаптерный {@code @Transactional}), а не одна tx на весь батч; partial-состояние внутри
+ *       батча возможно, но безвредно и идемпотентно снимается retry (курсор не сдвинулся);</li>
  *   <li>Аккумуляция только {@code repoAffected} (email'ы авторов) — хеши в heap НЕ копим;</li>
  *   <li>Per-repo sweep: {@code deleteZombies(repo, period, runMark)} (своя tx) — удаляет всё,
  *       что не увидено в этом сборе;</li>

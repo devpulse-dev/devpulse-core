@@ -1,0 +1,28 @@
+# Чистка schema cruft: мёртвые таблицы v1 + неиспользуемая колонка + дублирующий индекс.
+#
+# - analysis_run / author_stats / repo_stats / last_export_tracker — легаси-таблицы из миграций
+#   001/002. Не имеют JPA-сущностей и не читаются кодом v2: агрегаты живут в daily_author_stats,
+#   курсор сбора — в collection_run (ADR-4). Просто занимают место и путают схему.
+# - commit_details.kaiten_card_title — не входит ни в INSERT_SQL (CommitRepositoryAdapter), ни в
+#   CommitDetailsEntity → колонка всегда NULL (мёртвая).
+# - idx_unified_user_email — дублирует UNIQUE(email) из 011 (constraint сам создаёт индекс).
+#   Матчинг по email идёт через функциональный uq_unified_user_email_lower (020) либо
+#   unique-constraint; отдельный plain-индекс — лишняя поддержка на каждой записи юзера.
+#
+# IF EXISTS — идемпотентно (безопасно, если объект уже отсутствует). rollback пуст: восстанавливать
+# мёртвый cruft незачем.
+databaseChangeLog:
+  - changeSet:
+      id: 032-drop-schema-cruft
+      author: devpulse
+      changes:
+        - sql:
+            comment: "drop мёртвых таблиц v1, неиспользуемой колонки, дублирующего индекса"
+            sql: |
+              DROP TABLE IF EXISTS analysis_run CASCADE;
+              DROP TABLE IF EXISTS author_stats CASCADE;
+              DROP TABLE IF EXISTS repo_stats CASCADE;
+              DROP TABLE IF EXISTS last_export_tracker CASCADE;
+              ALTER TABLE commit_details DROP COLUMN IF EXISTS kaiten_card_title;
+              DROP INDEX IF EXISTS idx_unified_user_email;
+      rollback: []
