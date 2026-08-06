@@ -66,6 +66,10 @@ class SecurityConfig {
                         .requestMatchers("/api/v2/users/*/team").hasAnyRole("ADMIN", "TEAMLEAD")
                         .requestMatchers(HttpMethod.GET, "/api/v2/performance/review")
                                 .access(this::perfReviewSelfOrElevated)
+                        // Таймшит — персональные трудозатраты: та же политика, что у perf-review
+                        // (ADMIN/TEAMLEAD — по любому, MEMBER — только по себе).
+                        .requestMatchers(HttpMethod.GET, "/api/v2/stats/timesheet")
+                                .access(this::perfReviewSelfOrElevated)
                         .anyRequest().authenticated())
                 .csrf(AbstractHttpConfigurer::disable)
                 // logout обрабатывает AuthController (контракт AuthApi) — дефолтный фильтр не нужен.

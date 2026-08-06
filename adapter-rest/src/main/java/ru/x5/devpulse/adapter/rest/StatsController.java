@@ -17,6 +17,7 @@ import ru.x5.devpulse.adapter.rest.api.model.MergedMrStats;
 import ru.x5.devpulse.adapter.rest.api.model.PerformanceReview;
 import ru.x5.devpulse.adapter.rest.api.model.PeriodSummary;
 import ru.x5.devpulse.adapter.rest.api.model.ReviewStats;
+import ru.x5.devpulse.adapter.rest.api.model.Timesheet;
 import ru.x5.devpulse.adapter.rest.api.model.WeeklyStats;
 import ru.x5.devpulse.adapter.rest.mapper.DailyStatsMapper;
 import ru.x5.devpulse.adapter.rest.mapper.DefectsByPeriodMapper;
@@ -25,6 +26,7 @@ import ru.x5.devpulse.adapter.rest.mapper.MergedMrStatsMapper;
 import ru.x5.devpulse.adapter.rest.mapper.PerformanceReviewMapper;
 import ru.x5.devpulse.adapter.rest.mapper.PeriodSummaryMapper;
 import ru.x5.devpulse.adapter.rest.mapper.ReviewStatsMapper;
+import ru.x5.devpulse.adapter.rest.mapper.TimesheetMapper;
 import ru.x5.devpulse.adapter.rest.mapper.WeeklyStatsMapper;
 import ru.x5.devpulse.application.port.in.GetDailyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetHourlyStatsUseCase;
@@ -33,6 +35,7 @@ import ru.x5.devpulse.application.port.in.GetPerformanceReviewUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetTeamDefectsUseCase;
+import ru.x5.devpulse.application.port.in.GetTimesheetUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
 import ru.x5.devpulse.application.port.in.MarkDefectsAiAgentUseCase;
 import ru.x5.devpulse.domain.common.Period;
@@ -57,6 +60,7 @@ class StatsController implements StatsApi {
     private final GetTeamDefectsUseCase getTeamDefects;
     private final GetMergedMrStatsUseCase getMergedMrStats;
     private final MarkDefectsAiAgentUseCase markDefectsAiAgent;
+    private final GetTimesheetUseCase getTimesheet;
 
     private final DailyStatsMapper dailyStatsMapper;
     private final WeeklyStatsMapper weeklyStatsMapper;
@@ -66,6 +70,7 @@ class StatsController implements StatsApi {
     private final PerformanceReviewMapper performanceReviewMapper;
     private final DefectsByPeriodMapper defectsByPeriodMapper;
     private final MergedMrStatsMapper mergedMrStatsMapper;
+    private final TimesheetMapper timesheetMapper;
 
     @Override
     public ResponseEntity<List<DailyStats>> getDailyStats(LocalDate from, LocalDate to, String email,
@@ -139,6 +144,12 @@ class StatsController implements StatsApi {
     public ResponseEntity<MergedMrStats> getMergedMrStats(LocalDate from, LocalDate to, String team) {
         return ResponseEntity.ok(mergedMrStatsMapper.toDto(
                 getMergedMrStats.get(requireTeam(team), new Period(from, to))));
+    }
+
+    @Override
+    public ResponseEntity<Timesheet> getTimesheet(LocalDate from, LocalDate to, String email) {
+        return ResponseEntity.ok(timesheetMapper.toDto(
+                getTimesheet.get(new Email(email), new Period(from, to))));
     }
 
     @Override

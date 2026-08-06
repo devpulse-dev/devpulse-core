@@ -147,6 +147,15 @@ PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibas
 репо выводится из `web_url`. `target_branch` собирается GitLab-сборщиком (нужен пересбор истории —
 у старых MR ветки нет, см. миграцию 030).
 
+## Таймшит (трудозатраты)
+
+`GET /api/v2/stats/timesheet?from&to&email` — списанное время одного разработчика по дням.
+Источник — live `GET /time-logs` Kaiten по `kaiten_id` (в БД не хранится). Ответ Kaiten «толстый»
+(вложенные card/user, ~4 МБ на 100 логов), поэтому `KaitenTimeLogDto` берёт только
+`for_date` + `time_spent` — дальше адаптера жир не идёт. Суммирование по дню — в доменном
+`TimesheetAssembler`; время передаётся в **минутах** (целые, без потерь), в часы форматирует фронт.
+RBAC как у perf-review: ADMIN/TEAMLEAD — по любому, MEMBER — только по себе.
+
 ## Аутентификация и RBAC (ADR-13)
 
 Модуль `adapter-auth` (Spring Security): вход по GitLab PAT (`POST /api/v2/auth/login`) или OAuth2
@@ -256,14 +265,14 @@ done
 | `shared-contract` | Общие schemas (Email, Period, Page, `UserProfile` (с `team`/`isLead`), `AuthorSummary` (с `team`/`isLead`), `ReviewAuthor`, Commit, KaitenCard, ProblemDetails…) |
 | `collection-contract` | `POST /api/v2/collection/runs`, `GET /api/v2/collection/runs/{id}` |
 | `dashboard-contract` | `GET /api/v2/dashboard` (paginated, sorted by activity score) |
-| `stats-contract` | `GET /api/v2/stats/{daily,weekly,summary,reviews}`, `GET /api/v2/performance/review`; `POST /api/v2/stats/defects`, `POST /api/v2/stats/defects/ai-agent`, `GET /api/v2/stats/merged-mrs` |
+| `stats-contract` | `GET /api/v2/stats/{daily,weekly,summary,reviews}`, `GET /api/v2/performance/review`; `POST /api/v2/stats/defects`, `POST /api/v2/stats/defects/ai-agent`, `GET /api/v2/stats/merged-mrs`, `GET /api/v2/stats/timesheet` |
 | `users-contract` | `GET /api/v2/users` (+`?team=`), `GET /api/v2/users/{email}/{profile,commits}`, `PUT /api/v2/users/{email}/team`; тег **Teams**: `GET /api/v2/teams`, `PUT /api/v2/teams/lead` |
 | `kaiten-contract` | `POST /api/v2/kaiten/sync-users` |
 | `auth-contract` | `POST /api/v2/auth/login`, `GET /api/v2/auth/me`, `POST /api/v2/auth/logout`, `GET /api/v2/auth/config` |
 
 Каждый contract — Maven-артефакт в GitHub Packages (`com.devpulse:<name>:<version>`).
 **Lockstep-версионирование:** все 7 contract'ов публикуются одной версией (единый
-`<revision>` в корневом pom OAS-репо). Текущая — `3.8.0`. На нашей стороне это одна
+`<revision>` в корневом pom OAS-репо). Текущая — `3.10.0`. На нашей стороне это одна
 property `devpulse-oas.version` в `adapter-rest/pom.xml` (и `adapter-auth/pom.xml`).
 
 ### Как это работает на бэке

@@ -14,6 +14,7 @@ import ru.x5.devpulse.application.port.in.GetPerformanceReviewUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetTeamDefectsUseCase;
+import ru.x5.devpulse.application.port.in.GetTimesheetUseCase;
 import ru.x5.devpulse.application.port.in.GetUserCommitsUseCase;
 import ru.x5.devpulse.application.port.in.GetUserProfileUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
@@ -34,6 +35,7 @@ import ru.x5.devpulse.application.service.GetMergedMrStatsService;
 import ru.x5.devpulse.application.service.GetPeriodSummaryService;
 import ru.x5.devpulse.application.service.GetReviewStatsService;
 import ru.x5.devpulse.application.service.GetTeamDefectsService;
+import ru.x5.devpulse.application.service.GetTimesheetService;
 import ru.x5.devpulse.application.service.GetUserCommitsService;
 import ru.x5.devpulse.application.service.GetUserProfileService;
 import ru.x5.devpulse.application.service.GetWeeklyStatsService;
@@ -127,6 +129,14 @@ class QueryUseCaseConfig {
             ReviewStatsRepository reviewStatsRepository,
             @Value("${merged-mrs.dev-branches:dev,main,development}") List<String> devBranches) {
         return new GetMergedMrStatsService(unifiedUserRepository, reviewStatsRepository, devBranches);
+    }
+
+    /** Таймшит разработчика по дням — live time-logs из Kaiten. */
+    @Bean
+    GetTimesheetUseCase getTimesheetUseCase(
+            UnifiedUserRepository unifiedUserRepository,
+            KaitenGateway kaitenGateway) {
+        return new GetTimesheetService(unifiedUserRepository, kaitenGateway);
     }
 
     /** Список пользователей (picker perf-review + управление командами). */

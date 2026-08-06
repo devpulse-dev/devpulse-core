@@ -30,6 +30,7 @@ import ru.x5.devpulse.application.port.in.GetPerformanceReviewUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetTeamDefectsUseCase;
+import ru.x5.devpulse.application.port.in.GetTimesheetUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetMergedMrStatsUseCase;
 import ru.x5.devpulse.application.port.in.MarkDefectsAiAgentUseCase;
@@ -46,6 +47,8 @@ import ru.x5.devpulse.domain.model.performance.DefectMember;
 import ru.x5.devpulse.domain.model.performance.DefectsSummary;
 import ru.x5.devpulse.domain.model.performance.PeriodDefectCounts;
 import ru.x5.devpulse.domain.model.performance.TeamDefectsReport;
+import ru.x5.devpulse.domain.model.performance.Timesheet;
+import ru.x5.devpulse.domain.model.performance.TimesheetDay;
 import ru.x5.devpulse.domain.model.performance.DeliveredFeature;
 import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
 import ru.x5.devpulse.domain.model.performance.FirefightingItem;
@@ -91,6 +94,7 @@ class StatsControllerTest {
     @MockitoBean GetTeamDefectsUseCase getTeamDefects;
     @MockitoBean GetMergedMrStatsUseCase getMergedMrStats;
     @MockitoBean MarkDefectsAiAgentUseCase markDefectsAiAgent;
+    @MockitoBean GetTimesheetUseCase getTimesheet;
 
     @Test
     @DisplayName("GET /daily?from=&to= возвращает 200 и список агрегатов с email/repo")
@@ -327,6 +331,27 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.authors[0].count").value(21))
                 .andExpect(jsonPath("$.byRepo[0].repo").value("gkr/xrg-markable"))
                 .andExpect(jsonPath("$.byRepo[0].count").value(23));
+    }
+
+    @Test
+    @DisplayName("GET /timesheet → 200: totalMinutes, loggedDays и дни со списаниями")
+    void timesheetReturnsDays() throws Exception {
+        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
+        when(getTimesheet.get(eq(new Email("boris@x5.ru")), any())).thenReturn(new Timesheet(
+                new Email("boris@x5.ru"), may, 990,
+                List.of(new TimesheetDay(LocalDate.of(2026, 5, 4), 480),
+                        new TimesheetDay(LocalDate.of(2026, 5, 5), 510))));
+
+        mvc.perform(get("/api/v2/stats/timesheet")
+                        .param("from", "2026-05-01").param("to", "2026-05-31")
+                        .param("email", "boris@x5.ru"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("boris@x5.ru"))
+                .andExpect(jsonPath("$.from").value("2026-05-01"))
+                .andExpect(jsonPath("$.totalMinutes").value(990))
+                .andExpect(jsonPath("$.loggedDays").value(2))
+                .andExpect(jsonPath("$.days[1].date").value("2026-05-05"))
+                .andExpect(jsonPath("$.days[1].minutes").value(510));
     }
 
     @Test
