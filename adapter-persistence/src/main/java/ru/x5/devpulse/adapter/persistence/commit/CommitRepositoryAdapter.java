@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,6 +21,7 @@ import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.CommitHash;
 import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.stats.HourlyBucket;
+import ru.x5.devpulse.domain.model.stats.HourlyBucketAuthor;
 import ru.x5.devpulse.domain.model.user.Email;
 
 @Component
@@ -135,15 +137,23 @@ class CommitRepositoryAdapter implements CommitRepository {
         List<Object[]> rows = jpa.aggregateHourly(
                 period.fromAtStartOfDay(), period.toAtEndOfDay(), email, teamName);
 
-        List<HourlyBucket> buckets = new ArrayList<>(rows.size());
+        // Запрос отдаёт строку на (день, час, автор) и упорядочен по ячейкам, но на порядок
+        // не полагаемся: LinkedHashMap собирает авторов по ключу ячейки, а HourlyBucket.of
+        // складывает счётчики и нормализует сортировку авторов.
+        Map<Integer, List<HourlyBucketAuthor>> byCell = new LinkedHashMap<>();
         for (Object[] r : rows) {
             // ((Number) …) — устойчиво к JDBC-типу (Integer/Long/BigInteger/BigDecimal).
-            buckets.add(new HourlyBucket(
-                    ((Number) r[0]).intValue(),
-                    ((Number) r[1]).intValue(),
-                    ((Number) r[2]).longValue(),
-                    ((Number) r[3]).longValue()));
+            int weekday = ((Number) r[0]).intValue();
+            int hour = ((Number) r[1]).intValue();
+            byCell.computeIfAbsent(weekday * 24 + hour, k -> new ArrayList<>())
+                    .add(new HourlyBucketAuthor(
+                            new Email((String) r[2]),
+                            ((Number) r[3]).longValue(),
+                            ((Number) r[4]).longValue()));
         }
+
+        List<HourlyBucket> buckets = new ArrayList<>(byCell.size());
+        byCell.forEach((cell, authors) -> buckets.add(HourlyBucket.of(cell / 24, cell % 24, authors)));
         return buckets;
     }
 }

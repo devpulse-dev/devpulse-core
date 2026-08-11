@@ -90,12 +90,21 @@ interface CommitDetailsJpaRepository extends JpaRepository<CommitDetailsEntity, 
      * неопределённый тип). {@code :team} фильтрует по членству в команде через подзапрос на
      * {@code unified_user} (join по email, оба нормализованы к lower-case): коммиты авторов без
      * записи в {@code unified_user} либо в другой команде в выборку не входят. Несуществующая
-     * команда → пустой подзапрос → пустой результат. Возвращает строки
-     * {@code [weekday:int, hour:int, commits:long, addedLines:long]}.</p>
+     * команда → пустой подзапрос → пустой результат.</p>
+     *
+     * <p>Разрез идёт до автора: {@code email} в {@code group by} даёт строку на
+     * {@code (день, час, автор)}, счётчики ячейки складываются в адаптере. Раньше группировка
+     * заканчивалась на {@code (день, час)}, и матрица была анонимной — drill-down по ячейке
+     * собрать было не из чего (дневные агрегаты знают автора, но не знают часа). Отдельного
+     * запроса за суммами не нужно: ячеек максимум 7×24, авторов в часе обычно единицы.</p>
+     *
+     * <p>Возвращает строки {@code [weekday:int, hour:int, email:String, commits:long,
+     * addedLines:long]}, отсортированные так, что ячейки идут подряд.</p>
      */
     @Query(value = """
             select extract(isodow from commit_date)::int - 1 as weekday,
                    extract(hour   from commit_date)::int     as hour,
+                   email                                      as email,
                    count(*)                                   as commits,
                    coalesce(sum(added_lines), 0)             as added_lines
               from commit_details
@@ -105,7 +114,9 @@ interface CommitDetailsJpaRepository extends JpaRepository<CommitDetailsEntity, 
                and (cast(:team as text) is null
                     or email in (select u.email from unified_user u where u.team = :team))
              group by extract(isodow from commit_date)::int - 1,
-                      extract(hour from commit_date)::int
+                      extract(hour from commit_date)::int,
+                      email
+             order by weekday, hour, commits desc
             """, nativeQuery = true)
     List<Object[]> aggregateHourly(
             @Param("from") LocalDateTime from,

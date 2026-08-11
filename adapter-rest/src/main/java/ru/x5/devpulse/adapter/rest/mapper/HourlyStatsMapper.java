@@ -4,6 +4,7 @@ import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.ReportingPolicy;
 import ru.x5.devpulse.adapter.rest.api.model.HourlyCell;
+import ru.x5.devpulse.adapter.rest.api.model.HourlyCellAuthor;
 import ru.x5.devpulse.adapter.rest.api.model.HourlyStats;
 
 /**
@@ -11,10 +12,12 @@ import ru.x5.devpulse.adapter.rest.api.model.HourlyStats;
  *
  * <p>Уплощает {@code period: Period} в плоские {@code from}/{@code to}; вложенные
  * {@code HourlyBucket} мапятся в {@link HourlyCell} (имена полей совпадают,
- * int/long → Integer/Long автобоксятся).</p>
+ * int/long → Integer/Long автобоксятся), а их {@code authors} — в
+ * {@link HourlyCellAuthor} ({@code Email → String} через {@link DomainTypeConverters}).</p>
  */
 @Mapper(componentModel = "spring",
         implementationName = "RestHourlyStatsMapperImpl",
+        uses = DomainTypeConverters.class,
         unmappedSourcePolicy = ReportingPolicy.IGNORE)
 public interface HourlyStatsMapper {
 
@@ -23,4 +26,6 @@ public interface HourlyStatsMapper {
     HourlyStats toDto(ru.x5.devpulse.domain.model.stats.HourlyStats s);
 
     HourlyCell toCell(ru.x5.devpulse.domain.model.stats.HourlyBucket b);
+
+    HourlyCellAuthor toCellAuthor(ru.x5.devpulse.domain.model.stats.HourlyBucketAuthor a);
 }

@@ -73,6 +73,7 @@ import ru.x5.devpulse.domain.model.review.TeamMergedMrStats;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.stats.HourlyBucket;
+import ru.x5.devpulse.domain.model.stats.HourlyBucketAuthor;
 import ru.x5.devpulse.domain.model.stats.HourlyStats;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCardId;
 import ru.x5.devpulse.domain.model.stats.PeriodSummary;
@@ -167,6 +168,42 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.cells[0].hour").value(14))
                 .andExpect(jsonPath("$.cells[0].commits").value(7))
                 .andExpect(jsonPath("$.cells[0].addedLines").value(320));
+    }
+
+    @Test
+    @DisplayName("GET /hourly → ячейка отдаёт разбивку по авторам")
+    void hourlyReturnsCellAuthors() throws Exception {
+        when(getHourlyStats.get(any(), any(), any())).thenReturn(new HourlyStats(
+                new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)),
+                List.of(HourlyBucket.of(2, 14, List.of(
+                        new HourlyBucketAuthor(new Email("boris@x5.ru"), 5, 220),
+                        new HourlyBucketAuthor(new Email("anna@x5.ru"), 2, 100))))));
+
+        mvc.perform(get("/api/v2/stats/hourly")
+                        .param("from", "2026-05-01").param("to", "2026-05-31"))
+                .andExpect(status().isOk())
+                // Счётчики ячейки — сумма по авторам.
+                .andExpect(jsonPath("$.cells[0].commits").value(7))
+                .andExpect(jsonPath("$.cells[0].addedLines").value(320))
+                .andExpect(jsonPath("$.cells[0].authors.length()").value(2))
+                .andExpect(jsonPath("$.cells[0].authors[0].email").value("boris@x5.ru"))
+                .andExpect(jsonPath("$.cells[0].authors[0].commits").value(5))
+                .andExpect(jsonPath("$.cells[0].authors[0].addedLines").value(220))
+                .andExpect(jsonPath("$.cells[0].authors[1].email").value("anna@x5.ru"));
+    }
+
+    @Test
+    @DisplayName("GET /hourly → ячейка без разбивки отдаёт пустой массив авторов, а не null")
+    void hourlyReturnsEmptyAuthorsWhenAbsent() throws Exception {
+        when(getHourlyStats.get(any(), any(), any())).thenReturn(new HourlyStats(
+                new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)),
+                List.of(new HourlyBucket(2, 14, 7, 320))));
+
+        mvc.perform(get("/api/v2/stats/hourly")
+                        .param("from", "2026-05-01").param("to", "2026-05-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cells[0].authors").isArray())
+                .andExpect(jsonPath("$.cells[0].authors.length()").value(0));
     }
 
     @Test

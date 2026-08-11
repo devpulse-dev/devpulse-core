@@ -24,6 +24,7 @@ import ru.x5.devpulse.domain.model.git.Commit;
 import ru.x5.devpulse.domain.model.git.CommitHash;
 import ru.x5.devpulse.domain.model.git.RepoName;
 import ru.x5.devpulse.domain.model.stats.HourlyBucket;
+import ru.x5.devpulse.domain.model.stats.HourlyBucketAuthor;
 import ru.x5.devpulse.domain.model.user.Email;
 
 @SpringBootTest
@@ -110,6 +111,32 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                         .as("всего 3 — мердж исключён").isEqualTo(3),
                 () -> assertThat(repo.aggregateHourly(may, Optional.of(new Email("nobody@x5.ru")), Optional.empty()))
                         .as("фильтр по чужому email → пусто").isEmpty());
+    }
+
+    @Test
+    @DisplayName("aggregateHourly: ячейка несёт разбивку по авторам, по убыванию коммитов")
+    void aggregateHourlyBreaksDownByAuthor() {
+        Email other = new Email("other-c@x5.ru");
+        LocalDateTime mon10a = LocalDateTime.of(2026, 5, 4, 10, 0);
+        LocalDateTime mon10b = LocalDateTime.of(2026, 5, 4, 10, 30);
+        LocalDateTime mon10c = LocalDateTime.of(2026, 5, 4, 10, 45);
+
+        repo.saveAll(List.of(
+                newCommit("c1".repeat(20), BORIS, mon10a),   // (0,10) BORIS +10
+                newCommit("c2".repeat(20), BORIS, mon10b),   // (0,10) BORIS +10
+                newCommit("c3".repeat(20), other, mon10c)    // (0,10) other +10
+        ), Map.of());
+
+        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
+        HourlyBucket mon10 = cell(repo.aggregateHourly(may, Optional.empty(), Optional.empty()), 0, 10);
+
+        assertAll("разбивка ячейки по авторам",
+                () -> assertThat(mon10.commits()).as("счётчик ячейки = сумма по авторам").isEqualTo(3),
+                () -> assertThat(mon10.addedLines()).isEqualTo(30),
+                () -> assertThat(mon10.authors())
+                        .extracting(a -> a.email().value(), HourlyBucketAuthor::commits)
+                        .as("автор с двумя коммитами идёт первым")
+                        .containsExactly(tuple(BORIS.value(), 2L), tuple(other.value(), 1L)));
     }
 
     @Test
