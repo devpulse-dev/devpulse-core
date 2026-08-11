@@ -65,6 +65,23 @@ interface MergeRequestJpaRepository extends JpaRepository<MergeRequestEntity, Lo
             @Param("emails") Collection<String> emails,
             @Param("branches") Collection<String> branches);
 
+    /** MR одного автора — только поля, нужные для связки с карточкой (title/url/project). */
+    @Query("""
+            select m.gitlabProjectId as projectId, m.title as title, m.webUrl as webUrl
+              from MergeRequestEntity m
+             where m.authorEmail = :email
+            """)
+    List<AuthoredMrView> findByAuthorEmail(@Param("email") String email);
+
+    /** Проекция результата {@link #findByAuthorEmail}. */
+    interface AuthoredMrView {
+        Long getProjectId();
+
+        String getTitle();
+
+        String getWebUrl();
+    }
+
     /** Проекция результата {@link #countMergedByRepo}. */
     interface RepoMergedCountView {
         Long getProjectId();

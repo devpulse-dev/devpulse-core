@@ -135,8 +135,9 @@ class QueryUseCaseConfig {
     @Bean
     GetTimesheetUseCase getTimesheetUseCase(
             UnifiedUserRepository unifiedUserRepository,
-            KaitenGateway kaitenGateway) {
-        return new GetTimesheetService(unifiedUserRepository, kaitenGateway);
+            KaitenGateway kaitenGateway,
+            ReviewStatsRepository reviewStatsRepository) {
+        return new GetTimesheetService(unifiedUserRepository, kaitenGateway, reviewStatsRepository);
     }
 
     /** Список пользователей (picker perf-review + управление командами). */

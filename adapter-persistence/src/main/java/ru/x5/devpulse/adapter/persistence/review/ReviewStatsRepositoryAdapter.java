@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import ru.x5.devpulse.application.port.out.ReviewStatsRepository;
 import ru.x5.devpulse.domain.common.Period;
+import ru.x5.devpulse.domain.model.review.AuthoredMergeRequest;
 import ru.x5.devpulse.domain.model.review.MergeRequest;
 import ru.x5.devpulse.domain.model.review.MergedMrCountRow;
 import ru.x5.devpulse.domain.model.review.MrReview;
@@ -96,6 +97,14 @@ class ReviewStatsRepositoryAdapter implements ReviewStatsRepository {
         }
         path = path.replaceAll("^/+", "").replaceAll("/+$", "");
         return path.isBlank() ? fallback : path;
+    }
+
+    @Override
+    public List<AuthoredMergeRequest> findMergeRequestsByAuthor(Email author) {
+        return mrJpa.findByAuthorEmail(author.value()).stream()
+                .map(v -> new AuthoredMergeRequest(
+                        repoName(v.getWebUrl(), v.getProjectId()), v.getTitle(), v.getWebUrl()))
+                .toList();
     }
 
     private static MrReview toDomain(MrReviewEntity e) {

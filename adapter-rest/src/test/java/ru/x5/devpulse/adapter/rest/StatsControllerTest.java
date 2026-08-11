@@ -49,6 +49,8 @@ import ru.x5.devpulse.domain.model.performance.PeriodDefectCounts;
 import ru.x5.devpulse.domain.model.performance.TeamDefectsReport;
 import ru.x5.devpulse.domain.model.performance.Timesheet;
 import ru.x5.devpulse.domain.model.performance.TimesheetDay;
+import ru.x5.devpulse.domain.model.performance.TimesheetEntry;
+import ru.x5.devpulse.domain.model.review.AuthoredMergeRequest;
 import ru.x5.devpulse.domain.model.performance.DeliveredFeature;
 import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
 import ru.x5.devpulse.domain.model.performance.FirefightingItem;
@@ -339,8 +341,13 @@ class StatsControllerTest {
         Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
         when(getTimesheet.get(eq(new Email("boris@x5.ru")), any())).thenReturn(new Timesheet(
                 new Email("boris@x5.ru"), may, 990,
-                List.of(new TimesheetDay(LocalDate.of(2026, 5, 4), 480),
-                        new TimesheetDay(LocalDate.of(2026, 5, 5), 510))));
+                List.of(
+                        new TimesheetDay(LocalDate.of(2026, 5, 4), 480, List.of(
+                                new TimesheetEntry(new KaitenCardId(2712833L), "Дефект A",
+                                        "https://kaiten.x5.ru/2712833", KaitenCardType.DEFECT, true, 480,
+                                        List.of(new AuthoredMergeRequest("gkr/core", "1700-2712833 fix",
+                                                "https://scm/mr/1"))))),
+                        new TimesheetDay(LocalDate.of(2026, 5, 5), 510, List.of()))));
 
         mvc.perform(get("/api/v2/stats/timesheet")
                         .param("from", "2026-05-01").param("to", "2026-05-31")
@@ -351,7 +358,11 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.totalMinutes").value(990))
                 .andExpect(jsonPath("$.loggedDays").value(2))
                 .andExpect(jsonPath("$.days[1].date").value("2026-05-05"))
-                .andExpect(jsonPath("$.days[1].minutes").value(510));
+                .andExpect(jsonPath("$.days[1].minutes").value(510))
+                .andExpect(jsonPath("$.days[0].entries[0].cardId").value(2712833))
+                .andExpect(jsonPath("$.days[0].entries[0].type").value("DEFECT"))
+                .andExpect(jsonPath("$.days[0].entries[0].aiAgent").value(true))
+                .andExpect(jsonPath("$.days[0].entries[0].mergeRequests[0].repo").value("gkr/core"));
     }
 
     @Test

@@ -5,6 +5,9 @@ import org.mapstruct.Mapping;
 import org.mapstruct.ReportingPolicy;
 import ru.x5.devpulse.adapter.rest.api.model.Timesheet;
 import ru.x5.devpulse.adapter.rest.api.model.TimesheetDay;
+import ru.x5.devpulse.adapter.rest.api.model.TimesheetEntry;
+import ru.x5.devpulse.adapter.rest.api.model.TimesheetMergeRequest;
+import ru.x5.devpulse.domain.model.review.AuthoredMergeRequest;
 
 /**
  * {@code domain.performance.Timesheet} → {@link Timesheet}.
@@ -25,4 +28,12 @@ public interface TimesheetMapper {
     Timesheet toDto(ru.x5.devpulse.domain.model.performance.Timesheet ts);
 
     TimesheetDay toDay(ru.x5.devpulse.domain.model.performance.TimesheetDay day);
+
+    /**
+     * {@code KaitenCardType → TypeEnum} MapStruct мапит по совпадению имён констант
+     * (DEVELOPMENT/DEFECT/TASK/OTHER), {@code KaitenCardId → Long} — через {@link DomainTypeConverters}.
+     */
+    TimesheetEntry toEntry(ru.x5.devpulse.domain.model.performance.TimesheetEntry entry);
+
+    TimesheetMergeRequest toMergeRequest(AuthoredMergeRequest mr);
 }

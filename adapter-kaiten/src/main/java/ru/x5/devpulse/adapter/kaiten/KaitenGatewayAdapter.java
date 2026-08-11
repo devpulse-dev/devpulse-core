@@ -18,6 +18,8 @@ import ru.x5.devpulse.adapter.kaiten.dto.KaitenTimeLogDto;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenUserDto;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
+import ru.x5.devpulse.domain.model.kaiten.KaitenCardId;
+import ru.x5.devpulse.domain.model.kaiten.KaitenCardType;
 import ru.x5.devpulse.domain.model.kaiten.KaitenTimeLog;
 import ru.x5.devpulse.domain.model.kaiten.KaitenUser;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
@@ -185,11 +187,21 @@ class KaitenGatewayAdapter implements KaitenGateway {
                             + "&user_ids=" + userIds + "&offset=" + currentOffset,
                     () -> http.getTimeLogs(fromStr, toStr, userIds, limit, currentOffset));
 
+            String webBaseUrl = properties.webBaseUrl();
             for (KaitenTimeLogDto dto : rawPage) {
                 if (dto.forDate() == null || dto.timeSpent() == null) {
                     continue;
                 }
-                result.add(new KaitenTimeLog(dto.forDate(), dto.timeSpent()));
+                var card = dto.card();
+                Long cardId = card != null ? card.id() : dto.cardId();
+                result.add(new KaitenTimeLog(
+                        dto.forDate(),
+                        dto.timeSpent(),
+                        cardId == null ? null : new KaitenCardId(cardId),
+                        card != null ? card.title() : null,
+                        cardId == null ? null : mapper.buildCardUrl(webBaseUrl, cardId),
+                        card != null ? KaitenCardType.fromId(card.typeId()) : KaitenCardType.OTHER,
+                        card != null && mapper.aiAgentFrom(card.properties())));
             }
 
             if (rawPage.size() < limit) break;

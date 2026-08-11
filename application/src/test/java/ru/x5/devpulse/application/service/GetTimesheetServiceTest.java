@@ -18,10 +18,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
+import ru.x5.devpulse.application.port.out.ReviewStatsRepository;
 import ru.x5.devpulse.application.port.out.UnifiedUserRepository;
 import ru.x5.devpulse.domain.common.Period;
+import ru.x5.devpulse.domain.model.kaiten.KaitenCardId;
+import ru.x5.devpulse.domain.model.kaiten.KaitenCardType;
 import ru.x5.devpulse.domain.model.kaiten.KaitenTimeLog;
 import ru.x5.devpulse.domain.model.performance.Timesheet;
+import ru.x5.devpulse.domain.model.review.AuthoredMergeRequest;
 import ru.x5.devpulse.domain.model.user.Email;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 import ru.x5.devpulse.domain.model.user.UnifiedUser;
@@ -35,11 +39,12 @@ class GetTimesheetServiceTest {
 
     @Mock private UnifiedUserRepository userRepo;
     @Mock private KaitenGateway gateway;
+    @Mock private ReviewStatsRepository reviewRepo;
     private GetTimesheetService service;
 
     @BeforeEach
     void setUp() {
-        service = new GetTimesheetService(userRepo, gateway);
+        service = new GetTimesheetService(userRepo, gateway, reviewRepo);
     }
 
     @Test
@@ -47,9 +52,11 @@ class GetTimesheetServiceTest {
     void aggregatesByDay() {
         when(userRepo.findByEmail(BORIS)).thenReturn(Optional.of(user(BORIS, 1579L)));
         when(gateway.fetchTimeLogs(new KaitenUserId(1579L), MAY.from(), MAY.to())).thenReturn(List.of(
-                new KaitenTimeLog(LocalDate.of(2026, 5, 4), 480),
-                new KaitenTimeLog(LocalDate.of(2026, 5, 5), 300),
-                new KaitenTimeLog(LocalDate.of(2026, 5, 5), 210)));
+                log(LocalDate.of(2026, 5, 4), 480, 100L),
+                log(LocalDate.of(2026, 5, 5), 300, 100L),
+                log(LocalDate.of(2026, 5, 5), 210, 100L)));
+        when(reviewRepo.findMergeRequestsByAuthor(BORIS)).thenReturn(List.of(
+                new AuthoredMergeRequest("gkr/core", "1700-100 fix", "https://scm/mr/1")));
 
         Timesheet ts = service.get(BORIS, MAY);
 
@@ -57,7 +64,10 @@ class GetTimesheetServiceTest {
                 () -> assertThat(ts.email()).isEqualTo(BORIS),
                 () -> assertThat(ts.totalMinutes()).isEqualTo(990),
                 () -> assertThat(ts.loggedDays()).isEqualTo(2),
-                () -> assertThat(ts.days().get(1).minutes()).as("300+210").isEqualTo(510));
+                () -> assertThat(ts.days().get(1).minutes()).as("300+210").isEqualTo(510),
+                () -> assertThat(ts.days().get(0).entries()).singleElement()
+                        .satisfies(e -> assertThat(e.mergeRequests())
+                                .as("MR по номеру задачи из заголовка").hasSize(1)));
         verify(gateway).fetchTimeLogs(new KaitenUserId(1579L), MAY.from(), MAY.to());
     }
 
@@ -84,7 +94,12 @@ class GetTimesheetServiceTest {
 
         assertThat(ts.totalMinutes()).isZero();
         assertThat(ts.days()).isEmpty();
-        verifyNoInteractions(gateway);
+        verifyNoInteractions(gateway, reviewRepo);
+    }
+
+    private static KaitenTimeLog log(java.time.LocalDate date, int minutes, long cardId) {
+        return new KaitenTimeLog(date, minutes, new KaitenCardId(cardId), "card" + cardId,
+                "https://kaiten.x5.ru/" + cardId, KaitenCardType.DEFECT, false);
     }
 
     private static UnifiedUser user(Email email, Long kaitenId) {
