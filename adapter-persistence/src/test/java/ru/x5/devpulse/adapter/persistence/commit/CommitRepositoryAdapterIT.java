@@ -38,6 +38,20 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
     private static final Period JANUARY = new Period(
             LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31));
 
+    /*
+     * Класс поднят на общем контейнере без @Transactional и без очистки между
+     * методами: строки, записанные одним тестом, видны остальным. Поэтому каждый
+     * hourly-тест работает в СВОЁМ месяце — иначе итоги зависят от порядка запуска
+     * (и однажды уже сломались, когда в май добавился ещё один тест).
+     * Все стартовые даты — понедельники, чтобы weekday читался как 0.
+     */
+    private static final Period HOURLY_MAY = new Period(
+            LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
+    private static final Period HOURLY_SEP = new Period(
+            LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+    private static final Period HOURLY_OCT = new Period(
+            LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31));
+
     @Autowired
     CommitRepository repo;
 
@@ -98,8 +112,8 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                 mergeCommit("4".repeat(40), BORIS, mon10merge)             // мердж — НЕ считаем
         ), Map.of());
 
-        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
-        List<HourlyBucket> cells = repo.aggregateHourly(may, Optional.empty(), Optional.empty());
+        List<HourlyBucket> cells =
+                repo.aggregateHourly(HOURLY_MAY, Optional.empty(), Optional.empty());
 
         HourlyBucket mon10 = cell(cells, 0, 10);
         HourlyBucket tue = cell(cells, 1, 14);
@@ -109,26 +123,30 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                 () -> assertThat(tue.commits()).isEqualTo(1),
                 () -> assertThat(cells.stream().mapToLong(HourlyBucket::commits).sum())
                         .as("всего 3 — мердж исключён").isEqualTo(3),
-                () -> assertThat(repo.aggregateHourly(may, Optional.of(new Email("nobody@x5.ru")), Optional.empty()))
+                () -> assertThat(repo.aggregateHourly(
+                                HOURLY_MAY, Optional.of(new Email("nobody@x5.ru")), Optional.empty()))
                         .as("фильтр по чужому email → пусто").isEmpty());
     }
 
     @Test
     @DisplayName("aggregateHourly: ячейка несёт разбивку по авторам, по убыванию коммитов")
     void aggregateHourlyBreaksDownByAuthor() {
-        Email other = new Email("other-c@x5.ru");
-        LocalDateTime mon10a = LocalDateTime.of(2026, 5, 4, 10, 0);
-        LocalDateTime mon10b = LocalDateTime.of(2026, 5, 4, 10, 30);
-        LocalDateTime mon10c = LocalDateTime.of(2026, 5, 4, 10, 45);
+        // Сентябрь и собственные адреса: тест не должен видеть данные соседей и
+        // не должен попадать в их итоги. 7 сентября 2026 — понедельник.
+        Email lead = new Email("sep-lead@x5.ru");
+        Email helper = new Email("sep-helper@x5.ru");
+        LocalDateTime mon10a = LocalDateTime.of(2026, 9, 7, 10, 0);
+        LocalDateTime mon10b = LocalDateTime.of(2026, 9, 7, 10, 30);
+        LocalDateTime mon10c = LocalDateTime.of(2026, 9, 7, 10, 45);
 
         repo.saveAll(List.of(
-                newCommit("c1".repeat(20), BORIS, mon10a),   // (0,10) BORIS +10
-                newCommit("c2".repeat(20), BORIS, mon10b),   // (0,10) BORIS +10
-                newCommit("c3".repeat(20), other, mon10c)    // (0,10) other +10
+                newCommit("c1".repeat(20), lead, mon10a),     // (0,10) lead +10
+                newCommit("c2".repeat(20), lead, mon10b),     // (0,10) lead +10
+                newCommit("c3".repeat(20), helper, mon10c)    // (0,10) helper +10
         ), Map.of());
 
-        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
-        HourlyBucket mon10 = cell(repo.aggregateHourly(may, Optional.empty(), Optional.empty()), 0, 10);
+        HourlyBucket mon10 =
+                cell(repo.aggregateHourly(HOURLY_SEP, Optional.empty(), Optional.empty()), 0, 10);
 
         assertAll("разбивка ячейки по авторам",
                 () -> assertThat(mon10.commits()).as("счётчик ячейки = сумма по авторам").isEqualTo(3),
@@ -136,7 +154,7 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
                 () -> assertThat(mon10.authors())
                         .extracting(a -> a.email().value(), HourlyBucketAuthor::commits)
                         .as("автор с двумя коммитами идёт первым")
-                        .containsExactly(tuple(BORIS.value(), 2L), tuple(other.value(), 1L)));
+                        .containsExactly(tuple(lead.value(), 2L), tuple(helper.value(), 1L)));
     }
 
     @Test
@@ -149,25 +167,27 @@ class CommitRepositoryAdapterIT extends PostgresContainerSupport {
         userRepo.updateTeam(platformDev, "Platform");
         userRepo.updateTeam(coreDev, "Core");
 
-        LocalDateTime mon10 = LocalDateTime.of(2026, 5, 4, 10, 0);
-        LocalDateTime tue14 = LocalDateTime.of(2026, 5, 5, 14, 0);
+        // Октябрь: 5 октября 2026 — понедельник.
+        LocalDateTime mon10 = LocalDateTime.of(2026, 10, 5, 10, 0);
+        LocalDateTime tue14 = LocalDateTime.of(2026, 10, 6, 14, 0);
         repo.saveAll(List.of(
                 newCommit("a1".repeat(20), platformDev, mon10),   // Platform → (0,10)
                 newCommit("b2".repeat(20), coreDev, tue14)        // Core → (1,14)
         ), Map.of());
 
-        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
-
         assertAll("фильтр по команде",
-                () -> assertThat(repo.aggregateHourly(may, Optional.empty(), Optional.of("Platform")))
+                () -> assertThat(repo.aggregateHourly(
+                                HOURLY_OCT, Optional.empty(), Optional.of("Platform")))
                         .as("только коммит участника Platform")
                         .extracting(HourlyBucket::weekday, HourlyBucket::hour)
                         .containsExactly(tuple(0, 10)),
-                () -> assertThat(repo.aggregateHourly(may, Optional.empty(), Optional.of("Core")))
+                () -> assertThat(repo.aggregateHourly(
+                                HOURLY_OCT, Optional.empty(), Optional.of("Core")))
                         .as("только коммит участника Core")
                         .extracting(HourlyBucket::weekday, HourlyBucket::hour)
                         .containsExactly(tuple(1, 14)),
-                () -> assertThat(repo.aggregateHourly(may, Optional.empty(), Optional.of("Ghost")))
+                () -> assertThat(repo.aggregateHourly(
+                                HOURLY_OCT, Optional.empty(), Optional.of("Ghost")))
                         .as("несуществующая команда → пусто").isEmpty());
     }
 
