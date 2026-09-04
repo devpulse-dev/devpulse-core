@@ -47,8 +47,12 @@ class SecurityConfig {
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // RBAC (ADR-13). Контроллеры adapter-rest под префиксом /api/v2
-                        // (WebMvcConfig); auth-эндпоинты — нет (другой пакет). Гейтим только
-                        // аналитические разделы; операционное (collection) — любому аутентиф.
+                        // (WebMvcConfig); auth-эндпоинты — нет (другой пакет).
+                        // Операционное управление сбором (запуск/отмена прогона) — только ADMIN:
+                        // дорогая глобальная операция, не для любого аутентифицированного. GET
+                        // (статус/последний прогон) остаётся доступен всем — нужен UI.
+                        .requestMatchers(HttpMethod.POST, "/api/v2/collection/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v2/collection/**").hasRole("ADMIN")
                         .requestMatchers("/api/v2/cohorts/**").hasAnyRole("ADMIN", "TEAMLEAD")
                         // Мутация карточек Kaiten (простановка флага AI-Agent) — только elevated.
                         .requestMatchers(HttpMethod.POST, "/api/v2/stats/defects/ai-agent")
@@ -61,6 +65,10 @@ class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/v2/teams/**").hasAnyRole("ADMIN", "TEAMLEAD")
                         .requestMatchers("/api/v2/users/*/team").hasAnyRole("ADMIN", "TEAMLEAD")
                         .requestMatchers(HttpMethod.GET, "/api/v2/performance/review")
+                                .access(this::perfReviewSelfOrElevated)
+                        // Таймшит — персональные трудозатраты: та же политика, что у perf-review
+                        // (ADMIN/TEAMLEAD — по любому, MEMBER — только по себе).
+                        .requestMatchers(HttpMethod.GET, "/api/v2/stats/timesheet")
                                 .access(this::perfReviewSelfOrElevated)
                         .anyRequest().authenticated())
                 .csrf(AbstractHttpConfigurer::disable)

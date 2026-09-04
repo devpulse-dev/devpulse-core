@@ -1,0 +1,31 @@
+# Composite index под пагинируемую выборку коммитов автора за период.
+#
+# CommitDetailsJpaRepository.findByAuthorAndPeriod:
+#   WHERE email = ? AND commit_date BETWEEN ? AND ? ORDER BY commit_date DESC
+#
+# Существующие индексы этот доступ НЕ покрывают:
+#   - idx_commit_details_email(email) — только равенство по email; ORDER BY commit_date
+#     доедается сортировкой в памяти (дорого для «плодовитого» автора за год истории);
+#   - idx_commit_details_email_lower_date(LOWER(email), CAST(commit_date AS DATE)) — форма
+#     LOWER()/DATE не матчит raw email + timestamp range/ORDER этого запроса.
+#
+# Нужен обычный composite (email, commit_date): равенство по префиксу email + index-ordered
+# range/сортировка по commit_date (без in-memory sort). Пагинация коммитов профиля/автора —
+# именно этот путь.
+#
+# CONCURRENTLY (runInTransaction: false) — не блокируем writes на большой commit_details.
+# IF NOT EXISTS — идемпотентность, если индекс уже создан вручную.
+databaseChangeLog:
+  - changeSet:
+      id: 031-add-email-commit-date-index
+      author: devpulse
+      runInTransaction: false
+      changes:
+        - sql:
+            comment: "composite index под пагинируемую выборку коммитов автора за период"
+            sql: |
+              CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_commit_details_email_commit_date
+              ON commit_details (email, commit_date);
+      rollback:
+        - sql:
+            sql: DROP INDEX IF EXISTS idx_commit_details_email_commit_date;

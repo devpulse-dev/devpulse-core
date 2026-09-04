@@ -29,8 +29,6 @@ import ru.x5.devpulse.domain.model.user.Email;
  */
 public final class CohortAssembler {
 
-    private static final int BASELINE_PERIOD_DAYS = 30;
-
     /** Порядок тиров = ordinal {@link ActivityCategory}; на нём держится индексация матрицы переходов. */
     private static final List<ActivityCategory> TIERS = List.of(
             ActivityCategory.INACTIVE, ActivityCategory.BELOW_AVERAGE,
@@ -170,7 +168,7 @@ public final class CohortAssembler {
 
     private static ActivityCategory categoryFor(MonthlyAuthorActivity a, double expectedPer30) {
         if (a == null || a.nonMergeCommits() == 0) return ActivityCategory.INACTIVE;
-        double expected = expectedPer30 * (a.month().lengthOfMonth() / (double) BASELINE_PERIOD_DAYS);
+        double expected = ActivityScorer.scaleExpectedForDays(expectedPer30, a.month().lengthOfMonth());
         AuthorSummary summary = new AuthorSummary(a.email(), null, null,
                 a.commits(), a.mergeCommits(), a.addedLines(), a.deletedLines(), 0L, null, null, false);
         return ActivityScorer.score(summary, expected).category();

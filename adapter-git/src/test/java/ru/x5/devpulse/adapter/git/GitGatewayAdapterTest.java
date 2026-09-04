@@ -45,12 +45,12 @@ class GitGatewayAdapterTest {
     @Test
     @DisplayName("Меньше BATCH_SIZE коммитов → один батч (хвостовой flush на finish)")
     void smallStreamFlushesOnceAtEnd() throws Exception {
-        when(cli.prepare(REPO_URL)).thenReturn(new GitCliClient.PreparedRepo(REPO, REPO_PATH));
+        when(cli.prepare(eq(REPO_URL), any())).thenReturn(new GitCliClient.PreparedRepo(REPO, REPO_PATH));
         stubStreamLog(generateLogLines(3));
 
         GitGatewayAdapter adapter = newAdapter();
         List<List<Commit>> batches = new ArrayList<>();
-        adapter.streamCommits(REPO, SINCE, UNTIL, batches::add);
+        adapter.streamCommits(REPO, SINCE, UNTIL, batches::add, () -> false);
 
         assertAll("один хвостовой батч из 3 коммитов",
                 () -> assertThat(batches).hasSize(1),
@@ -60,13 +60,13 @@ class GitGatewayAdapterTest {
     @Test
     @DisplayName("Ровно BATCH_SIZE * N коммитов → N батчей по BATCH_SIZE, ни одного хвостового")
     void exactMultipleProducesExactBatches() throws Exception {
-        when(cli.prepare(REPO_URL)).thenReturn(new GitCliClient.PreparedRepo(REPO, REPO_PATH));
+        when(cli.prepare(eq(REPO_URL), any())).thenReturn(new GitCliClient.PreparedRepo(REPO, REPO_PATH));
         int total = GitGatewayAdapter.BATCH_SIZE * 2;
         stubStreamLog(generateLogLines(total));
 
         GitGatewayAdapter adapter = newAdapter();
         List<List<Commit>> batches = new ArrayList<>();
-        adapter.streamCommits(REPO, SINCE, UNTIL, batches::add);
+        adapter.streamCommits(REPO, SINCE, UNTIL, batches::add, () -> false);
 
         assertAll("ровно 2 батча",
                 () -> assertThat(batches).hasSize(2),
@@ -77,13 +77,13 @@ class GitGatewayAdapterTest {
     @Test
     @DisplayName("BATCH_SIZE + 1 коммитов → один полный батч + один хвостовой из 1")
     void overflowProducesTailBatch() throws Exception {
-        when(cli.prepare(REPO_URL)).thenReturn(new GitCliClient.PreparedRepo(REPO, REPO_PATH));
+        when(cli.prepare(eq(REPO_URL), any())).thenReturn(new GitCliClient.PreparedRepo(REPO, REPO_PATH));
         int total = GitGatewayAdapter.BATCH_SIZE + 1;
         stubStreamLog(generateLogLines(total));
 
         GitGatewayAdapter adapter = newAdapter();
         List<List<Commit>> batches = new ArrayList<>();
-        adapter.streamCommits(REPO, SINCE, UNTIL, batches::add);
+        adapter.streamCommits(REPO, SINCE, UNTIL, batches::add, () -> false);
 
         assertAll("полный батч + хвост",
                 () -> assertThat(batches).hasSize(2),
@@ -94,12 +94,12 @@ class GitGatewayAdapterTest {
     @Test
     @DisplayName("Пустой output → batchHandler НЕ зовётся ни разу")
     void emptyOutputDoesNotCallHandler() throws Exception {
-        when(cli.prepare(REPO_URL)).thenReturn(new GitCliClient.PreparedRepo(REPO, REPO_PATH));
+        when(cli.prepare(eq(REPO_URL), any())).thenReturn(new GitCliClient.PreparedRepo(REPO, REPO_PATH));
         stubStreamLog(List.of());
 
         GitGatewayAdapter adapter = newAdapter();
         List<List<Commit>> batches = new ArrayList<>();
-        adapter.streamCommits(REPO, SINCE, UNTIL, batches::add);
+        adapter.streamCommits(REPO, SINCE, UNTIL, batches::add, () -> false);
 
         assertThat(batches).isEmpty();
     }
@@ -107,13 +107,13 @@ class GitGatewayAdapterTest {
     @Test
     @DisplayName("CLI бросает InterruptedException → GitOperationInterruptedException + interrupt flag")
     void interruptIsPropagated() throws Exception {
-        when(cli.prepare(REPO_URL)).thenThrow(new InterruptedException("ctrl-c"));
+        when(cli.prepare(eq(REPO_URL), any())).thenThrow(new InterruptedException("ctrl-c"));
         // сбрасываем флаг от предыдущих тестов
         Thread.interrupted();
 
         GitGatewayAdapter adapter = newAdapter();
         try {
-            adapter.streamCommits(REPO, SINCE, UNTIL, b -> {});
+            adapter.streamCommits(REPO, SINCE, UNTIL, b -> {}, () -> false);
             assertThat(false).as("должен был кинуть").isTrue();
         } catch (GitOperationInterruptedException expected) {
             assertThat(Thread.interrupted())
@@ -133,7 +133,7 @@ class GitGatewayAdapterTest {
             Consumer<String> handler = inv.getArgument(3);
             lines.forEach(handler::accept);
             return null;
-        }).when(cli).streamLog(eq(REPO_PATH), any(), any(), any());
+        }).when(cli).streamLog(eq(REPO_PATH), any(), any(), any(), any());
     }
 
     /**

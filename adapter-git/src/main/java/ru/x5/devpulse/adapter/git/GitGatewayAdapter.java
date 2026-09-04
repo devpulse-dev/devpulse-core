@@ -3,6 +3,7 @@ package ru.x5.devpulse.adapter.git;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -47,10 +48,11 @@ class GitGatewayAdapter implements GitGateway {
     public void streamCommits(RepoName repo,
                               LocalDateTime since,
                               LocalDateTime until,
-                              Consumer<List<Commit>> batchHandler) {
+                              Consumer<List<Commit>> batchHandler,
+                              BooleanSupplier cancelled) {
         String url = findUrl(repo);
         try {
-            GitCliClient.PreparedRepo prepared = cli.prepare(url);
+            GitCliClient.PreparedRepo prepared = cli.prepare(url, cancelled);
 
             // Аккумулятор батча. Парсер пушит сюда коммиты, мы flush'им по достижении BATCH_SIZE.
             final List<Commit> buffer = new ArrayList<>(BATCH_SIZE);
@@ -65,7 +67,7 @@ class GitGatewayAdapter implements GitGateway {
                 }
             });
 
-            cli.streamLog(prepared.path(), since, until, parser::onLine);
+            cli.streamLog(prepared.path(), since, until, parser::onLine, cancelled);
             parser.finish();
 
             if (!buffer.isEmpty()) {

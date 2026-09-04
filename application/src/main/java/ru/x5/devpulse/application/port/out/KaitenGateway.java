@@ -1,10 +1,12 @@
 package ru.x5.devpulse.application.port.out;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
+import ru.x5.devpulse.domain.model.kaiten.KaitenTimeLog;
 import ru.x5.devpulse.domain.model.kaiten.KaitenUser;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 
@@ -49,4 +51,13 @@ public interface KaitenGateway {
      * Используется query-сценариями (например профиль пользователя), где нужен синхронный ответ.</p>
      */
     List<KaitenCard> fetchCardsForMember(KaitenUserId memberId, LocalDateTime updatedAfter);
+
+    /**
+     * Списания времени одного пользователя за период ({@code GET /time-logs}) — для таймшита.
+     *
+     * <p>Границы {@code from}/{@code to} включительны, фильтр — по {@code for_date} (день, на
+     * который списано время). Адаптер пагинирует и отдаёт «худые» доменные записи: тяжёлые
+     * вложенные card/user из ответа Kaiten наружу не выходят.</p>
+     */
+    List<KaitenTimeLog> fetchTimeLogs(KaitenUserId userId, LocalDate from, LocalDate to);
 }

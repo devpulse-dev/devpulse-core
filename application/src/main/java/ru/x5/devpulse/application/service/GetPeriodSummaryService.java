@@ -11,7 +11,7 @@ import ru.x5.devpulse.domain.service.StatsSummarizer;
 /**
  * Сводка за период: totals + top-N авторов c enriched displayName/avatarUrl.
  *
- * <p>Top по умолчанию ≤ 10 (см. {@link StatsSummarizer#summarize}), batch-fetch для них — тривиален.</p>
+ * <p>Top по умолчанию ≤ 10 (см. {@link StatsSummarizer#summarizeAuthors}), batch-fetch для них — тривиален.</p>
  */
 @RequiredArgsConstructor
 public final class GetPeriodSummaryService implements GetPeriodSummaryUseCase {
@@ -21,7 +21,10 @@ public final class GetPeriodSummaryService implements GetPeriodSummaryUseCase {
 
     @Override
     public PeriodSummary summarize(Period period) {
-        PeriodSummary raw = StatsSummarizer.summarize(period, dailyStatsRepository.findByPeriod(period));
+        // Агрегация по автору — в БД (GROUP BY): totals и top-N считаются на компактном
+        // per-author списке, а не на всех daily-строках периода.
+        PeriodSummary raw = StatsSummarizer.summarizeAuthors(
+                period, dailyStatsRepository.aggregateAuthorsByPeriod(period));
         var enriched = new AuthorSummaryEnricher(unifiedUserRepository).enrich(raw.topAuthors());
         return raw.withTopAuthors(enriched);
     }

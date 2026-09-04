@@ -1,5 +1,6 @@
 package ru.x5.devpulse.adapter.kaiten;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -13,9 +14,13 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenCardDto;
+import ru.x5.devpulse.adapter.kaiten.dto.KaitenTimeLogDto;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenUserDto;
 import ru.x5.devpulse.application.port.out.KaitenGateway;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCard;
+import ru.x5.devpulse.domain.model.kaiten.KaitenCardId;
+import ru.x5.devpulse.domain.model.kaiten.KaitenCardType;
+import ru.x5.devpulse.domain.model.kaiten.KaitenTimeLog;
 import ru.x5.devpulse.domain.model.kaiten.KaitenUser;
 import ru.x5.devpulse.domain.model.user.KaitenUserId;
 
@@ -157,5 +162,52 @@ class KaitenGatewayAdapter implements KaitenGateway {
         List<KaitenCard> accumulator = new ArrayList<>();
         streamCards(List.of(memberId), updatedAfter, accumulator::addAll);
         return accumulator;
+    }
+
+    /**
+     * Списания времени за период (таймшит). Пагинация limit/offset как у {@code /cards};
+     * из «толстого» ответа сразу оставляем только {@code for_date} + {@code time_spent} —
+     * вложенные card/user (мегабайты на сотню логов) дальше адаптера не идут.
+     *
+     * <p>Логи без {@code for_date}/{@code time_spent} пропускаем: они не дают вклада в таймшит.</p>
+     */
+    @Override
+    public List<KaitenTimeLog> fetchTimeLogs(KaitenUserId userId, LocalDate from, LocalDate to) {
+        int limit = properties.pageSize();
+        int offset = 0;
+        String userIds = String.valueOf(userId.value());
+        String fromStr = from.toString();
+        String toStr = to.toString();
+
+        List<KaitenTimeLog> result = new ArrayList<>();
+        while (true) {
+            int currentOffset = offset;
+            List<KaitenTimeLogDto> rawPage = rateLimiter.execute(
+                    "GET /time-logs?from=" + fromStr + "&to=" + toStr
+                            + "&user_ids=" + userIds + "&offset=" + currentOffset,
+                    () -> http.getTimeLogs(fromStr, toStr, userIds, limit, currentOffset));
+
+            String webBaseUrl = properties.webBaseUrl();
+            for (KaitenTimeLogDto dto : rawPage) {
+                if (dto.forDate() == null || dto.timeSpent() == null) {
+                    continue;
+                }
+                var card = dto.card();
+                Long cardId = card != null ? card.id() : dto.cardId();
+                result.add(new KaitenTimeLog(
+                        dto.forDate(),
+                        dto.timeSpent(),
+                        cardId == null ? null : new KaitenCardId(cardId),
+                        card != null ? card.title() : null,
+                        cardId == null ? null : mapper.buildCardUrl(webBaseUrl, cardId),
+                        card != null ? KaitenCardType.fromId(card.typeId()) : KaitenCardType.OTHER,
+                        card != null && mapper.aiAgentFrom(card.properties())));
+            }
+
+            if (rawPage.size() < limit) break;
+            offset += limit;
+        }
+        log.info("Kaiten time-logs: user={} {}..{} — {} записей", userId.value(), fromStr, toStr, result.size());
+        return result;
     }
 }

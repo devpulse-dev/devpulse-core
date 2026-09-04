@@ -27,8 +27,11 @@ import ru.x5.devpulse.domain.model.user.Email;
  * <p><b>Пайплайн:</b></p>
  * <ol>
  *   <li>Для каждого репо: {@code runMark = now()} — метка начала сбора;</li>
- *   <li>Стрим git коммитов → {@code persistCommitBatch} per-batch (своя короткая tx):
- *       existing-коммиты помечаются {@code markSeen(runMark)}, новые — сохраняются с {@code now()};</li>
+ *   <li>Стрим git коммитов → {@code persistCommitBatch}: existing-коммиты помечаются
+ *       {@code markSeen(runMark)}, новые — сохраняются с {@code now()}. <b>Батч НЕ атомарен:</b>
+ *       каждый вызов репозитория (markSeen / findOrCreateAll / saveAll) — своя короткая tx
+ *       (адаптерный {@code @Transactional}), а не одна tx на весь батч; partial-состояние внутри
+ *       батча возможно, но безвредно и идемпотентно снимается retry (курсор не сдвинулся);</li>
  *   <li>Аккумуляция только {@code repoAffected} (email'ы авторов) — хеши в heap НЕ копим;</li>
  *   <li>Per-repo sweep: {@code deleteZombies(repo, period, runMark)} (своя tx) — удаляет всё,
  *       что не увидено в этом сборе;</li>
@@ -76,7 +79,18 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
                 throw new CollectionCancelledException(
                         "Сбор отменён перед репозиторием " + repo.value());
             }
-            allAffected.addAll(collectOneRepo(repo, since, until, period));
+            try {
+                allAffected.addAll(collectOneRepo(repo, since, until, period, cancel));
+            } catch (RuntimeException e) {
+                // git теперь interrupt-aware: отмена могла убить процесс ВНУТРИ репо. Отличаем нашу
+                // отмену от реального git-сбоя (при отмене deleteZombies не выполнялся — streamCommits
+                // прервался до sweep'а). Перепроверка безопасна к взведённому interrupt-флагу (см. helper).
+                if (isCancelledSafely(cancel)) {
+                    throw new CollectionCancelledException(
+                            "Сбор отменён во время репозитория " + repo.value());
+                }
+                throw e;
+            }
         }
 
         // Один recompute на весь прогон: daily_stats для затронутых авторов пересобираются ровно
@@ -92,10 +106,31 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
         return allAffected;
     }
 
+    /**
+     * Безопасная перепроверка отмены в catch git-фазы. Interrupt-aware git ставит interrupt-флаг
+     * перед выбросом ({@code killProcess}), а {@code cancel.cancelled()} ходит в БД — на
+     * interrupted-потоке {@code getConnection()} может бросить (пул прерывает ожидание). Снимаем
+     * флаг на время запроса и восстанавливаем после; если запрос всё же упал, но флаг был взведён
+     * нашей же отменой — трактуем как отмену, а не как FAILED.
+     */
+    private static boolean isCancelledSafely(CancellationSignal cancel) {
+        boolean wasInterrupted = Thread.interrupted(); // снимает флаг, чтобы БД-запрос не упал под ним
+        try {
+            return cancel.cancelled();
+        } catch (RuntimeException dbError) {
+            return wasInterrupted; // не смогли перепроверить, но interrupt был → это наша отмена
+        } finally {
+            if (wasInterrupted) {
+                Thread.currentThread().interrupt(); // восстанавливаем флаг прерывания
+            }
+        }
+    }
+
     private Set<Email> collectOneRepo(RepoName repo,
                                       LocalDateTime since,
                                       LocalDateTime until,
-                                      Period period) {
+                                      Period period,
+                                      CancellationSignal cancel) {
         log.info("Стримим коммиты из {}", repo.value());
 
         // Метка сбора: всё, что увидено в этом прогоне (insert либо markSeen), получит
@@ -108,7 +143,7 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
                 if (c.authorEmail() != null) repoAffected.add(c.authorEmail());
             }
             persistCommitBatch(batch, runMark);
-        });
+        }, cancel::cancelled);
 
         // Sweep rebase/force-push зомби этого репо. Своя tx (deleteZombies @Transactional).
         // recompute сюда НЕ входит — он вынесен в collect(), один на весь прогон (P0-3 / ADR-10).
@@ -127,6 +162,9 @@ public final class CollectGitStatsService implements CollectGitStatsUseCase {
         Set<CommitHash> hashes = new HashSet<>(batch.size());
         for (Commit c : batch) hashes.add(c.hash());
 
+        // Дедуп по commit_hash ГЛОБАЛЬНО (не per-repo): commit_hash уникален во всей таблице.
+        // Опирается на инвариант «репозитории независимы» (нет зеркал/форков с общей историей) —
+        // см. CommitDetailsJpaRepository.findExistingHashes. Появится зеркало → нужен per-repo ключ.
         Set<CommitHash> existing = commitRepository.findExistingHashes(hashes);
 
         // Existing-коммиты всё ещё в git — защищаем от sweep'а (bump collected_at до runMark).

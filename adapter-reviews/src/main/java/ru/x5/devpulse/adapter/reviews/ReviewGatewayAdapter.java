@@ -17,7 +17,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
@@ -59,12 +60,42 @@ class ReviewGatewayAdapter implements ReviewGateway {
     private final GitlabProperties properties;
     private final GitRepoProperties gitRepos;
 
+    /**
+     * Верхний потолок числа страниц пагинации (MR / notes / users). Защита от зациклившегося
+     * или аномального API: без него {@code while(size==perPage)} мог бы крутиться бесконечно.
+     * При {@code pageSize=100} это 100k элементов на одну пагинацию — заведомо выше реального
+     * объёма проекта; достижение капа логируется WARN'ом (данные усечены, доберёт следующий сбор).
+     */
+    private static final int MAX_PAGES = 1000;
+
+    /**
+     * Множитель размера волны fan-out: за раз обрабатываем {@code concurrency × WAVE_MULTIPLIER} MR,
+     * а не весь проект сразу. Ограничивает число одновременных futures/VT в heap (крупный проект на
+     * 10^5 MR иначе дал бы heap-спайк). Barrier между волнами амортизируется множителем > 1.
+     */
+    private static final int WAVE_MULTIPLIER = 4;
+
+    /**
+     * Сколько собранных MR накапливать перед отдачей на запись. Раньше батч был равен целому
+     * проекту: на xrg-core это ~20k MR и полчаса работы, которые жили только в heap — рестарт
+     * или сбой на 29-й минуте терял всё, курсор не двигался, и следующий прогон начинал заново
+     * (бэкфилл не сходился в принципе). Теперь результат закрепляется по ходу.
+     *
+     * <p>Значение совпадает с размером чанка upsert'а в {@code ReviewWriteRepositoryAdapter}:
+     * больше — растёт объём потерь при сбое, меньше — чаще короткие транзакции без выигрыша.
+     * Сброс происходит на границе волны, поэтому фактический размер батча — первое кратное
+     * {@code concurrency × WAVE_MULTIPLIER}, превысившее порог.</p>
+     */
+    private static final int FLUSH_THRESHOLD = 500;
+
     @Override
-    public List<CollectedMergeRequest> fetchMergeRequests(LocalDateTime updatedAfter) {
+    public void streamMergeRequests(LocalDateTime updatedAfter,
+                                    BooleanSupplier cancelled,
+                                    Consumer<List<CollectedMergeRequest>> batchHandler) {
         List<String> projects = GitlabProjectPaths.resolve(properties, gitRepos);
         if (projects.isEmpty()) {
             log.warn("GitLab: не настроены проекты (gitlab.api.projects / git.repositories) — сбор ревью пропущен");
-            return List.of();
+            return;
         }
 
         // Опциональный кап окна бэкфилла: maxBackfillDays > 0 → не сканируем глубже now - N дней.
@@ -86,17 +117,25 @@ class ReviewGatewayAdapter implements ReviewGateway {
         log.info("GitLab: старт сбора ревью по {} проектам (updated_after={}, public_email={})",
                 projects.size(), updatedAfterIso, properties.fetchPublicEmails() ? "вкл" : "username@домен");
 
-        List<CollectedMergeRequest> result = new ArrayList<>();
+        int grandTotal = 0;
         for (String project : projects) {
+            // Checkpoint отмены: между проектами (симметрично git между репо). Прекращаем опрашивать
+            // новые проекты; собранное уже отдано на запись. Оркестратор зафиксирует CANCELLED.
+            if (cancelled.getAsBoolean()) {
+                log.info("GitLab: отмена — прекращаю сбор ревью перед проектом {}", project);
+                break;
+            }
             try {
-                collectProject(project, updatedAfterIso, publicEmailById, result);
+                // Стриминг чанками ПО ХОДУ проекта, а не одним батчем в конце: собранное
+                // закрепляется в БД каждые ~FLUSH_THRESHOLD MR, поэтому сбой на середине
+                // крупного проекта стоит минут работы, а не всего проекта.
+                grandTotal += collectProject(project, updatedAfterIso, publicEmailById, batchHandler);
             } catch (Exception e) {
                 // Падение одного проекта не должно ронять остальные.
                 log.error("GitLab: проект {} — сбор ревью упал: {}", project, e.getMessage(), e);
             }
         }
-        log.info("GitLab: собрано {} MR с ревью по {} проектам", result.size(), projects.size());
-        return result;
+        log.info("GitLab: собрано {} MR с ревью по {} проектам", grandTotal, projects.size());
     }
 
     /* ----------------------------- users ----------------------------- */
@@ -117,6 +156,10 @@ class ReviewGatewayAdapter implements ReviewGateway {
                     }
                 }
                 if (users.size() < perPage) break;
+                if (page >= MAX_PAGES) {
+                    log.warn("GitLab: потолок пагинации /users ({} стр.), public_email усечён", MAX_PAGES);
+                    break;
+                }
                 page++;
             }
             log.info("GitLab: загружено {} public_email'ов", byId.size());
@@ -131,8 +174,10 @@ class ReviewGatewayAdapter implements ReviewGateway {
 
     /* ----------------------------- MR + reviews ----------------------------- */
 
-    private void collectProject(String project, String updatedAfterIso,
-                                Map<Long, String> publicEmailById, List<CollectedMergeRequest> out) {
+    /** @return сколько MR собрано и отдано на запись (сумма по всем чанкам проекта). */
+    private int collectProject(String project, String updatedAfterIso,
+                               Map<Long, String> publicEmailById,
+                               Consumer<List<CollectedMergeRequest>> batchHandler) {
         // 1. Список MR — последовательно (дёшево: 1 запрос на страницу из pageSize MR).
         List<GitlabMrDto> allMrs = new ArrayList<>();
         int page = 1;
@@ -144,16 +189,27 @@ class ReviewGatewayAdapter implements ReviewGateway {
                     () -> http.getMergeRequests(project, updatedAfterIso, p, perPage, "all", "all"));
             allMrs.addAll(mrs);
             if (mrs.size() < perPage) break;
+            if (p >= MAX_PAGES) {
+                log.warn("GitLab: {} — достигнут потолок пагинации MR ({} стр. × {}), список усечён — "
+                        + "часть MR не собрана этим прогоном (доберёт следующий)", project, MAX_PAGES, perPage);
+                break;
+            }
             page++;
         }
-        if (allMrs.isEmpty()) return;
+        if (allMrs.isEmpty()) return 0;
 
-        log.info("GitLab: {} — {} MR в списке, тяну approvals+notes (concurrency={})",
-                project, allMrs.size(), properties.concurrency());
+        // Сколько MR пойдут без запроса notes (user_notes_count=0) — видно эффект экономии прямо
+        // в логе прогона: это чистое вычитание из бюджета RPS, самого дефицитного ресурса фазы.
+        long withoutNotes = allMrs.stream().filter(GitlabMrDto::hasNoUserNotes).count();
+        log.info("GitLab: {} — {} MR в списке, тяну approvals+notes (concurrency={}, "
+                        + "без комментариев: {} — запрос notes пропускается)",
+                project, allMrs.size(), properties.concurrency(), withoutNotes);
 
         // 2. Per-MR ревью (approvals + notes) — параллельно, bounded virtual threads.
-        out.addAll(fetchReviewsConcurrently(project, allMrs, publicEmailById));
+        //    Собранное отдаётся на запись чанками по ходу, а не возвращается одним списком.
+        int collected = fetchReviewsConcurrently(project, allMrs, publicEmailById, batchHandler);
         log.info("GitLab: {} — всего {} MR обработано", project, allMrs.size());
+        return collected;
     }
 
     /**
@@ -161,73 +217,109 @@ class ReviewGatewayAdapter implements ReviewGateway {
      * запросов к GitLab (Semaphore), virtual threads дёшевы. {@link #toCollected} и {@link #resolve}
      * не имеют общего изменяемого состояния — читают только immutable map/properties.
      *
+     * <p><b>Волнами (heap-cap).</b> MR обрабатываются партиями по {@code concurrency ×
+     * WAVE_MULTIPLIER}, а не сабмитятся все сразу — иначе на крупном проекте (10^5 MR) в heap
+     * одновременно висели бы 10^5 futures/VT (спайк в сотни МБ). {@code concurrency} по-прежнему
+     * ограничивает одновременный HTTP через Semaphore.</p>
+     *
      * <p><b>Deadline (P1-2).</b> На сбор одного проекта стоит верхняя граница
-     * {@code gitlab.api.project-review-timeout} (по умолчанию 30m, {@code 0s} — без границы).
+     * {@code gitlab.api.project-review-timeout} (deployed-дефолт 1h, {@code 0s} — без границы).
      * По её истечении недособранные MR отменяются, а уже собранные — сохраняются. Это страхует от
      * деградации GitLab, когда даже при bounded retry per-call десятки тысяч MR держали бы
      * advisory-лок часами. Потерянные MR (ошибки + отменённые) логируются <b>агрегатно</b>, а не
      * молча проглатываются по одному.</p>
+     *
+     * <p><b>Сброс чанками.</b> Собранное не копится до конца проекта, а уходит в
+     * {@code batchHandler} на границе волны, как только накопится {@link #FLUSH_THRESHOLD}.
+     * Граница волны выбрана точкой сброса потому, что там уже нет живых futures — чанк
+     * консистентен, и его запись не конкурирует со сбором. Дедлайн и отмена не теряют остаток:
+     * финальный сброс идёт после цикла.</p>
+     *
+     * @return сколько MR фактически отдано на запись
      */
-    private List<CollectedMergeRequest> fetchReviewsConcurrently(
-            String project, List<GitlabMrDto> mrs, Map<Long, String> publicEmailById) {
+    private int fetchReviewsConcurrently(
+            String project, List<GitlabMrDto> mrs, Map<Long, String> publicEmailById,
+            Consumer<List<CollectedMergeRequest>> batchHandler) {
 
-        Semaphore gate = new Semaphore(Math.max(1, properties.concurrency()));
-        AtomicInteger done = new AtomicInteger();
+        int concurrency = Math.max(1, properties.concurrency());
+        int waveSize = concurrency * WAVE_MULTIPLIER;
+        Semaphore gate = new Semaphore(concurrency);
         int total = mrs.size();
-        List<Future<CollectedMergeRequest>> futures = new ArrayList<>(total);
-        List<CollectedMergeRequest> result = new ArrayList<>(total);
+        // Буфер под порог + одну волну (сброс на границе волны может его перешагнуть), а не под
+        // весь проект: на 20k MR прежний ArrayList(total) держал в heap весь корпус до конца.
+        List<CollectedMergeRequest> buffer = new ArrayList<>(Math.min(total, FLUSH_THRESHOLD + waveSize));
+        int flushed = 0;
 
         Duration timeout = properties.projectReviewTimeout();
         boolean bounded = timeout != null && !timeout.isZero() && !timeout.isNegative();
+        long deadlineNanos = System.nanoTime() + (bounded ? timeout.toNanos() : 0L);
 
         int failed = 0;
         int dropped = 0;
+        int done = 0;
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         try {
-            for (GitlabMrDto mr : mrs) {
-                futures.add(executor.submit(() -> {
-                    gate.acquire();
-                    try {
-                        return toCollected(project, mr, publicEmailById);
-                    } finally {
-                        gate.release();
-                        int n = done.incrementAndGet();
-                        if (n % 200 == 0 || n == total) {
-                            log.info("GitLab: {} — собрано ревью по {}/{} MR", project, n, total);
-                        }
-                    }
-                }));
-            }
-
-            long deadlineNanos = System.nanoTime() + (bounded ? timeout.toNanos() : 0L);
-            for (Future<CollectedMergeRequest> f : futures) {
-                try {
-                    // bounded: ждём не дольше остатка дедлайна; get(0) после дедлайна = неблокирующий
-                    // опрос (уже-готовые добираем, ещё-бегущие → TimeoutException → отмена в finally).
-                    CollectedMergeRequest c = bounded
-                            ? f.get(Math.max(0L, deadlineNanos - System.nanoTime()), TimeUnit.NANOSECONDS)
-                            : f.get();
-                    if (c != null) result.add(c);
-                } catch (TimeoutException te) {
-                    // дедлайн исчерпан — этот MR не дождались; остальные так же отвалятся по 0-таймауту
-                } catch (ExecutionException ee) {
-                    failed++;
-                    Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
-                    log.debug("GitLab: {} — ревью одного MR не собрано: {}", project, cause.getMessage());
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
+            // Волнами по waveSize: одновременно в heap максимум waveSize futures/VT, а не весь проект.
+            // Крупный проект (10^5 MR) иначе дал бы heap-спайк в сотни МБ на eager-submit всех задач.
+            waves:
+            for (int start = 0; start < total; start += waveSize) {
+                if (bounded && System.nanoTime() >= deadlineNanos) {
+                    dropped += total - start; // остаток волн не начат — дедлайн проекта исчерпан
                     break;
+                }
+                int end = Math.min(start + waveSize, total);
+                List<Future<CollectedMergeRequest>> futures = new ArrayList<>(end - start);
+                for (GitlabMrDto mr : mrs.subList(start, end)) {
+                    futures.add(executor.submit(() -> {
+                        gate.acquire();
+                        try {
+                            return toCollected(project, mr, publicEmailById);
+                        } finally {
+                            gate.release();
+                        }
+                    }));
+                }
+                for (Future<CollectedMergeRequest> f : futures) {
+                    try {
+                        CollectedMergeRequest c = bounded
+                                ? f.get(Math.max(0L, deadlineNanos - System.nanoTime()), TimeUnit.NANOSECONDS)
+                                : f.get();
+                        if (c != null) buffer.add(c);
+                    } catch (TimeoutException te) {
+                        // дедлайн — этот и последующие в волне отвалятся по 0-таймауту
+                    } catch (ExecutionException ee) {
+                        failed++;
+                        Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
+                        log.debug("GitLab: {} — ревью одного MR не собрано: {}", project, cause.getMessage());
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        for (Future<CollectedMergeRequest> g : futures) {
+                            if (!g.isDone() && g.cancel(true)) dropped++;
+                        }
+                        break waves;
+                    }
+                    done++;
+                    if (done % 200 == 0 || done == total) {
+                        log.info("GitLab: {} — собрано ревью по {}/{} MR", project, done, total);
+                    }
+                }
+                // Отменяем недособранное текущей волны (дедлайн) перед следующей.
+                for (Future<CollectedMergeRequest> f : futures) {
+                    if (!f.isDone() && f.cancel(true)) dropped++;
+                }
+                // Граница волны — здесь нет живых futures, чанк консистентен.
+                if (buffer.size() >= FLUSH_THRESHOLD) {
+                    flushed += flush(project, buffer, batchHandler, done, total);
                 }
             }
         } finally {
-            // Отменяем всё, что не успело (дедлайн/прерывание), и гасим executor немедленно.
-            for (Future<CollectedMergeRequest> f : futures) {
-                if (!f.isDone() && f.cancel(true)) {
-                    dropped++;
-                }
-            }
             executor.shutdownNow();
         }
+
+        // Остаток — в том числе после дедлайна или отмены: то, что успели собрать, должно быть
+        // записано. Вне finally сознательно: если сброс внутри цикла упал (ошибка записи), не
+        // маскируем исходное исключение повторной попыткой на том же handler'е.
+        flushed += flush(project, buffer, batchHandler, done, total);
 
         int lost = failed + dropped;
         if (lost > 0) {
@@ -235,7 +327,24 @@ class ReviewGatewayAdapter implements ReviewGateway {
                             + "Ревью-метрики по этим MR в текущем прогоне неполные — починятся следующим сбором.",
                     project, lost, total, failed, dropped);
         }
-        return result;
+        return flushed;
+    }
+
+    /**
+     * Отдаёт накопленный чанк на запись и очищает буфер. Пустой буфер — no-op (обработчик не
+     * дёргается вхолостую).
+     *
+     * @return сколько MR отдано
+     */
+    private int flush(String project, List<CollectedMergeRequest> buffer,
+                      Consumer<List<CollectedMergeRequest>> batchHandler, int done, int total) {
+        if (buffer.isEmpty()) return 0;
+        int size = buffer.size();
+        // Копия: обработчик получает свой список, а буфер переиспользуется дальше по волнам.
+        batchHandler.accept(new ArrayList<>(buffer));
+        buffer.clear();
+        log.info("GitLab: {} — записано {} MR (прогресс {}/{})", project, size, done, total);
+        return size;
     }
 
     private CollectedMergeRequest toCollected(String project, GitlabMrDto mr,
@@ -258,10 +367,16 @@ class ReviewGatewayAdapter implements ReviewGateway {
             }
         }
 
-        for (GitlabNoteDto note : fetchNotes(project, mr.iid())) {
-            if (note.system() || note.author() == null || note.author().id() == null) continue;
-            ReviewerAcc acc = reviewers.computeIfAbsent(note.author().id(), k -> new ReviewerAcc(note.author()));
-            acc.commentCount++;
+        // MR без пользовательских комментариев — не тратим на него запрос: весь бюджет RPS уходит
+        // именно на per-MR вызовы. GitLab считает user_notes_count по тому же критерию, по которому
+        // мы фильтруем ниже (system=false), поэтому пропуск не теряет ни одного ревьюера. Поля нет
+        // в ответе (null) → идём за notes, как раньше.
+        if (!mr.hasNoUserNotes()) {
+            for (GitlabNoteDto note : fetchNotes(project, mr.iid())) {
+                if (note.system() || note.author() == null || note.author().id() == null) continue;
+                ReviewerAcc acc = reviewers.computeIfAbsent(note.author().id(), k -> new ReviewerAcc(note.author()));
+                acc.commentCount++;
+            }
         }
 
         List<MrReview> reviews = new ArrayList<>();
@@ -308,6 +423,10 @@ class ReviewGatewayAdapter implements ReviewGateway {
                     () -> http.getNotes(project, iid, p, perPage));
             all.addAll(notes);
             if (notes.size() < perPage) break;
+            if (p >= MAX_PAGES) {
+                log.warn("GitLab: {}!{} — потолок пагинации notes ({} стр.), усечено", project, iid, MAX_PAGES);
+                break;
+            }
             page++;
         }
         return all;

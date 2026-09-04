@@ -20,8 +20,10 @@
     </description>
 
     <properties>
-        <!-- В lockstep с остальным бэком; auth-contract существует с OAS 3.3.0. -->
-        <devpulse-oas.version>3.3.0</devpulse-oas.version>
+        <!-- В lockstep с остальным бэком; auth-contract существует с OAS 3.3.0.
+             Версия должна совпадать с adapter-rest: модули тянут общий shared-contract,
+             и расхождение означало бы две разные версии одних и тех же схем в сборке. -->
+        <devpulse-oas.version>3.12.0</devpulse-oas.version>
         <openapi-generator.version>7.10.0</openapi-generator.version>
     </properties>
 

@@ -5,9 +5,12 @@ import java.util.Objects;
 /**
  * Идентификатор задачи, привязанный к коммиту через сообщение.
  *
- * <p>В нашем случае это числовой ID карточки Kaiten (например {@code "12345"}),
- * который извлекается парсером из commit message. Конкретный формат —
- * ответственность {@link ru.x5.devpulse.domain.service.CommitMessageParser}.</p>
+ * <p>Обычно это числовой ID карточки Kaiten (например {@code "12345"}), извлечённый
+ * {@link ru.x5.devpulse.domain.service.CommitMessageParser} из commit message. Но тип
+ * <b>не гарантирует</b> числовой формат: значение читается и из БД (колонка
+ * {@code task_number VARCHAR}, где возможны легаси-значения), поэтому инвариант — лишь
+ * непустая строка. Числовая интерпретация — best-effort через {@link #asKaitenCardId()}
+ * (вернёт empty, если не парсится).</p>
  */
 public record TaskNumber(String value) {
 

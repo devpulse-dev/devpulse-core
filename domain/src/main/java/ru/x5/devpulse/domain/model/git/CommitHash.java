@@ -1,5 +1,6 @@
 package ru.x5.devpulse.domain.model.git;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -15,7 +16,7 @@ public record CommitHash(String value) {
 
     public CommitHash {
         Objects.requireNonNull(value, "commit hash must not be null");
-        String normalized = value.trim().toLowerCase();
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
         if (normalized.length() != 40 && normalized.length() != 64) {
             throw new IllegalArgumentException(
                     "commit hash must be 40 (SHA-1) or 64 (SHA-256) chars, got " + normalized.length());

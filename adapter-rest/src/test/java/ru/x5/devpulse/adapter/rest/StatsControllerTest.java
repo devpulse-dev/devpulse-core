@@ -30,6 +30,7 @@ import ru.x5.devpulse.application.port.in.GetPerformanceReviewUseCase;
 import ru.x5.devpulse.application.port.in.GetPeriodSummaryUseCase;
 import ru.x5.devpulse.application.port.in.GetReviewStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetTeamDefectsUseCase;
+import ru.x5.devpulse.application.port.in.GetTimesheetUseCase;
 import ru.x5.devpulse.application.port.in.GetWeeklyStatsUseCase;
 import ru.x5.devpulse.application.port.in.GetMergedMrStatsUseCase;
 import ru.x5.devpulse.application.port.in.MarkDefectsAiAgentUseCase;
@@ -46,6 +47,10 @@ import ru.x5.devpulse.domain.model.performance.DefectMember;
 import ru.x5.devpulse.domain.model.performance.DefectsSummary;
 import ru.x5.devpulse.domain.model.performance.PeriodDefectCounts;
 import ru.x5.devpulse.domain.model.performance.TeamDefectsReport;
+import ru.x5.devpulse.domain.model.performance.Timesheet;
+import ru.x5.devpulse.domain.model.performance.TimesheetDay;
+import ru.x5.devpulse.domain.model.performance.TimesheetEntry;
+import ru.x5.devpulse.domain.model.review.AuthoredMergeRequest;
 import ru.x5.devpulse.domain.model.performance.DeliveredFeature;
 import ru.x5.devpulse.domain.model.performance.DevelopmentRollup;
 import ru.x5.devpulse.domain.model.performance.FirefightingItem;
@@ -68,6 +73,7 @@ import ru.x5.devpulse.domain.model.review.TeamMergedMrStats;
 import ru.x5.devpulse.domain.model.stats.AuthorSummary;
 import ru.x5.devpulse.domain.model.stats.DailyAuthorStats;
 import ru.x5.devpulse.domain.model.stats.HourlyBucket;
+import ru.x5.devpulse.domain.model.stats.HourlyBucketAuthor;
 import ru.x5.devpulse.domain.model.stats.HourlyStats;
 import ru.x5.devpulse.domain.model.kaiten.KaitenCardId;
 import ru.x5.devpulse.domain.model.stats.PeriodSummary;
@@ -91,11 +97,12 @@ class StatsControllerTest {
     @MockitoBean GetTeamDefectsUseCase getTeamDefects;
     @MockitoBean GetMergedMrStatsUseCase getMergedMrStats;
     @MockitoBean MarkDefectsAiAgentUseCase markDefectsAiAgent;
+    @MockitoBean GetTimesheetUseCase getTimesheet;
 
     @Test
     @DisplayName("GET /daily?from=&to= возвращает 200 и список агрегатов с email/repo")
     void dailyReturnsList() throws Exception {
-        when(getDailyStats.findByPeriod(any())).thenReturn(List.of(new DailyAuthorStats(
+        when(getDailyStats.findByPeriod(any(), any(), any())).thenReturn(List.of(new DailyAuthorStats(
                 1L, new Email("a@x5.ru"), LocalDate.of(2026, 5, 10),
                 new RepoName("xrg-core"), 3, 0, 10, 5, 1,
                 LocalDateTime.now(), 42L)));
@@ -106,6 +113,20 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$[0].email").value("a@x5.ru"))
                 .andExpect(jsonPath("$[0].repo").value("xrg-core"))
                 .andExpect(jsonPath("$[0].commits").value(3));
+    }
+
+    @Test
+    @DisplayName("GET /daily?email=&team= прокидывает опциональные фильтры в use case")
+    void dailyPassesOptionalFilters() throws Exception {
+        when(getDailyStats.findByPeriod(any(), any(), any())).thenReturn(List.of());
+
+        mvc.perform(get("/api/v2/stats/daily")
+                        .param("from", "2026-05-01").param("to", "2026-05-31")
+                        .param("team", "Platform"))
+                .andExpect(status().isOk());
+
+        // email отсутствует → Optional.empty(); team задан → Optional.of("Platform")
+        verify(getDailyStats).findByPeriod(any(), eq(Optional.empty()), eq(Optional.of("Platform")));
     }
 
     @Test
@@ -147,6 +168,42 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.cells[0].hour").value(14))
                 .andExpect(jsonPath("$.cells[0].commits").value(7))
                 .andExpect(jsonPath("$.cells[0].addedLines").value(320));
+    }
+
+    @Test
+    @DisplayName("GET /hourly → ячейка отдаёт разбивку по авторам")
+    void hourlyReturnsCellAuthors() throws Exception {
+        when(getHourlyStats.get(any(), any(), any())).thenReturn(new HourlyStats(
+                new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)),
+                List.of(HourlyBucket.of(2, 14, List.of(
+                        new HourlyBucketAuthor(new Email("boris@x5.ru"), 5, 220),
+                        new HourlyBucketAuthor(new Email("anna@x5.ru"), 2, 100))))));
+
+        mvc.perform(get("/api/v2/stats/hourly")
+                        .param("from", "2026-05-01").param("to", "2026-05-31"))
+                .andExpect(status().isOk())
+                // Счётчики ячейки — сумма по авторам.
+                .andExpect(jsonPath("$.cells[0].commits").value(7))
+                .andExpect(jsonPath("$.cells[0].addedLines").value(320))
+                .andExpect(jsonPath("$.cells[0].authors.length()").value(2))
+                .andExpect(jsonPath("$.cells[0].authors[0].email").value("boris@x5.ru"))
+                .andExpect(jsonPath("$.cells[0].authors[0].commits").value(5))
+                .andExpect(jsonPath("$.cells[0].authors[0].addedLines").value(220))
+                .andExpect(jsonPath("$.cells[0].authors[1].email").value("anna@x5.ru"));
+    }
+
+    @Test
+    @DisplayName("GET /hourly → ячейка без разбивки отдаёт пустой массив авторов, а не null")
+    void hourlyReturnsEmptyAuthorsWhenAbsent() throws Exception {
+        when(getHourlyStats.get(any(), any(), any())).thenReturn(new HourlyStats(
+                new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)),
+                List.of(new HourlyBucket(2, 14, 7, 320))));
+
+        mvc.perform(get("/api/v2/stats/hourly")
+                        .param("from", "2026-05-01").param("to", "2026-05-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cells[0].authors").isArray())
+                .andExpect(jsonPath("$.cells[0].authors.length()").value(0));
     }
 
     @Test
@@ -313,6 +370,36 @@ class StatsControllerTest {
                 .andExpect(jsonPath("$.authors[0].count").value(21))
                 .andExpect(jsonPath("$.byRepo[0].repo").value("gkr/xrg-markable"))
                 .andExpect(jsonPath("$.byRepo[0].count").value(23));
+    }
+
+    @Test
+    @DisplayName("GET /timesheet → 200: totalMinutes, loggedDays и дни со списаниями")
+    void timesheetReturnsDays() throws Exception {
+        Period may = new Period(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31));
+        when(getTimesheet.get(eq(new Email("boris@x5.ru")), any())).thenReturn(new Timesheet(
+                new Email("boris@x5.ru"), may, 990,
+                List.of(
+                        new TimesheetDay(LocalDate.of(2026, 5, 4), 480, List.of(
+                                new TimesheetEntry(new KaitenCardId(2712833L), "Дефект A",
+                                        "https://kaiten.x5.ru/2712833", KaitenCardType.DEFECT, true, 480,
+                                        List.of(new AuthoredMergeRequest("gkr/core", "1700-2712833 fix",
+                                                "https://scm/mr/1"))))),
+                        new TimesheetDay(LocalDate.of(2026, 5, 5), 510, List.of()))));
+
+        mvc.perform(get("/api/v2/stats/timesheet")
+                        .param("from", "2026-05-01").param("to", "2026-05-31")
+                        .param("email", "boris@x5.ru"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("boris@x5.ru"))
+                .andExpect(jsonPath("$.from").value("2026-05-01"))
+                .andExpect(jsonPath("$.totalMinutes").value(990))
+                .andExpect(jsonPath("$.loggedDays").value(2))
+                .andExpect(jsonPath("$.days[1].date").value("2026-05-05"))
+                .andExpect(jsonPath("$.days[1].minutes").value(510))
+                .andExpect(jsonPath("$.days[0].entries[0].cardId").value(2712833))
+                .andExpect(jsonPath("$.days[0].entries[0].type").value("DEFECT"))
+                .andExpect(jsonPath("$.days[0].entries[0].aiAgent").value(true))
+                .andExpect(jsonPath("$.days[0].entries[0].mergeRequests[0].repo").value("gkr/core"));
     }
 
     @Test

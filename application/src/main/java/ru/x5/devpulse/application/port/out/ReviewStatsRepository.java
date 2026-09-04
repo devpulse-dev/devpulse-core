@@ -3,6 +3,7 @@ package ru.x5.devpulse.application.port.out;
 import java.util.Collection;
 import java.util.List;
 import ru.x5.devpulse.domain.common.Period;
+import ru.x5.devpulse.domain.model.review.AuthoredMergeRequest;
 import ru.x5.devpulse.domain.model.review.MergeRequest;
 import ru.x5.devpulse.domain.model.review.MergedMrCountRow;
 import ru.x5.devpulse.domain.model.review.RepoMergedMrCount;
@@ -41,4 +42,12 @@ public interface ReviewStatsRepository {
      */
     List<RepoMergedMrCount> countMergedMrByRepo(
             Period period, Collection<Email> authorEmails, Collection<String> targetBranches);
+
+    /**
+     * Все MR автора в «лёгком» виде (repo/title/url) — для связки карточек Kaiten с MR в таймшите.
+     *
+     * <p>Без периода: MR по карточке мог быть открыт задолго до списания времени. Запрос идёт по
+     * индексу {@code idx_merge_request_author_email}, номер задачи парсится из заголовка уже в домене.</p>
+     */
+    List<AuthoredMergeRequest> findMergeRequestsByAuthor(Email author);
 }

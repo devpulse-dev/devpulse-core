@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,15 +23,19 @@ import ru.x5.devpulse.domain.model.review.MrReview;
  * Запись собранных MR/ревью. Идемпотентно: upsert MR по {@code (project_id, iid)},
  * ревью пересобираются (delete + insert) — повторный сбор не плодит дублей.
  *
- * <p><b>Производительность.</b> Бэкфилл может приносить десятки тысяч MR за раз. Пишем
- * чанками по {@link #CHUNK} с {@code flush()+clear()} после каждого — иначе persistence-context
- * растёт и dirty-checking на каждом flush становится O(n²) (минуты на 20k+ MR). Старые ревью
- * чанка удаляются одним bulk-запросом, не по одному MR.</p>
+ * <p><b>Производительность.</b> Бэкфилл может приносить десятки тысяч MR за раз. Пишем чанками
+ * по {@link #CHUNK}; после каждого — {@code em.clear()}, чтобы прочитанные batch-SELECT'ом
+ * сущности не копились в persistence-context. Старые ревью чанка удаляются одним bulk-запросом.</p>
  *
- * <p><b>P1-3.</b> Существующие MR находятся одним batch-запросом на чанк (вместо N+1
- * {@code findBy} per MR). Сами строки {@code mr_review} пишутся через native
- * {@link JdbcTemplate#batchUpdate} — {@code MrReviewEntity} на {@code IDENTITY}, и
- * {@code reviewJpa.saveAll} не батчился (та же причина, что в ADR-11 для commit_details).</p>
+ * <p><b>Батчинг MR.</b> Сами {@code merge_request} пишутся одним native
+ * {@code INSERT … ON CONFLICT (project_id, iid) DO UPDATE} на чанк (идемпотентно по натуральному
+ * ключу), а не построчным {@code mrJpa.save()} — тот на {@code IDENTITY} давал N round-trips
+ * (десятки тысяч одиночных INSERT на бэкфилле; та же причина, что в ADR-11 для commit_details).
+ * Id всех MR чанка (новых и обновлённых) добираются одним batch-SELECT по паре ключей.</p>
+ *
+ * <p>Строки {@code mr_review} тоже пишутся через native {@link JdbcTemplate#batchUpdate}
+ * ({@code MrReviewEntity} на {@code IDENTITY} не батчился JPA-saveAll'ом), и пересобираются
+ * целиком (bulk-delete по mr_id всех MR чанка + insert) — replace-семантика без дублей.</p>
  */
 @Component
 @Log4j2
@@ -45,6 +50,27 @@ class ReviewWriteRepositoryAdapter implements ReviewWriteRepository {
             VALUES (?, ?, ?, ?, ?)
             """;
 
+    /**
+     * Bulk upsert MR по натуральному ключу {@code (gitlab_project_id, gitlab_mr_iid)}
+     * (unique-constraint {@code uk_merge_request_project_iid}, миграция 022). {@code EXCLUDED.*} —
+     * значения из VALUES при конфликте; {@code id} (IDENTITY) сохраняется у существующей строки.
+     */
+    private static final String MR_UPSERT_SQL = """
+            INSERT INTO merge_request
+                (gitlab_project_id, gitlab_mr_iid, author_email, title, web_url, state,
+                 target_branch, created_at, merged_at, collected_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (gitlab_project_id, gitlab_mr_iid) DO UPDATE SET
+                author_email  = EXCLUDED.author_email,
+                title         = EXCLUDED.title,
+                web_url       = EXCLUDED.web_url,
+                state         = EXCLUDED.state,
+                target_branch = EXCLUDED.target_branch,
+                created_at    = EXCLUDED.created_at,
+                merged_at     = EXCLUDED.merged_at,
+                collected_at  = EXCLUDED.collected_at
+            """;
+
     private final MergeRequestJpaRepository mrJpa;
     private final MrReviewJpaRepository reviewJpa;
     private final JdbcTemplate jdbcTemplate;
@@ -56,66 +82,84 @@ class ReviewWriteRepositoryAdapter implements ReviewWriteRepository {
     @Transactional
     public void upsert(List<CollectedMergeRequest> mergeRequests) {
         if (mergeRequests == null || mergeRequests.isEmpty()) return;
+        // Дедуп по натуральному ключу (project_id, iid), last-wins. Offset-пагинация GitLab ШТАТНО
+        // возвращает дубли на границах страниц у активного проекта (новые MR сдвигают окно). Дубль
+        // в одном чанке ронял бы native ON CONFLICT ("cannot affect row a second time" при
+        // reWriteBatchedInserts) либо uk_mr_review_mr_reviewer (ревью вставились бы дважды) → откат
+        // транзакции и потеря всех ревью проекта. Дедуп до чанкинга снимает обе поломки.
+        List<CollectedMergeRequest> deduped = dedupLastWins(mergeRequests);
         LocalDateTime now = LocalDateTime.now();
-        int total = mergeRequests.size();
+        int total = deduped.size();
 
         for (int start = 0; start < total; start += CHUNK) {
             int end = Math.min(start + CHUNK, total);
-            upsertChunk(mergeRequests.subList(start, end), now);
-            em.flush();
-            em.clear(); // отцепляем сущности чанка — контекст не растёт, dirty-checking остаётся O(chunk)
+            upsertChunk(deduped.subList(start, end), now);
+            em.clear(); // отцепляем прочитанные findBy-сущности — persistence context не растёт на бэкфилле
             log.info("Записано {}/{} MR с ревью", end, total);
         }
-        log.info("Записано/обновлено {} MR с ревью", total);
+        log.info("Записано/обновлено {} MR с ревью ({} дублей пагинации отброшено)",
+                total, mergeRequests.size() - total);
+    }
+
+    /** Дедуп по (project_id, iid), last-wins; порядок первого появления сохраняется. */
+    private static List<CollectedMergeRequest> dedupLastWins(List<CollectedMergeRequest> mrs) {
+        LinkedHashMap<MrKey, CollectedMergeRequest> byKey = new LinkedHashMap<>(mrs.size());
+        for (CollectedMergeRequest c : mrs) {
+            byKey.put(new MrKey(c.gitlabProjectId(), c.gitlabMrIid()), c);
+        }
+        return new ArrayList<>(byKey.values());
     }
 
     private void upsertChunk(List<CollectedMergeRequest> chunk, LocalDateTime now) {
-        // 1. Один batch-lookup существующих MR (вместо N+1 findBy per MR).
+        // 1. Bulk UPSERT MR по натуральному ключу (project_id, iid) — идемпотентно, одним batch,
+        //    без построчного save() (IDENTITY давал N round-trips на десятки тысяч MR).
+        //    В чанке дублей (project, iid) нет — MR проекта уникальны по iid — ON CONFLICT безопасен.
+        jdbcTemplate.batchUpdate(MR_UPSERT_SQL, chunk, chunk.size(), (ps, c) -> {
+            ps.setLong(1, c.gitlabProjectId());
+            ps.setLong(2, c.gitlabMrIid());
+            ps.setString(3, c.author().value());
+            ps.setString(4, truncate(c.title()));
+            ps.setString(5, truncate(c.webUrl()));
+            ps.setString(6, c.state() == null || c.state().isBlank() ? "unknown" : c.state());
+            ps.setString(7, c.targetBranch());
+            ps.setObject(8, c.createdAt());
+            ps.setObject(9, c.mergedAt());
+            ps.setObject(10, now);
+        });
+
+        // 2. Один batch-SELECT id по (project_id, iid) для всех MR чанка (новых и обновлённых).
+        //    Суперсет project IN(..) AND iid IN(..) разрешается по паре ключей через MrKey
+        //    (одинаковый iid в разных проектах не путается).
         Set<Long> projectIds = new HashSet<>();
         Set<Long> iids = new HashSet<>();
         for (CollectedMergeRequest c : chunk) {
             projectIds.add(c.gitlabProjectId());
             iids.add(c.gitlabMrIid());
         }
-        Map<MrKey, MergeRequestEntity> existing = new HashMap<>();
+        Map<MrKey, Long> idByKey = new HashMap<>();
         for (MergeRequestEntity e : mrJpa.findByGitlabProjectIdInAndGitlabMrIidIn(projectIds, iids)) {
-            existing.put(new MrKey(e.getGitlabProjectId(), e.getGitlabMrIid()), e);
+            idByKey.put(new MrKey(e.getGitlabProjectId(), e.getGitlabMrIid()), e.getId());
         }
 
-        List<Long> existingMrIds = new ArrayList<>();
+        // 3. Ревью пересобираем целиком: bulk-delete по mr_id всех MR чанка + native batch insert.
+        //    Delete по всем id (для новых MR это no-op) — проще, чем различать new/existing, и корректно.
+        List<Long> mrIds = new ArrayList<>(chunk.size());
         List<ReviewRow> reviewRows = new ArrayList<>();
-
         for (CollectedMergeRequest c : chunk) {
-            MergeRequestEntity mr = existing.get(new MrKey(c.gitlabProjectId(), c.gitlabMrIid()));
-            if (mr == null) {
-                mr = new MergeRequestEntity();
-            } else {
-                existingMrIds.add(mr.getId()); // существующий → его старые ревью заменим
+            Long mrId = idByKey.get(new MrKey(c.gitlabProjectId(), c.gitlabMrIid()));
+            if (mrId == null) {
+                // после успешного upsert строка обязана существовать; страхуемся от потери ревью
+                log.warn("MR {}!{} не найден после upsert — ревью пропущены",
+                        c.gitlabProjectId(), c.gitlabMrIid());
+                continue;
             }
-
-            mr.setGitlabProjectId(c.gitlabProjectId());
-            mr.setGitlabMrIid(c.gitlabMrIid());
-            mr.setAuthorEmail(c.author().value());
-            mr.setTitle(truncate(c.title()));
-            mr.setWebUrl(truncate(c.webUrl()));
-            mr.setState(c.state() == null || c.state().isBlank() ? "unknown" : c.state());
-            mr.setTargetBranch(c.targetBranch());
-            mr.setCreatedAt(c.createdAt());
-            mr.setMergedAt(c.mergedAt());
-            mr.setCollectedAt(now);
-            Long mrId = mrJpa.save(mr).getId(); // IDENTITY → insert/flush, id назначен
-
+            mrIds.add(mrId);
             for (MrReview r : c.reviews()) {
-                reviewRows.add(new ReviewRow(
-                        mrId, r.reviewer().value(), r.approved(), r.commentCount()));
+                reviewRows.add(new ReviewRow(mrId, r.reviewer().value(), r.approved(), r.commentCount()));
             }
         }
-
-        // 2. Replace ревью: bulk-delete старых (только для существовавших MR), затем native insert.
-        //    deleteByMergeRequestIdIn (JPQL) триггерит auto-flush апдейтов MR перед удалением;
-        //    новые MR с IDENTITY уже зафлашены в save() — строки в БД, FK mr_review удовлетворён.
-        if (!existingMrIds.isEmpty()) {
-            reviewJpa.deleteByMergeRequestIdIn(existingMrIds);
+        if (!mrIds.isEmpty()) {
+            reviewJpa.deleteByMergeRequestIdIn(mrIds);
         }
         insertReviews(reviewRows, now);
     }

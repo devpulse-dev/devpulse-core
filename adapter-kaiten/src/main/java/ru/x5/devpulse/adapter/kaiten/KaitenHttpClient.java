@@ -8,6 +8,7 @@ import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.service.annotation.PatchExchange;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenCardDto;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenCardUpdateDto;
+import ru.x5.devpulse.adapter.kaiten.dto.KaitenTimeLogDto;
 import ru.x5.devpulse.adapter.kaiten.dto.KaitenUserDto;
 
 /**
@@ -74,4 +75,19 @@ public interface KaitenHttpClient {
      */
     @PatchExchange("/cards/{id}")
     void updateCard(@PathVariable long id, @RequestBody KaitenCardUpdateDto body);
+
+    /**
+     * {@code GET /time-logs?from=&to=&user_ids=&limit=&offset=} — списания времени.
+     *
+     * <p>{@code from}/{@code to} — даты (YYYY-MM-DD) по полю {@code for_date}; {@code user_ids} —
+     * id через запятую. Ответ «толстый» (вложенные card/user), поэтому DTO берёт только скаляры.</p>
+     */
+    @GetExchange("/time-logs")
+    List<KaitenTimeLogDto> getTimeLogs(
+            @org.springframework.web.bind.annotation.RequestParam String from,
+            @org.springframework.web.bind.annotation.RequestParam String to,
+            @org.springframework.web.bind.annotation.RequestParam(name = "user_ids") String userIds,
+            @org.springframework.web.bind.annotation.RequestParam int limit,
+            @org.springframework.web.bind.annotation.RequestParam int offset
+    );
 }

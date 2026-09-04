@@ -156,13 +156,13 @@ class CollectDailyStatsServiceTest {
     @DisplayName("Happy path зовёт фазу reviews; её падение изолировано ⇒ SUCCESS")
     void reviewsPhaseRunsAndIsIsolated() {
         when(collectGitStats.collect(any(), any(), any())).thenReturn(Set.of());
-        doThrow(new RuntimeException("gitlab unreachable")).when(collectReviews).collect(any());
+        doThrow(new RuntimeException("gitlab unreachable")).when(collectReviews).collect(any(), any());
 
         service.run(SINCE);
 
         assertAll("reviews-фаза",
                 () -> assertThat(lastSaved().status()).isEqualTo(CollectionStatus.SUCCESS),
-                () -> verify(collectReviews).collect(any()));
+                () -> verify(collectReviews).collect(any(), any()));
     }
 
     @Test

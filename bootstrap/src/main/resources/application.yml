@@ -20,6 +20,11 @@ spring:
         # шлёт по одному round-trip'у на строку. Задаём через data-source-properties, чтобы работало
         # независимо от того, как задан DB_URL в проде.
         reWriteBatchedInserts: true
+        # TCP keepalive: advisory-lock (PgAdvisoryCollectionLock) держит один коннект IDLE весь сбор
+        # (минуты-часы). Без keepalive промежуточный firewall/LB может тихо оборвать простаивающий
+        # коннект → Postgres преждевременно освободит lock при ещё идущем сборе → возможен параллельный
+        # прогон. Keepalive не даёт коннекту выглядеть простаивающим для сетевого оборудования.
+        tcpKeepAlive: true
 
   jpa:
     open-in-view: false
@@ -142,10 +147,17 @@ gitlab:
     # Глубина бэкфилла назад от now (дней). 0 = без ограничения (вся история от since прогона).
     # Поставь > 0, только если нужно искусственно ограничить первый прогон.
     max-backfill-days: ${GITLAB_MAX_BACKFILL_DAYS:0}
-    # Сколько MR обрабатывать параллельно (approvals+notes на virtual threads). Главный рычаг
-    # скорости: per-MR вызовы — узкое место. Подними, если scm.x5.ru держит больше RPS.
-    concurrency: ${GITLAB_CONCURRENCY:16}
-    request-delay-ms: 200
+    # Сколько MR обрабатывать параллельно (approvals+notes на virtual threads). Работает только
+    # в паре с request-delay-ms: лимитер держит ОБЩИЙ потолок RPS, поэтому поднимать concurrency
+    # сверх (1000 / request-delay-ms) бессмысленно — потоки просто встанут в очередь к лимитеру.
+    concurrency: ${GITLAB_CONCURRENCY:30}
+    # Минимальная пауза между ЛЮБЫМИ двумя запросами к GitLab — общая на процесс (reserve-slot
+    # в GitlabRateLimiter), а не на поток. Это и есть фактический потолок скорости сбора:
+    # 30 мс = ~33 rps = дефолтный лимит GitLab для authenticated API (2000 req/min).
+    # Было 200 мс (5 rps) — на 19.6k MR × 2 запроса это давало 2+ часа на один проект.
+    # Упереться в реальный лимит безопасно: на 429 лимитер сам встаёт в global pause и
+    # уважает Retry-After. Если scm.x5.ru окажется строже — поднять через env, не пересобирая.
+    request-delay-ms: ${GITLAB_REQUEST_DELAY_MS:30}
     max-retries: 5
     retry-backoff-ms: 2000
     page-size: 100

@@ -127,7 +127,7 @@ class CollectGitStatsServiceTest {
     void noCommitsNoRecompute() {
         when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
         doAnswer(inv -> null)
-                .when(gitGateway).streamCommits(eq(REPO), any(), any(), any());
+                .when(gitGateway).streamCommits(eq(REPO), any(), any(), any(), any());
 
         Set<Email> affected = service.collect(SINCE, UNTIL, CancellationSignal.NEVER);
 
@@ -149,7 +149,7 @@ class CollectGitStatsServiceTest {
             Consumer<List<Commit>> handler = inv.getArgument(3);
             handler.accept(List.of(commit(SHA_NEW)));
             return null;
-        }).when(gitGateway).streamCommits(any(), any(), any(), any());
+        }).when(gitGateway).streamCommits(any(), any(), any(), any(), any());
         when(commitRepository.findExistingHashes(anyCollection())).thenReturn(Set.of());
 
         service.collect(SINCE, UNTIL, CancellationSignal.NEVER);
@@ -174,8 +174,28 @@ class CollectGitStatsServiceTest {
                 .isInstanceOf(CollectionCancelledException.class);
 
         assertAll("отмена до обработки репозитория",
-                () -> verify(gitGateway, never()).streamCommits(any(), any(), any(), any()),
+                () -> verify(gitGateway, never()).streamCommits(any(), any(), any(), any(), any()),
                 () -> verify(commitRepository, never()).deleteZombies(any(), any(), any()),
+                () -> verify(dailyStatsRepository, never()).recomputeFromCommits(any(), any()));
+    }
+
+    @Test
+    @DisplayName("Отмена ВО ВРЕМЯ репо (git interrupt-aware): сбой git при активной отмене → CollectionCancelled, не FAILED")
+    void cancelledDuringRepoStops() {
+        when(gitGateway.configuredRepos()).thenReturn(List.of(REPO));
+        boolean[] cancelledFlag = {false};
+        CancellationSignal cancel = () -> cancelledFlag[0];
+        // Имитируем interrupt-aware git: во время стрима запросили отмену → процесс убит → RuntimeException.
+        doAnswer(inv -> {
+            cancelledFlag[0] = true;
+            throw new RuntimeException("git killed by cancel");
+        }).when(gitGateway).streamCommits(eq(REPO), any(), any(), any(), any());
+
+        assertThatThrownBy(() -> service.collect(SINCE, UNTIL, cancel))
+                .as("сбой git при активной отмене классифицируется как отмена, а не как FAILED")
+                .isInstanceOf(CollectionCancelledException.class);
+
+        assertAll("отмена во время репо: recompute не зовётся",
                 () -> verify(dailyStatsRepository, never()).recomputeFromCommits(any(), any()));
     }
 
@@ -187,7 +207,7 @@ class CollectGitStatsServiceTest {
             Consumer<List<Commit>> handler = inv.getArgument(3);
             handler.accept(batch);
             return null;
-        }).when(gitGateway).streamCommits(eq(REPO), any(), any(), any());
+        }).when(gitGateway).streamCommits(eq(REPO), any(), any(), any(), any());
     }
 
     private static Commit commit(String hash) {

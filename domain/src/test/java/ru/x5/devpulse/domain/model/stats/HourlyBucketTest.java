@@ -8,6 +8,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import java.util.ArrayList;
+import java.util.List;
+import ru.x5.devpulse.domain.model.user.Email;
 
 @DisplayName("Value Object: HourlyBucket")
 class HourlyBucketTest {
@@ -50,5 +53,50 @@ class HourlyBucketTest {
                         .isInstanceOf(IllegalArgumentException.class),
                 () -> assertThatThrownBy(() -> new HourlyBucket(0, 0, 0, -1))
                         .isInstanceOf(IllegalArgumentException.class));
+    }
+
+    @Test
+    @DisplayName("of(): счётчики складываются из вклада авторов")
+    void ofSumsAuthors() {
+        HourlyBucket cell = HourlyBucket.of(2, 14, List.of(
+                new HourlyBucketAuthor(new Email("a@x5.ru"), 3, 100),
+                new HourlyBucketAuthor(new Email("b@x5.ru"), 4, 220)));
+
+        assertAll("сумма по авторам",
+                () -> assertThat(cell.commits()).isEqualTo(7),
+                () -> assertThat(cell.addedLines()).isEqualTo(320));
+    }
+
+    @Test
+    @DisplayName("of(): авторы сортируются по убыванию коммитов — вызывающий не сортирует сам")
+    void ofSortsAuthorsDesc() {
+        HourlyBucket cell = HourlyBucket.of(0, 10, List.of(
+                new HourlyBucketAuthor(new Email("small@x5.ru"), 1, 5),
+                new HourlyBucketAuthor(new Email("big@x5.ru"), 9, 500),
+                new HourlyBucketAuthor(new Email("mid@x5.ru"), 4, 50)));
+
+        assertThat(cell.authors())
+                .extracting(a -> a.email().value())
+                .containsExactly("big@x5.ru", "mid@x5.ru", "small@x5.ru");
+    }
+
+    @Test
+    @DisplayName("Конструктор без авторов даёт пустой список, а не null")
+    void authorsDefaultToEmpty() {
+        assertAll("ячейка без разбивки",
+                () -> assertThat(new HourlyBucket(0, 0, 1, 1).authors()).isEmpty(),
+                () -> assertThat(new HourlyBucket(0, 0, 1, 1, null).authors()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("Список авторов копируется — мутация исходника ячейку не трогает")
+    void authorsAreDefensivelyCopied() {
+        List<HourlyBucketAuthor> source = new ArrayList<>();
+        source.add(new HourlyBucketAuthor(new Email("a@x5.ru"), 3, 100));
+        HourlyBucket cell = new HourlyBucket(0, 10, 3, 100, source);
+
+        source.add(new HourlyBucketAuthor(new Email("b@x5.ru"), 5, 200));
+
+        assertThat(cell.authors()).hasSize(1);
     }
 }

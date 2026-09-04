@@ -8,6 +8,6 @@ import java.time.LocalDateTime;
  */
 public interface CollectReviewsUseCase {
 
-    /** Собирает MR, обновлённые после {@code since}. */
-    void collect(LocalDateTime since);
+    /** Собирает MR, обновлённые после {@code since}. Опрашивает {@code cancel} между проектами. */
+    void collect(LocalDateTime since, CancellationSignal cancel);
 }

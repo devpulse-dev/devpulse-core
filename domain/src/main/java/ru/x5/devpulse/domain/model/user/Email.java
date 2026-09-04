@@ -1,5 +1,6 @@
 package ru.x5.devpulse.domain.model.user;
 
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -10,10 +11,12 @@ import java.util.Objects;
  * <p><b>Инвариант:</b> после конструктора {@link #value()} <b>всегда</b>:
  * <ul>
  *   <li>trim'нут от ведущих/конечных пробелов;</li>
- *   <li>приведён к {@code toLowerCase()} (locale-independent — стандартный Java lowercasing);</li>
+ *   <li>приведён к нижнему регистру через {@code toLowerCase(Locale.ROOT)} — <b>стабильно
+ *       независимо от системной локали</b> (обычный {@code toLowerCase()} под локалью tr-TR
+ *       превратил бы {@code "I"} в {@code "ı"} без точки и сломал бы матчинг email);</li>
  *   <li>содержит {@code @} с непустыми local-part и доменом, в домене присутствует {@code .}</li>
  * </ul>
- * Адаптеры МОГУТ полагаться на этот инвариант и НЕ должны делать ещё один {@code .toLowerCase()}
+ * Адаптеры МОГУТ полагаться на этот инвариант и НЕ должны делать ещё один {@code toLowerCase()}
  * перед отправкой в БД или внешние системы. Если адаптер тащит email из строки извне (REST query
  * string, git author email), он строит {@code new Email(raw)} и получает нормализованное значение.</p>
  *
@@ -24,7 +27,7 @@ public record Email(String value) {
 
     public Email {
         Objects.requireNonNull(value, "email must not be null");
-        String trimmed = value.trim().toLowerCase();
+        String trimmed = value.trim().toLowerCase(Locale.ROOT);
         if (trimmed.isEmpty()) {
             throw new IllegalArgumentException("email must not be blank");
         }

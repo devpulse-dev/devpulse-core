@@ -71,7 +71,8 @@ public interface CommitRepository {
      *
      * @param author пусто — без фильтра по автору; задан — только этот автор
      * @param team   пусто — без фильтра по команде; задан — только участники команды
-     * @return непустые ячейки (commits &gt; 0); порядок не гарантируется
+     * @return непустые ячейки (commits &gt; 0) с разбивкой по авторам внутри каждой;
+     *         порядок ячеек не гарантируется, авторы внутри — по убыванию коммитов
      */
     List<HourlyBucket> aggregateHourly(Period period, Optional<Email> author, Optional<String> team);
 }

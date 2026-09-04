@@ -109,6 +109,24 @@ class ReviewRepositoryAdapterIT extends PostgresContainerSupport {
     }
 
     @Test
+    @DisplayName("upsert дедуплицирует дубли (project,iid) в батче (пагинация GitLab), last-wins")
+    void upsertDedupsPaginationDuplicates() {
+        Email author = new Email("mr-dedup@x5.ru");
+        // Тот же (project=42, iid=77) дважды в одном батче — как offset-пагинация на границе страниц
+        // у активного проекта. Первый с ревью ALICE, второй (last-wins) с ревью BOB. Без дедупа
+        // упало бы на ON CONFLICT ("cannot affect row a second time") или uk_mr_review_mr_reviewer.
+        writeRepo.upsert(List.of(
+                mr(42L, 77L, author, CREATED.plusHours(1), List.of(new MrReview(ALICE, true, 1))),
+                mr(42L, 77L, author, CREATED.plusHours(2), List.of(new MrReview(BOB, true, 9)))));
+
+        MergeRequest m = readByAuthor(author);
+        assertAll("дедуп last-wins",
+                () -> assertThat(m.reviews()).as("ревью последнего вхождения").hasSize(1),
+                () -> assertThat(m.reviews().getFirst().reviewer()).isEqualTo(BOB),
+                () -> assertThat(m.reviews().getFirst().commentCount()).isEqualTo(9));
+    }
+
+    @Test
     @DisplayName("countMergedMrByAuthor: группировка по автору + фильтры период/ветки/авторы")
     void countsMergedByAuthor() {
         Email x = new Email("agg-author-x@x5.ru");

@@ -31,7 +31,19 @@ import ru.x5.devpulse.domain.model.stats.AuthorSummary;
  */
 public final class ActivityScorer {
 
+    /** Baseline: длина периода (дней), к которой отнесено ожидаемое число не-мердж коммитов. */
+    public static final int BASELINE_PERIOD_DAYS = 30;
+
     private ActivityScorer() {}
+
+    /**
+     * Масштабирует baseline ожидаемых не-мердж коммитов (заданный на {@value #BASELINE_PERIOD_DAYS}
+     * дней) под фактическую длину периода в днях. Единый дом политики нормализации baseline —
+     * используют и дашборд, и когорты (раньше формула и константа дублировались в обоих).
+     */
+    public static double scaleExpectedForDays(double expectedPer30Days, long days) {
+        return expectedPer30Days * (days / (double) BASELINE_PERIOD_DAYS);
+    }
 
     /**
      * Считает score для одного автора.
