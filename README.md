@@ -82,7 +82,7 @@ DevPulse/
 
 ## Структура БД
 
-PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibase/migration/`. Добавляем только новые нумерованные файлы, применённые не редактируем (последняя — `030-add-target-branch-to-merge-request.yaml`).
+PostgreSQL, миграции в `adapter-persistence/src/main/resources/liquibase/migration/`. Добавляем только новые нумерованные файлы, применённые не редактируем (последняя — `033-widen-commit-message.yaml`).
 
 > Идемпотентность наката на непустую схему: `create`/`addColumn`-миграции защищены
 > `preConditions` (`not tableExists`/`not columnExists`, `onFail: MARK_RAN`) — накат на БД,

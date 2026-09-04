@@ -20,8 +20,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                      без ограничения: собирать всю историю от {@code since} прогона. Поставь
  *                      &gt; 0, если нужно ограничить первый прогон (например на медленном GitLab).
  * @param concurrency   сколько MR обрабатывать параллельно (approvals+notes на virtual threads).
- *                      Главный рычаг скорости: per-MR вызовы — bottleneck. По умолчанию 8.
- * @param requestDelayMs минимальная пауза между запросами (троттлинг, per-thread)
+ *                      Работает только в паре с {@code requestDelayMs}: реальную скорость задаёт
+ *                      общий потолок RPS, поэтому значение свыше {@code 1000/requestDelayMs}
+ *                      ничего не ускоряет — лишние потоки просто ждут слот. По умолчанию 8.
+ * @param requestDelayMs минимальная пауза между любыми двумя запросами — <b>глобально на процесс</b>
+ *                      (reserve-slot в {@code GitlabRateLimiter}), не per-thread. Фактический
+ *                      потолок скорости сбора: {@code 1000/requestDelayMs} rps. По умолчанию 30 мс
+ *                      (~33 rps = дефолтный лимит GitLab 2000 req/min для authenticated API)
  * @param maxRetries    повторов на 429/5xx
  * @param retryBackoffMs стартовый backoff (экспоненциальный)
  * @param pageSize      размер страницы пагинации
@@ -57,7 +62,7 @@ public record GitlabProperties(
         if (emailDomain == null || emailDomain.isBlank()) emailDomain = "x5.ru";
         if (maxBackfillDays < 0) maxBackfillDays = 0; // 0 = без ограничения
         if (concurrency <= 0) concurrency = 8;
-        if (requestDelayMs <= 0) requestDelayMs = 200;
+        if (requestDelayMs <= 0) requestDelayMs = 30;
         if (maxRetries <= 0) maxRetries = 5;
         if (retryBackoffMs <= 0) retryBackoffMs = 2_000;
         if (pageSize <= 0) pageSize = 100;

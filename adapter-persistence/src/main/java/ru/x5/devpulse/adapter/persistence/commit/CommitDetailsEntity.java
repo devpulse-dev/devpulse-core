@@ -44,7 +44,7 @@ public class CommitDetailsEntity {
     @Column(name = "task_number", length = 50)
     private String taskNumber;
 
-    @Column(name = "commit_message", length = 2000)
+    @Column(name = "commit_message", length = 5000)
     private String commitMessage;
 
     @Column(name = "added_lines")
